@@ -1,13 +1,13 @@
 import { ApiError, useAuthStore } from '@chappie/shared';
 import { SparklesIcon } from '@heroicons/react/24/outline';
 import { RiArrowLeftSLine, RiLoader4Line, RiMailLine, RiSettings3Line } from '@remixicon/react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Logo } from '@/components/ui/logo';
+import { OtpField } from '@/components/ui/otp-field';
 import { toast } from '@/components/ui/toast';
-import { cn } from '@/lib/utils';
 
 type Step = 'email' | 'code';
 
@@ -55,19 +55,27 @@ export function LoginPage() {
     void sendCodeNow();
   };
 
-  const onVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!code.trim()) return;
+  const verifyingRef = useRef(false);
+  const verifyWith = async (value: string) => {
+    const digit = value.trim();
+    if (verifyingRef.current || digit.length < 6) return;
+    verifyingRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      await login(email.trim(), code.trim());
+      await login(email.trim(), digit);
       navigate('/chat', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '登录失败');
     } finally {
+      verifyingRef.current = false;
       setBusy(false);
     }
+  };
+
+  const onVerify = (e: React.FormEvent) => {
+    e.preventDefault();
+    void verifyWith(code);
   };
 
   const saveServer = async () => {
@@ -130,25 +138,24 @@ export function LoginPage() {
                 onClick={() => {
                   setStep('email');
                   setError(null);
+                  setCode('');
+                  setDevCode(null);
                 }}
                 className="flex items-center gap-1 text-[11px] text-ink-tertiary transition-colors hover:text-ink"
               >
                 <RiArrowLeftSLine className="size-3" /> 更换邮箱
               </button>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <label htmlFor="login-code" className="text-[12px] font-medium text-ink-secondary">
                   验证码
                 </label>
-                <Input
+                <OtpField
                   id="login-code"
                   autoFocus
                   value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="6 位数字验证码"
-                  className={cn('h-9 text-center text-base tracking-[0.5em]')}
-                  inputMode="numeric"
-                  maxLength={6}
-                  required
+                  onChange={setCode}
+                  onComplete={(v) => void verifyWith(v)}
+                  disabled={busy}
                 />
                 <p className="text-[11px] text-ink-tertiary">
                   已发送至 <span className="text-ink-secondary">{email}</span>
@@ -156,7 +163,7 @@ export function LoginPage() {
                 </p>
               </div>
               {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
-              <Button type="submit" className="w-full" disabled={busy || code.length < 4}>
+              <Button type="submit" className="w-full" disabled={busy || code.length < 6}>
                 {busy ? <RiLoader4Line className="size-4 animate-spin" /> : '登录'}
               </Button>
               <button
