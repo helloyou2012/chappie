@@ -1,0 +1,32 @@
+deploy/remote-deploy.sh
+  s_5811db174623c3::t_6886409ccb9f0a 1-40
+.github/workflows/deploy.yml
+  s_5811db174623c3::t_9153a23e83a268 76-77
+  s_5811db174623c3::t_4443452feec83c 1-75,78-100
+core/crates/store/src/lib.rs
+  s_5811db174623c3::t_353735f39a9926 50-78
+  s_5811db174623c3::t_3de68399ea9a57 33-38
+packages/shared/src/constants.ts
+  s_5811db174623c3::t_8d391afb3674c7 1-17
+README.md
+  s_5811db174623c3::t_3613d05b603ed1 252-265,267,273-288
+  s_5811db174623c3::t_75e34ef0477895 266,268-272
+.gitignore
+  s_5811db174623c3::t_1166d1baee9cd0 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a9a340b7f5ce354c72a9fa496c58001a106f4507",
+  "prompts": {},
+  "sessions": {
+    "s_5811db174623c3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e98bc37-7ffa-4938-82eb-dee572e126d7",
+        "model": "deepseek-flash"
+      },
+      "human_author": "helloyou2012 <helloyou2012@yeah.net>"
+    }
+  }
+}
