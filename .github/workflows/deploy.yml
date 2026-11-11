@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-24.04
     # 注意：environment 级 secrets/vars 只在 job 启动后解析，不能在 job 级 if 中引用。
     # 这里用 step 级 env 引用，并在预检步骤给出明确错误。
-    environment: production
+    environment: deploy
     steps:
       - uses: actions/download-artifact@v4
         with:

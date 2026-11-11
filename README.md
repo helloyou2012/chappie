@@ -263,7 +263,7 @@ pnpm test:rust                                               # Rust 纯工具 + 
 5. 打包 `bin/im-core + web/ + ai/dist + ai/migrations`，通过 SSH 上传并执行
    `deploy/remote-deploy.sh`（同步产物 → 跑迁移 → 重启 systemd）。
 
-需要在仓库 Settings → Environments → `production`（或仓库级）配置：
+需要在仓库 Settings → Environments → `deploy`（或仓库级）配置：
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
