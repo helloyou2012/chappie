@@ -1,0 +1,33 @@
+core/crates/common/Cargo.toml
+  s_5811db174623c3::t_16425fb87772d4 19
+.env.example
+  s_5811db174623c3::t_2f75f9557110a0 32-35
+core/Cargo.toml
+  s_5811db174623c3::t_80a56bdd6e2ac2 33-34
+core/crates/common/src/config.rs
+  s_5811db174623c3::t_43da246465cad1 49-50
+  s_5811db174623c3::t_99d1f899fba567 16-19
+core/crates/common/src/email.rs
+  s_5811db174623c3::t_bfd8995083c3ce 3-11,16,20-26,30,34,36-98,100
+README.md
+  s_5811db174623c3::t_9554de641e25e9 143-145
+  s_5811db174623c3::t_bdec5bb95e6b19 320
+core/crates/chat/src/auth.rs
+  s_5811db174623c3::t_be5a9d953d9391 54-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2247cd8bfe81517f264b339152d4a799ea178e84",
+  "prompts": {},
+  "sessions": {
+    "s_5811db174623c3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e98bc37-7ffa-4938-82eb-dee572e126d7",
+        "model": "deepseek-flash"
+      },
+      "human_author": "helloyou2012 <helloyou2012@yeah.net>"
+    }
+  }
+}
