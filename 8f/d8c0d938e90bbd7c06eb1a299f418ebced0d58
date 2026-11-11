@@ -1,0 +1,243 @@
+ai/package.json
+  s_953d6d24a3381c::t_9ef2b713c2ddf1 1-29
+ai/src/admin-api.ts
+  s_953d6d24a3381c::t_1b43fb4284e18d 1-561
+ai/src/agent-runtime.ts
+  s_953d6d24a3381c::t_5af3175554e0e4 1-914
+ai/src/approval.ts
+  s_953d6d24a3381c::t_0371fab6868a3b 1-153
+ai/src/classifier.ts
+  s_953d6d24a3381c::t_7e6f8806160868 1-67
+ai/src/common/config.ts
+  s_953d6d24a3381c::t_61b5899a6d533c 1-52
+ai/src/common/datetime.ts
+  s_953d6d24a3381c::t_835395652c084d 1-7
+ai/src/common/db.ts
+  s_953d6d24a3381c::t_2b2b53e8348107 1-27
+ai/src/common/internal.ts
+  s_953d6d24a3381c::t_b9f6ac4e189db5 1-94
+ai/src/common/json.ts
+  s_953d6d24a3381c::t_56aaacbce7428f 1-20
+ai/src/common/log.ts
+  s_953d6d24a3381c::t_695a1e90aa84ed 1-35
+ai/src/common/redis.ts
+  s_953d6d24a3381c::t_d33a071b204194 1-107
+ai/src/db/schema.ts
+  s_953d6d24a3381c::t_c4f4dc25dc0f0b 1-335
+ai/src/index.ts
+  s_953d6d24a3381c::t_7e4c3efcc44ffd 1-54
+ai/src/memory.ts
+  s_953d6d24a3381c::t_390a03e234e388 1-340
+ai/src/migrate.ts
+  s_953d6d24a3381c::t_78e67764b5f373 1-53
+ai/src/model-gateway/anthropic.ts
+  s_953d6d24a3381c::t_bacd6899e9ebcf 1-94
+ai/src/model-gateway/index.ts
+  s_953d6d24a3381c::t_2ffabf70816350 1-102
+ai/src/model-gateway/mock.ts
+  s_953d6d24a3381c::t_c2d0778f3bda32 1-258
+ai/src/model-gateway/openai.ts
+  s_953d6d24a3381c::t_ffaa340b616f4a 1-188
+ai/src/model-gateway/types.ts
+  s_953d6d24a3381c::t_9ee1756d610f0a 1-98
+ai/src/outbox-worker.ts
+  s_953d6d24a3381c::t_1521438d7b2178 1-537
+ai/src/pipeline.ts
+  s_953d6d24a3381c::t_18fa9efd5caf05 1-170
+ai/src/policy.ts
+  s_953d6d24a3381c::t_407a13a8aa1e40 1-219
+ai/src/router.ts
+  s_953d6d24a3381c::t_6bed3f60aa8400 1-92
+ai/src/scheduler.ts
+  s_953d6d24a3381c::t_e292f9d9f2ef33 1-193
+ai/src/seed.ts
+  s_953d6d24a3381c::t_b1b7786a1f34ba 1-154
+ai/src/tool-gateway.ts
+  s_953d6d24a3381c::t_eac2f8c4603113 1-362
+ai/tsconfig.json
+  s_953d6d24a3381c::t_d14250f5307ad7 1-17
+apps/desktop/icon-source.svg
+  s_953d6d24a3381c::t_7f24930df857c0 1
+apps/desktop/src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml
+  s_953d6d24a3381c::t_4d7126537de74b 1-5
+apps/desktop/src-tauri/icons/android/values/ic_launcher_background.xml
+  s_953d6d24a3381c::t_812facb4c68a71 1-4
+apps/mobile/app.json
+  s_953d6d24a3381c::t_3f06b9783db50e 1-25
+apps/mobile/app/(tabs)/_layout.tsx
+  s_953d6d24a3381c::t_63abcd36399b06 1-59
+apps/mobile/app/(tabs)/approvals.tsx
+  s_953d6d24a3381c::t_0f969ce15cfa9b 1-127
+apps/mobile/app/(tabs)/avatar.tsx
+  s_953d6d24a3381c::t_e7cd404bee48dc 1-246
+apps/mobile/app/(tabs)/index.tsx
+  s_953d6d24a3381c::t_213591dc767a32 1-377
+apps/mobile/app/(tabs)/reports.tsx
+  s_953d6d24a3381c::t_0072201a75c85e 1-165
+apps/mobile/app/_layout.tsx
+  s_953d6d24a3381c::t_953d231bb8398d 1-28
+apps/mobile/app/chat/[id].tsx
+  s_953d6d24a3381c::t_ebe086e4104785 1-309
+apps/mobile/app/index.tsx
+  s_953d6d24a3381c::t_82f3d0eb675b9b 1-20
+apps/mobile/app/login.tsx
+  s_953d6d24a3381c::t_0708790cf5a918 1-265
+apps/mobile/babel.config.js
+  s_953d6d24a3381c::t_e6b5d680223c8c 1-6
+apps/mobile/metro.config.js
+  s_953d6d24a3381c::t_a07513baf330eb 1-18
+apps/mobile/package.json
+  s_953d6d24a3381c::t_b1261f853e387d 1-34
+apps/mobile/src/components/logo.tsx
+  s_953d6d24a3381c::t_7fbedc44abe33e 1-8
+apps/mobile/src/components/message.tsx
+  s_953d6d24a3381c::t_97f64f6e50c6a2 1-334
+apps/mobile/src/hooks/use-theme.ts
+  s_953d6d24a3381c::t_b1788e1f9b7f0a 1-7
+apps/mobile/src/realtime.ts
+  s_953d6d24a3381c::t_fa5a4d46d374a0 1-39
+apps/web/index.html
+  s_953d6d24a3381c::t_ed0705150a3974 1-14
+apps/web/package.json
+  s_953d6d24a3381c::t_46444a9d355864 1-35
+apps/web/public/logo.svg
+  s_953d6d24a3381c::t_3be28d0d2b9a41 1
+apps/web/src/App.tsx
+  s_953d6d24a3381c::t_8bdfdaf024d50f 1-50
+apps/web/src/components/avatar/capabilities-tab.tsx
+  s_953d6d24a3381c::t_5fecce29c46abd 1-124
+apps/web/src/components/avatar/memory-tab.tsx
+  s_953d6d24a3381c::t_48101e9dabc4c5 1-171
+apps/web/src/components/avatar/persona-tab.tsx
+  s_953d6d24a3381c::t_d54b9616c6eca3 1-132
+apps/web/src/components/avatar/policy-tab.tsx
+  s_953d6d24a3381c::t_72ce88ae5b359e 1-305
+apps/web/src/components/avatar/usage-tab.tsx
+  s_953d6d24a3381c::t_c2faa6d12ac66f 1-96
+apps/web/src/components/chat/cards.tsx
+  s_953d6d24a3381c::t_41f233bd593e30 1-434
+apps/web/src/components/chat/member-panel.tsx
+  s_953d6d24a3381c::t_7a58ea97efd6b0 1-102
+apps/web/src/components/chat/mode-switch.tsx
+  s_953d6d24a3381c::t_500fcbcf06618a 1-95
+apps/web/src/components/layout/app-shell.tsx
+  s_953d6d24a3381c::t_3584ea1c09abd5 1-34
+apps/web/src/components/layout/icon-rail.tsx
+  s_953d6d24a3381c::t_c5827ac1373330 1-124
+apps/web/src/components/layout/new-conversation-dialog.tsx
+  s_953d6d24a3381c::t_4868368526722f 1-199
+apps/web/src/components/ui/badge.tsx
+  s_953d6d24a3381c::t_c8d62456e375c2 1-32
+apps/web/src/components/ui/button.tsx
+  s_953d6d24a3381c::t_0a82a52473513d 1-36
+apps/web/src/components/ui/card.tsx
+  s_953d6d24a3381c::t_b53a3160e269cf 1-51
+apps/web/src/components/ui/dialog.tsx
+  s_953d6d24a3381c::t_e4e7364407cb54 1-70
+apps/web/src/components/ui/dropdown-menu.tsx
+  s_953d6d24a3381c::t_63e5d7fd56b86e 1-56
+apps/web/src/components/ui/logo.tsx
+  s_953d6d24a3381c::t_6e4ea95c069a27 1-27
+apps/web/src/components/ui/switch.tsx
+  s_953d6d24a3381c::t_6fbc4da415e66d 1-19
+apps/web/src/components/ui/tabs.tsx
+  s_953d6d24a3381c::t_a79992a0ebe261 1-35
+apps/web/src/components/ui/textarea.tsx
+  s_953d6d24a3381c::t_a2643b97edf2e1 1-16
+apps/web/src/components/ui/toast.tsx
+  s_953d6d24a3381c::t_f113d5b9473a64 1-80
+apps/web/src/index.css
+  s_953d6d24a3381c::t_d5cf08eff5be49 1-377
+apps/web/src/lib/realtime.ts
+  s_953d6d24a3381c::t_75dc0413cdf199 1-52
+apps/web/src/lib/theme.ts
+  s_953d6d24a3381c::t_9f30a6bd189d12 1-26
+apps/web/src/lib/utils.ts
+  s_953d6d24a3381c::t_60f4c644dfadc9 1-6
+apps/web/src/main.tsx
+  s_953d6d24a3381c::t_5c653fe2068e5a 1-13
+apps/web/src/pages/approvals-page.tsx
+  s_953d6d24a3381c::t_87d7148b5a0298 1-172
+apps/web/src/pages/avatar-console-page.tsx
+  s_953d6d24a3381c::t_96121de7b04e93 1-142
+apps/web/src/pages/login-page.tsx
+  s_953d6d24a3381c::t_33a3b3c89de725 1-215
+apps/web/src/pages/reports-page.tsx
+  s_953d6d24a3381c::t_44a4ca173927e8 1-177
+apps/web/vite.config.ts
+  s_953d6d24a3381c::t_e4a75ba3425a24 1-19
+biome.jsonc
+  s_953d6d24a3381c::t_d95551a9c42adb 1-93
+core/Cargo.lock
+  s_953d6d24a3381c::t_b2720f79f78369 1-2601
+core/crates/gateway/src/rest.rs
+  s_953d6d24a3381c::t_9881705715a2f5 1-299
+docs/system-design.md
+  s_953d6d24a3381c::t_ca0863e3ca8e8b 1-990
+package.json
+  s_953d6d24a3381c::t_be803c3df8f537 1-31
+packages/contract/bun.lock
+  s_953d6d24a3381c::t_c6c0b300bccff4 1-28
+packages/contract/contract.test.ts
+  s_953d6d24a3381c::t_1cdbcf5cd5defe 1-80
+packages/contract/scripts/export-fixtures.ts
+  s_953d6d24a3381c::t_4fc6776ff9a52e 1-15
+packages/contract/src/admin.ts
+  s_953d6d24a3381c::t_940dec4c439dc3 1-129
+packages/contract/src/ai.ts
+  s_953d6d24a3381c::t_8323ee81174a28 1-271
+packages/contract/src/cards.ts
+  s_953d6d24a3381c::t_08619d96a51c8d 1-101
+packages/contract/src/chat.ts
+  s_953d6d24a3381c::t_d5d2ed65d05c14 1-196
+packages/contract/src/events.ts
+  s_953d6d24a3381c::t_f727885894f559 1-90
+packages/contract/src/fixtures.ts
+  s_953d6d24a3381c::t_326ff5d2d26368 1-374
+packages/contract/src/frames.ts
+  s_953d6d24a3381c::t_2f9bbd81ea8280 1-108
+packages/contract/src/identity.ts
+  s_953d6d24a3381c::t_16ee78ccc985b0 1-57
+packages/contract/src/index.ts
+  s_953d6d24a3381c::t_a421edd13a3100 1-19
+packages/contract/src/rest.ts
+  s_953d6d24a3381c::t_6da16f8bcbb52d 1-135
+packages/shared/src/api.ts
+  s_953d6d24a3381c::t_81cddf03ee4501 1-267
+packages/shared/src/constants.ts
+  s_953d6d24a3381c::t_e6882673ba1b55 1-24
+packages/shared/src/datetime.ts
+  s_953d6d24a3381c::t_cca15161d98f79 1-14
+packages/shared/src/format.ts
+  s_953d6d24a3381c::t_526769351d4913 1-50
+packages/shared/src/index.ts
+  s_953d6d24a3381c::t_f6ff484596de96 1-8
+packages/shared/src/storage.ts
+  s_953d6d24a3381c::t_da5bceea50e6ae 1-49
+packages/shared/src/store/auth.ts
+  s_953d6d24a3381c::t_b191e60c9a2efd 1-136
+packages/shared/src/store/chat.ts
+  s_953d6d24a3381c::t_8fc3870e4e049c 1-359
+packages/shared/src/ws.ts
+  s_953d6d24a3381c::t_2a67b3074bf17b 1-156
+pnpm-lock.yaml
+  s_953d6d24a3381c::t_146ba4aad893d8 1-7040
+scripts/gen-icons.sh
+  s_953d6d24a3381c::t_ce8d0a25dc7acd 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8fd8c0d938e90bbd7c06eb1a299f418ebced0d58",
+  "prompts": {},
+  "sessions": {
+    "s_953d6d24a3381c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "351bb8ca-9984-4f4a-b8c0-c1c13671cc3e",
+        "model": "deepseek-flash"
+      },
+      "human_author": "helloyou2012 <helloyou2012@yeah.net>"
+    }
+  }
+}
