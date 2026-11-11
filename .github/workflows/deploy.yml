@@ -1,0 +1,100 @@
+name: build-and-deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: chappie-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build artifacts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        run: |
+          pnpm test:contract
+          pnpm test:shared
+          cd ai && bun test
+
+      - name: Build web
+        run: pnpm web:build
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Build im-core (release)
+        run: cargo build --release --manifest-path core/Cargo.toml -p im-core
+
+      - name: Bundle ai-platform
+        run: |
+          mkdir -p build/ai/dist
+          cd ai
+          bun build src/index.ts --target=bun --outdir=../build/ai/dist --minify
+          bun build src/migrate.ts --target=bun --outdir=../build/ai/dist --minify
+          cp -r migrations ../build/ai/migrations
+
+      - name: Package deploy artifact
+        run: |
+          mkdir -p build/bin build/web
+          cp core/target/release/im-core build/bin/im-core
+          cp -r apps/web/dist/. build/web/
+          cp deploy/remote-deploy.sh build/remote-deploy.sh
+          tar -C build -czf chappie-deploy.tar.gz .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chappie-deploy
+          path: chappie-deploy.tar.gz
+          retention-days: 14
+
+  deploy:
+    name: Deploy to production
+    needs: build
+    # 未配置部署凭据时跳过（避免构建正常的仓库出现失败任务）
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: chappie-deploy
+
+      - name: Prepare SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload and deploy
+        run: |
+          scp -i ~/.ssh/id_ed25519 -o BatchMode=yes chappie-deploy.tar.gz \
+            "ubuntu@${{ secrets.DEPLOY_HOST }}:/tmp/chappie-deploy.tar.gz"
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "ubuntu@${{ secrets.DEPLOY_HOST }}" \
+            'rm -rf /tmp/chappie-deploy && mkdir -p /tmp/chappie-deploy && tar -xzf /tmp/chappie-deploy.tar.gz -C /tmp/chappie-deploy && bash /tmp/chappie-deploy/remote-deploy.sh'
+
+      - name: Smoke test
+        run: curl -fsS --retry 10 --retry-delay 2 -o /dev/null https://chappie.run/

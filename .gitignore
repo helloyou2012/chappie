@@ -13,3 +13,4 @@ apps/desktop/src-tauri/gen/
 packages/contract/fixtures.json
 .turbo/
 coverage/
+build/

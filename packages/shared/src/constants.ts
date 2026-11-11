@@ -1,6 +1,20 @@
-/** 默认服务地址（可在登录页修改）。macOS AirPlay 占用 7000，网关默认 7100。 */
-export const DEFAULT_SERVER_URL = 'http://127.0.0.1:7100';
-export const DEFAULT_ADMIN_URL = 'http://127.0.0.1:7002';
+/**
+ * 默认服务地址（可在登录页修改）。macOS AirPlay 占用 7000，网关默认 7100。
+ *
+ * 部署到域名时优先使用同源：反向代理把 /api、/ws、/admin 转发到对应服务。
+ * 本地开发 / Tauri（tauri://localhost）/ React Native（无 location）仍回退到本机端口。
+ */
+function sameOriginBase(): string | null {
+  if (typeof window === 'undefined') return null;
+  const origin = window.location?.origin;
+  if (!origin || !/^https?:/.test(origin)) return null;
+  if (/localhost|127\.0\.0\.1/.test(origin)) return null;
+  return origin;
+}
+
+const ORIGIN = sameOriginBase();
+export const DEFAULT_SERVER_URL = ORIGIN ?? 'http://127.0.0.1:7100';
+export const DEFAULT_ADMIN_URL = ORIGIN ?? 'http://127.0.0.1:7002';
 
 export const MODE_LABELS: Record<string, string> = {
   manual: '手动',

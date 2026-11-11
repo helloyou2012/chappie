@@ -30,7 +30,12 @@ impl Db {
             .await
             .context("连接 Redis 失败（请先运行 pnpm compose:up）")?;
 
-        tracing::info!(pg = %cfg.database_url, redis = %cfg.redis_url, "storage connected");
+        // 连接串含密码，日志中必须脱敏（避免凭据进入 journald/日志采集）
+        tracing::info!(
+            pg = %redact_url(&cfg.database_url),
+            redis = %redact_url(&cfg.redis_url),
+            "storage connected"
+        );
         Ok(Self { pg, redis })
     }
 
@@ -39,6 +44,35 @@ impl Db {
         sqlx::migrate!("../../migrations").run(&self.pg).await?;
         tracing::info!("core migrations up to date");
         Ok(())
+    }
+}
+
+/// 连接串脱敏：`scheme://user:pass@host` → `scheme://***@host`。
+fn redact_url(raw: &str) -> String {
+    match raw.split_once("://") {
+        Some((scheme, rest)) => match rest.split_once('@') {
+            Some((_credentials, host)) => format!("{scheme}://***@{host}"),
+            None => raw.to_string(),
+        },
+        None => raw.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_url;
+
+    #[test]
+    fn redacts_credentials_in_urls() {
+        assert_eq!(
+            redact_url("postgres://chappie:secret@127.0.0.1:5432/chappie"),
+            "postgres://***@127.0.0.1:5432/chappie"
+        );
+        assert_eq!(
+            redact_url("redis://:secret@127.0.0.1:6379"),
+            "redis://***@127.0.0.1:6379"
+        );
+        assert_eq!(redact_url("redis://127.0.0.1:6379"), "redis://127.0.0.1:6379");
     }
 }
 

@@ -249,6 +249,43 @@ pnpm test:rust                                               # Rust 纯工具 + 
 - **Rust**（`core`）：ID/时间工具单测 + 与 TS 共用的契约 fixtures 往返。
 - AI 集成测试自带隔离夹具并在结束后清理；数据库不可用或未迁移时自动跳过。
 
+### 生产部署（GitHub Actions）
+
+线上环境：**https://chappie.run**。构建全部在 GitHub Actions 完成，服务器只运行产物
+（不安装 Node / Rust / pnpm，也不做任何编译）。
+
+推送 `main` 或手动触发 `workflow_dispatch` 后，`.github/workflows/deploy.yml` 会：
+
+1. 跑契约 / shared / AI 单元测试；
+2. `pnpm web:build` 构建 Web 静态产物；
+3. `cargo build --release -p im-core` 构建 x86_64 Linux 二进制；
+4. `bun build --target=bun` 把 ai-platform 打成自包含 bundle（`index.js` + `migrate.js`）；
+5. 打包 `bin/im-core + web/ + ai/dist + ai/migrations`，通过 SSH 上传并执行
+   `deploy/remote-deploy.sh`（同步产物 → 跑迁移 → 重启 systemd）。
+
+需要在仓库 Settings 配置：
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `DEPLOY_HOST` | Secret | 服务器地址（如 `13.158.45.159`） |
+| `DEPLOY_SSH_KEY` | Secret | 部署用 SSH 私钥全文 |
+| `DEPLOY_ENABLED` | Variable | 设为 `true` 才启用部署任务（未配置时只构建、不发布） |
+
+服务器目录布局（`/opt/chappie`）：
+
+```
+bin/im-core          # systemd: chappie-core
+web/                 # Caddy 静态根目录
+ai/dist/index.js     # systemd: chappie-ai（Bun bundle，无 node_modules）
+ai/dist/migrate.js   # 部署时执行 AI 迁移
+ai/migrations/*.sql
+.env                 # 生产配置（600，保留在服务器，不随产物覆盖）
+```
+
+Caddy 将 `/api/*`、`/ws` 反代到 `127.0.0.1:7100`，`/admin/*` 反代到 `127.0.0.1:7002`，
+其余走 `web/` 的 SPA。手动回滚：在 Actions 中重跑历史 artifact，或用
+`workflow_dispatch` 重新部署。
+
 ### 品牌资产
 
 - 唯一源文件：`apps/desktop/icon-source.svg`
