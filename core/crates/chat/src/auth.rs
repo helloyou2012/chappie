@@ -51,7 +51,9 @@ pub async fn send_code(db: &Db, cfg: &Config, email: &str) -> AppResult<AuthCode
         .set_ex(code_key, &code, cfg.auth_code_ttl_seconds)
         .await?;
 
-    EmailSender::from_config(&cfg.smtp_url).send_code(&email, &code).await;
+    EmailSender::from_config(&cfg.resend_api_key, &cfg.mail_from)
+        .send_code(&email, &code)
+        .await;
 
     Ok(AuthCodeResult {
         dev_code: cfg.auth_code_dev_echo.then_some(code),

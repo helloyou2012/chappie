@@ -30,6 +30,8 @@ chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
 hex = "0.4"
 tokio-stream = { version = "0.1", features = ["sync"] }
+# 邮件投递（Resend HTTP API），仅需 TLS 客户端
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [profile.release]
 lto = "thin"

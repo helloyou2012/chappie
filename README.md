@@ -140,7 +140,9 @@ MODEL_NAME=gpt-4o-mini
 | `ADMIN_PORT`         | 7002                                                 | ai-platform 控制台 API                                 |
 | `DATABASE_URL`       | `postgres://chappie:chappie@127.0.0.1:15432/chappie` | compose 映射到 15432，避免与本机 PG 冲突               |
 | `REDIS_URL`          | `redis://127.0.0.1:6379`                             |                                                        |
-| `AUTH_CODE_DEV_ECHO` | `true`                                               | 开发模式验证码回显（生产请关闭并配置 `SMTP_URL`）      |
+| `AUTH_CODE_DEV_ECHO` | `true`                                               | 开发模式验证码回显（生产请关闭并配置 `RESEND_API_KEY`）|
+| `RESEND_API_KEY`     | 空                                                   | Resend API key；配置后验证码通过邮件发送               |
+| `MAIL_FROM`          | `Chappie <no-reply@chappie.run>`                     | 发件人（域名需在 Resend 验证）                         |
 | `MAX_HOP_COUNT`      | 3                                                    | AI 对 AI 最大跳数                                      |
 
 ## 实现要点
@@ -315,7 +317,7 @@ Caddy 将 `/api/*`、`/ws` 反代到 `127.0.0.1:7100`，`/admin/*` 反代到 `12
 - **推送通道**：APNs / FCM 为 stub（device 表已登记）。
 - **对象存储 / 文件消息**：类型已注册（image / file），未实现上传服务。
 - **向量检索**：`memory_item.embedding` 用 `REAL[]` + 应用层余弦，无需 pgvector；接口已隔离。
-- **SMTP 投递**：`EmailSender` 已抽象，SMTP 分支目前仅记录日志。
+- **邮件投递**：已接入 Resend HTTP API（配置 `RESEND_API_KEY` 即真实发送），未配置时退化为日志输出。
 - **审批卡片刷新**：批准后的结果以新消息呈现，未回写卡片内容。
 - **多租户 / RLS / DLP / 插件市场 / 多渠道网关**：未实现。
 - **大规模部署**：fanout 已具备 Redis 多节点语义，未做分片扇出。
