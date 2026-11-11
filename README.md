@@ -263,13 +263,15 @@ pnpm test:rust                                               # Rust 纯工具 + 
 5. 打包 `bin/im-core + web/ + ai/dist + ai/migrations`，通过 SSH 上传并执行
    `deploy/remote-deploy.sh`（同步产物 → 跑迁移 → 重启 systemd）。
 
-需要在仓库 Settings 配置：
+需要在仓库 Settings → Environments → `production`（或仓库级）配置：
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `DEPLOY_HOST` | Secret | 服务器地址（如 `13.158.45.159`） |
+| `DEPLOY_HOST` | Variable | 服务器地址（如 `13.158.45.159`），工作流以 `vars.DEPLOY_HOST` 引用 |
 | `DEPLOY_SSH_KEY` | Secret | 部署用 SSH 私钥全文 |
-| `DEPLOY_ENABLED` | Variable | 设为 `true` 才启用部署任务（未配置时只构建、不发布） |
+
+注意：environment 级 secrets/variables 要到 job 启动后才解析，不能在 job 级 `if`
+中引用；工作流已改为 step 级引用，并在预检步骤对缺失给出明确报错。
 
 服务器目录布局（`/opt/chappie`）：
 

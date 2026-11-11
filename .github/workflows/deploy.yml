@@ -72,27 +72,40 @@ jobs:
   deploy:
     name: Deploy to production
     needs: build
-    # 未配置部署凭据时跳过（避免构建正常的仓库出现失败任务）
-    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-24.04
+    # 注意：environment 级 secrets/vars 只在 job 启动后解析，不能在 job 级 if 中引用。
+    # 这里用 step 级 env 引用，并在预检步骤给出明确错误。
     environment: production
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: chappie-deploy
 
+      - name: Preflight
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          test -n "$DEPLOY_HOST" || { echo "::error::DEPLOY_HOST 为空：请确认 environment 名称与 workflow 一致（production），且变量配置在该环境下"; exit 1; }
+          test -n "$DEPLOY_SSH_KEY" || { echo "::error::DEPLOY_SSH_KEY 为空：请在 production 环境添加 secret"; exit 1; }
+
       - name: Prepare SSH
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
       - name: Upload and deploy
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         run: |
           scp -i ~/.ssh/id_ed25519 -o BatchMode=yes chappie-deploy.tar.gz \
-            "ubuntu@${{ secrets.DEPLOY_HOST }}:/tmp/chappie-deploy.tar.gz"
-          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "ubuntu@${{ secrets.DEPLOY_HOST }}" \
+            "ubuntu@$DEPLOY_HOST:/tmp/chappie-deploy.tar.gz"
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "ubuntu@$DEPLOY_HOST" \
             'rm -rf /tmp/chappie-deploy && mkdir -p /tmp/chappie-deploy && tar -xzf /tmp/chappie-deploy.tar.gz -C /tmp/chappie-deploy && bash /tmp/chappie-deploy/remote-deploy.sh'
 
       - name: Smoke test
