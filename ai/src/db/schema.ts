@@ -104,6 +104,9 @@ export const agentTask = pgTable(
     traceId: text('trace_id'),
     error: text('error'),
     context: jsonb('context').$type<Record<string, unknown>>(),
+    /** 任务租约：崩溃检测与恢复认领（设计方案 §27.4 中断恢复） */
+    lockedBy: text('locked_by'),
+    leaseUntil: ts('lease_until'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
@@ -123,6 +126,8 @@ export const taskStep = pgTable('task_step', {
   model: text('model'),
   tokens: integer('tokens'),
   latencyMs: integer('latency_ms'),
+  /** 工具幂等账本键（type='tool'/'tool_pending'）：恢复时按 (task_id, tool_call_id) 查重复用 */
+  toolCallId: text('tool_call_id'),
   createdAt: ts('created_at').notNull().defaultNow(),
 });
 

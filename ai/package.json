@@ -9,7 +9,7 @@
     "scheduler": "bun --env-file=../.env run src/index.ts --role=scheduler",
     "migrate": "bun --env-file=../.env run src/migrate.ts",
     "seed": "bun --env-file=../.env run src/seed.ts",
-    "test": "bun test",
+    "test": "bun --env-file=../.env test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

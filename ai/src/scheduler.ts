@@ -19,6 +19,7 @@ import {
   feedback,
   schedulerJob,
 } from './db/schema';
+import { sweepOrphanTasks } from './recovery';
 
 const TICK_MS = 30_000;
 const REPORT_HOUR_MINUTE = '09:00';
@@ -29,6 +30,8 @@ export async function runScheduler(signal?: AbortSignal): Promise<void> {
     try {
       await sweepExpiredApprovals();
       await runDueReports();
+      // 孤儿任务恢复（租约过期 = worker 崩溃 —— 设计方案 §27.4 中断恢复）
+      await sweepOrphanTasks();
     } catch (e) {
       log.error('scheduler tick failed', { error: String(e) });
     }

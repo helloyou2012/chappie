@@ -4,7 +4,7 @@
  */
 
 import type { ChatMessage, CompleteRequest, Provider, ToolCall } from './types';
-import { estimateCost } from './types';
+import { createToolNameMap, estimateCost } from './types';
 
 type AnthropicBlock =
   | { type: 'text'; text: string }
@@ -13,7 +13,7 @@ type AnthropicBlock =
 
 type AnthropicMessage = { role: 'user' | 'assistant'; content: string | AnthropicBlock[] };
 
-function toAnthropicMessage(m: ChatMessage): AnthropicMessage {
+function toAnthropicMessage(m: ChatMessage, toWire: (name: string) => string): AnthropicMessage {
   if (m.role === 'tool') {
     return {
       role: 'user',
@@ -24,7 +24,7 @@ function toAnthropicMessage(m: ChatMessage): AnthropicMessage {
     const blocks: AnthropicBlock[] = [];
     if (m.content) blocks.push({ type: 'text', text: m.content });
     for (const tc of m.toolCalls) {
-      blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.args });
+      blocks.push({ type: 'tool_use', id: tc.id, name: toWire(tc.name), input: tc.args });
     }
     return { role: 'assistant', content: blocks };
   }
@@ -34,16 +34,17 @@ function toAnthropicMessage(m: ChatMessage): AnthropicMessage {
 export const anthropicProvider: Provider = {
   name: 'anthropic',
   async complete(req: CompleteRequest, ctx) {
+    const names = createToolNameMap(req.tools);
     const body: Record<string, unknown> = {
       model: ctx.model,
       max_tokens: req.maxTokens ?? 1024,
       system: req.system,
-      messages: req.messages.map(toAnthropicMessage),
+      messages: req.messages.map((m) => toAnthropicMessage(m, names.toWire)),
       temperature: req.temperature ?? 0.6,
     };
     if (req.tools?.length) {
       body.tools = req.tools.map((t) => ({
-        name: t.name,
+        name: names.toWire(t.name),
         description: t.description,
         input_schema: t.parameters,
       }));
@@ -75,7 +76,7 @@ export const anthropicProvider: Provider = {
     for (const block of data.content ?? []) {
       if (block.type === 'text') text += block.text;
       else if (block.type === 'tool_use') {
-        toolCalls.push({ id: block.id, name: block.name, args: block.input });
+        toolCalls.push({ id: block.id, name: names.fromWire(block.name), args: block.input });
       }
     }
     const usage = {

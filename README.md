@@ -232,13 +232,22 @@ pnpm lint:fix      # 应用自动修复
 
 ```bash
 pnpm lint                                                    # Biome 检查
-pnpm test:contract                                           # TS 契约 fixtures 校验
-cargo test --manifest-path core/Cargo.toml -p im-core-chat   # Rust 契约往返
-pnpm --filter @chappie/web typecheck                         # Web 类型检查
-pnpm --filter @chappie/web build                             # Web 生产构建
-cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml # 桌面端编译
-cd apps/mobile && pnpm exec tsc --noEmit                     # 移动端类型检查
+pnpm test                                                    # 契约 + shared + AI 全部测试
+pnpm test:contract                                           # 契约 fixtures / contentText
+pnpm test:shared                                             # 客户端状态机 / 格式化 / WS 重连
+pnpm test:ai                                                 # AI 单元 + 恢复集成测试（需 PG + pnpm ai:migrate）
+pnpm test:rust                                               # Rust 纯工具 + 契约往返单测
 ```
+
+测试分层：
+
+- **契约**（`packages/contract`）：fixtures zod 校验 + 内容预览降级文案；
+- **shared**（`packages/shared/test`）：聊天归约（排序/去重/未读/补拉）、格式化、存储适配、WS 首帧鉴权与重连；
+- **AI**（`ai/test`）：意图分类、输出护栏、记忆抽取、mock 模型、工具网关授权/风险分级、
+  策略引擎（档位/禁区/预算），以及任务断连恢复（租约围栏、检查点续跑、账本复用、
+  非幂等不确定转人工、审批续跑中断不重复转账、陈旧任务丢弃）。
+- **Rust**（`core`）：ID/时间工具单测 + 与 TS 共用的契约 fixtures 往返。
+- AI 集成测试自带隔离夹具并在结束后清理；数据库不可用或未迁移时自动跳过。
 
 ### 品牌资产
 
@@ -250,15 +259,15 @@ cd apps/mobile && pnpm exec tsc --noEmit                     # 移动端类型�
 
 ## 常见问题
 
-| 现象             | 处理                                                                     |
-| ---------------- | ------------------------------------------------------------------------ |
-| 7000 端口被占用  | macOS AirPlay Receiver；本项目已用 7100                                  |
-| 5432 被占用      | compose 已映射 15432；`.env` 的 `DATABASE_URL` 同步                      |
-| 验证码 429       | 每邮箱每小时 5 次限流；清理 `core:rl:code:<email>`                       |
-| 分身不回复       | 检查档位、让位、冷却、预算；在控制台「任务回放」查看 `agent_task` / `task_step` |
-| 移动端连不上后端 | Android 模拟器用 `10.0.2.2`；真机用电脑局域网 IP 并在登录页配置          |
-| 桌面端白屏       | 需先 `pnpm web` 启动 5173（dev 模式由 Tauri 加载它）                     |
-| Docker Hub 拉取慢 | 先用加速源拉取并 `docker tag` 为 `postgres:18` / `redis:8` 等默认名    |
+| 现象              | 处理                                                                            |
+| ----------------- | ------------------------------------------------------------------------------- |
+| 7000 端口被占用   | macOS AirPlay Receiver；本项目已用 7100                                         |
+| 5432 被占用       | compose 已映射 15432；`.env` 的 `DATABASE_URL` 同步                             |
+| 验证码 429        | 每邮箱每小时 5 次限流；清理 `core:rl:code:<email>`                              |
+| 分身不回复        | 检查档位、让位、冷却、预算；在控制台「任务回放」查看 `agent_task` / `task_step` |
+| 移动端连不上后端  | Android 模拟器用 `10.0.2.2`；真机用电脑局域网 IP 并在登录页配置                 |
+| 桌面端白屏        | 需先 `pnpm web` 启动 5173（dev 模式由 Tauri 加载它）                            |
+| Docker Hub 拉取慢 | 先用加速源拉取并 `docker tag` 为 `postgres:18` / `redis:8` 等默认名             |
 
 ## 工程取舍
 

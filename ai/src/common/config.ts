@@ -20,6 +20,18 @@ export interface AiConfig {
   classifierModel: string;
   avatarDailyBudgetUsd: number;
   maxHopCount: number;
+  /** 任务租约 TTL（秒）：心跳间隔续约，过期即可被恢复清扫认领 */
+  taskLeaseTtlSeconds: number;
+  /** 任务心跳间隔（毫秒） */
+  taskHeartbeatMs: number;
+  /** 恢复时效线（秒）：超过即视为过期任务直接丢弃（设计方案 §26.3） */
+  recoveryStaleSeconds: number;
+  /** created 状态孤儿认领宽限（秒）：覆盖存量僵尸行（lease 为 NULL） */
+  recoveryCreatedGraceSeconds: number;
+  /** 已决议审批续跑中断的认领宽限（秒）：避免与刚批准的正常续跑竞争 */
+  recoveryApprovalGraceSeconds: number;
+  /** 恢复清扫每 tick 认领上限 */
+  recoveryBatch: number;
 }
 
 function env(key: string, def = ''): string {
@@ -46,6 +58,12 @@ export function loadConfig(): AiConfig {
     classifierModel: env('CLASSIFIER_MODEL'),
     avatarDailyBudgetUsd: Number(env('AVATAR_DAILY_BUDGET_USD', '1.0')),
     maxHopCount: Number(env('MAX_HOP_COUNT', '3')),
+    taskLeaseTtlSeconds: Number(env('AI_TASK_LEASE_TTL_S', '120')),
+    taskHeartbeatMs: Number(env('AI_TASK_HEARTBEAT_MS', '30000')),
+    recoveryStaleSeconds: Number(env('AI_RECOVERY_STALE_S', '3600')),
+    recoveryCreatedGraceSeconds: Number(env('AI_RECOVERY_CREATED_GRACE_S', '600')),
+    recoveryApprovalGraceSeconds: Number(env('AI_RECOVERY_APPROVAL_GRACE_S', '120')),
+    recoveryBatch: Number(env('AI_RECOVERY_BATCH', '5')),
   };
 }
 

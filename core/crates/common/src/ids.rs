@@ -35,3 +35,42 @@ pub fn new_auth_code() -> String {
 pub fn hex(bytes: impl AsRef<[u8]>) -> String {
     hex::encode(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_id_has_prefix_and_uuid() {
+        let id = new_id("t");
+        assert!(id.starts_with("t_"));
+        let uuid_part = &id[2..];
+        assert_eq!(uuid_part.len(), 36);
+        assert!(uuid::Uuid::parse_str(uuid_part).is_ok());
+    }
+
+    #[test]
+    fn ids_are_unique() {
+        assert_ne!(new_user_id(), new_user_id());
+        assert_ne!(new_avatar_id(), new_avatar_id());
+        assert_ne!(new_conv_id(), new_conv_id());
+        assert_ne!(new_msg_id(), new_msg_id());
+    }
+
+    #[test]
+    fn token_is_64_hex_chars() {
+        let token = new_token();
+        assert_eq!(token.len(), 64);
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn auth_code_is_six_digits_without_leading_zero() {
+        for _ in 0..64 {
+            let code = new_auth_code();
+            assert_eq!(code.len(), 6);
+            assert!(!code.starts_with('0'));
+            assert!(code.parse::<u32>().is_ok());
+        }
+    }
+}

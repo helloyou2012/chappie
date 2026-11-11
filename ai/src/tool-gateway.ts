@@ -31,6 +31,8 @@ export interface BuiltinTool {
   name: string;
   description: string;
   risk: RiskLevel;
+  /** 是否幂等（设计方案 §27.5「能力声明是否幂等」）：崩溃恢复时，非幂等工具不确定状态一律保守转人工 */
+  idempotent: boolean;
   /** 参数 JSON Schema（下发给模型的 tool 定义） */
   jsonSchema: Record<string, unknown>;
   validate: z.ZodTypeAny;
@@ -96,6 +98,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: '查询日程',
     description: '查询日程安排，可指定今天/明天',
     risk: 'L0',
+    idempotent: true,
     jsonSchema: {
       type: 'object',
       properties: {
@@ -120,6 +123,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: '创建日程',
     description: '创建一条日程提醒（低风险写操作）',
     risk: 'L1',
+    idempotent: false,
     jsonSchema: {
       type: 'object',
       required: ['title'],
@@ -150,6 +154,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: '查看待办',
     description: '查看当前待办清单',
     risk: 'L0',
+    idempotent: true,
     jsonSchema: { type: 'object', properties: {} },
     validate: z.object({}),
     async exec(_args, ctx) {
@@ -168,6 +173,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: '添加待办',
     description: '向待办清单添加一项',
     risk: 'L1',
+    idempotent: false,
     jsonSchema: {
       type: 'object',
       required: ['text'],
@@ -186,6 +192,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: '翻译',
     description: '把文本翻译为目标语言（默认英文）',
     risk: 'L0',
+    idempotent: true,
     jsonSchema: {
       type: 'object',
       required: ['text'],
@@ -208,6 +215,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: '总结',
     description: '总结一段文本的要点',
     risk: 'L0',
+    idempotent: true,
     jsonSchema: {
       type: 'object',
       required: ['text'],
@@ -227,6 +235,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: '搜索',
     description: '在网络上搜索信息（演示实现返回模拟结果）',
     risk: 'L0',
+    idempotent: true,
     jsonSchema: {
       type: 'object',
       required: ['query'],
@@ -246,6 +255,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: '发起转账',
     description: '给他人转账（高风险，需主人确认）',
     risk: 'L2',
+    idempotent: false,
     jsonSchema: {
       type: 'object',
       required: ['amount'],

@@ -6,13 +6,13 @@
  */
 
 import type { ChatMessage, CompleteRequest, Provider, ToolCall } from './types';
-import { estimateCost, safeJsonParse } from './types';
+import { createToolNameMap, estimateCost, safeJsonParse } from './types';
 
 // ---------------------------------------------------------------------------
 // Chat Completions
 // ---------------------------------------------------------------------------
 
-function toChatMessage(m: ChatMessage): Record<string, unknown> {
+function toChatMessage(m: ChatMessage, toWire: (name: string) => string): Record<string, unknown> {
   if (m.role === 'tool') {
     return { role: 'tool', tool_call_id: m.toolCallId ?? '', content: m.content };
   }
@@ -23,7 +23,7 @@ function toChatMessage(m: ChatMessage): Record<string, unknown> {
       tool_calls: m.toolCalls.map((tc) => ({
         id: tc.id,
         type: 'function',
-        function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+        function: { name: toWire(tc.name), arguments: JSON.stringify(tc.args) },
       })),
     };
   }
@@ -33,15 +33,23 @@ function toChatMessage(m: ChatMessage): Record<string, unknown> {
 export const openaiChatProvider: Provider = {
   name: 'openai-chat',
   async complete(req: CompleteRequest, ctx) {
+    const names = createToolNameMap(req.tools);
     const body: Record<string, unknown> = {
       model: ctx.model,
-      messages: [{ role: 'system', content: req.system }, ...req.messages.map(toChatMessage)],
+      messages: [
+        { role: 'system', content: req.system },
+        ...req.messages.map((m) => toChatMessage(m, names.toWire)),
+      ],
       temperature: req.temperature ?? 0.6,
     };
     if (req.tools?.length) {
       body.tools = req.tools.map((t) => ({
         type: 'function',
-        function: { name: t.name, description: t.description, parameters: t.parameters },
+        function: {
+          name: names.toWire(t.name),
+          description: t.description,
+          parameters: t.parameters,
+        },
       }));
     }
     if (req.maxTokens) body.max_tokens = req.maxTokens;
@@ -71,7 +79,7 @@ export const openaiChatProvider: Provider = {
     const msg = data.choices?.[0]?.message ?? {};
     const toolCalls: ToolCall[] = (msg.tool_calls ?? []).map((tc) => ({
       id: tc.id,
-      name: tc.function.name,
+      name: names.fromWire(tc.function.name),
       args: safeJsonParse<Record<string, unknown>>(tc.function.arguments, {}),
     }));
     const usage = {
@@ -98,7 +106,7 @@ type ResponsesInputItem =
   | { type: 'function_call'; call_id: string; name: string; arguments: string }
   | { type: 'function_call_output'; call_id: string; output: string };
 
-function toResponsesInput(m: ChatMessage): ResponsesInputItem[] {
+function toResponsesInput(m: ChatMessage, toWire: (name: string) => string): ResponsesInputItem[] {
   if (m.role === 'tool') {
     return [{ type: 'function_call_output', call_id: m.toolCallId ?? '', output: m.content }];
   }
@@ -106,7 +114,7 @@ function toResponsesInput(m: ChatMessage): ResponsesInputItem[] {
     return m.toolCalls.map((tc) => ({
       type: 'function_call' as const,
       call_id: tc.id,
-      name: tc.name,
+      name: toWire(tc.name),
       arguments: JSON.stringify(tc.args),
     }));
   }
@@ -121,16 +129,17 @@ function toResponsesInput(m: ChatMessage): ResponsesInputItem[] {
 export const openaiResponsesProvider: Provider = {
   name: 'openai-responses',
   async complete(req: CompleteRequest, ctx) {
+    const names = createToolNameMap(req.tools);
     const body: Record<string, unknown> = {
       model: ctx.model,
       instructions: req.system,
-      input: req.messages.flatMap(toResponsesInput),
+      input: req.messages.flatMap((m) => toResponsesInput(m, names.toWire)),
       temperature: req.temperature ?? 0.6,
     };
     if (req.tools?.length) {
       body.tools = req.tools.map((t) => ({
         type: 'function',
-        name: t.name,
+        name: names.toWire(t.name),
         description: t.description,
         parameters: t.parameters,
       }));
@@ -167,7 +176,7 @@ export const openaiResponsesProvider: Provider = {
       } else if (item.type === 'function_call') {
         toolCalls.push({
           id: item.call_id,
-          name: item.name,
+          name: names.fromWire(item.name),
           args: safeJsonParse<Record<string, unknown>>(item.arguments, {}),
         });
       }

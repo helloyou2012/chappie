@@ -68,6 +68,31 @@ export interface ProviderContext {
   apiKey: string;
 }
 
+/**
+ * 工具名线上映射：Anthropic / OpenAI 的函数名均要求 ^[a-zA-Z0-9_-]+$，
+ * 而内置工具 id 含点号（calendar.read）。发送前映射为安全名，解析回包时还原。
+ */
+export function createToolNameMap(tools?: ToolDef[]): {
+  toWire: (name: string) => string;
+  fromWire: (name: string) => string;
+} {
+  if (!tools?.length) return { toWire: (n) => n, fromWire: (n) => n };
+  const byWire = new Map<string, string>();
+  const byOriginal = new Map<string, string>();
+  for (const tool of tools) {
+    const base = tool.name.replace(/[^a-zA-Z0-9_-]/g, '_') || 'tool';
+    let wire = base;
+    let i = 2;
+    while (byWire.has(wire)) wire = `${base}_${i++}`;
+    byOriginal.set(tool.name, wire);
+    byWire.set(wire, tool.name);
+  }
+  return {
+    toWire: (name) => byOriginal.get(name) ?? name,
+    fromWire: (name) => byWire.get(name) ?? name,
+  };
+}
+
 export interface Provider {
   name: string;
   complete(req: CompleteRequest, ctx: ProviderContext): Promise<CompleteResult>;

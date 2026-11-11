@@ -24,6 +24,14 @@ import { internal } from './common/internal';
 import { parseJsonSafe } from './common/json';
 import { log, newId } from './common/log';
 import {
+  assertLeaseAlive,
+  heartbeatOnce,
+  LEASE_TTL_S,
+  LeaseLostError,
+  RUNTIME_ID,
+  withLease,
+} from './common/task-lease';
+import {
   agentTask,
   auditLog,
   avatar as avatarTable,
@@ -40,6 +48,18 @@ import {
 } from './memory';
 import { type ChatMessage, type CompleteResult, complete, recordUsage } from './model-gateway';
 import { BUILTIN_TOOLS, executeTool, getTool, prepareToolCall } from './tool-gateway';
+
+/** 恢复检查点（agent_task.context.checkpoint）：ReAct 循环的可序列化快照 */
+export interface ResumeCheckpoint {
+  messages: ChatMessage[];
+  round: number;
+  stepIdx: number;
+  toolsUsed: string[];
+  /** 策略快照（恢复时无需重查任务上下文即可重建 AgentInput） */
+  mode: AvatarMode;
+  allowCapabilities: string[] | null;
+  maxRisk: RiskLevel;
+}
 
 const MAX_TOOL_ROUNDS = 3;
 const CONTEXT_WINDOW = 16;
@@ -63,6 +83,8 @@ export interface AgentInput {
     args: Record<string, unknown>;
     result: unknown;
   };
+  /** 崩溃恢复：从最近检查点续跑（跳过 prompt 装配，直接进入 round N） */
+  resumeCheckpoint?: ResumeCheckpoint;
 }
 
 export interface AgentOutcome {
@@ -81,11 +103,6 @@ interface AvatarRow {
   ownerId: string;
   name: string;
   persona: string;
-}
-
-interface OwnerRow {
-  id: string;
-  name: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,8 +189,9 @@ function buildPromptMessages(
 // 护栏（设计方案 §7.1）
 // ---------------------------------------------------------------------------
 
+// 注意：仅用于 .test()，不能带 g 标志（lastIndex 会跨调用残留导致漏判）
 const INJECTION_RESIDUE_RE =
-  /忽略(之前|以上|前面|所有)(的)?(指令|规则|提示)|ignore (all )?(previous|above) instructions|你现在是|system prompt/gi;
+  /忽略(之前|以上|前面|所有)(的)?(指令|规则|提示)|ignore (all )?(previous|above) instructions|你现在是|system prompt/i;
 const PHONE_RE = /\b(1[3-9]\d)\d{4}(\d{4})\b/g;
 const ID_CARD_RE = /\b(\d{4})\d{10}(\d{3}[\dXx])\b/g;
 
@@ -189,30 +207,66 @@ export function guardOutput(text: string): { text: string; blocked: boolean; rea
 // 任务步与审计
 // ---------------------------------------------------------------------------
 
-async function addStep(
+/**
+ * 落一步执行记录。critical=true（工具幂等账本类）不吞错：写失败即任务失败，
+ * 否则恢复时会误判「未执行」而重复执行非幂等工具。
+ */
+export async function addStep(
   taskId: string,
   idx: number,
   type: string,
   input: unknown,
   output: unknown,
-  meta?: { model?: string; tokens?: number; latencyMs?: number },
+  meta?: {
+    model?: string;
+    tokens?: number;
+    latencyMs?: number;
+    critical?: boolean;
+    toolCallId?: string;
+  },
 ): Promise<void> {
-  await db
-    .insert(taskStep)
-    .values({
-      taskId,
-      idx,
-      type,
-      input: input ?? null,
-      output: output ?? null,
-      model: meta?.model ?? null,
-      tokens: meta?.tokens ?? null,
-      latencyMs: meta?.latencyMs ?? null,
-    })
-    .catch(() => undefined);
+  const run = db.insert(taskStep).values({
+    taskId,
+    idx,
+    type,
+    input: input ?? null,
+    output: output ?? null,
+    model: meta?.model ?? null,
+    tokens: meta?.tokens ?? null,
+    latencyMs: meta?.latencyMs ?? null,
+    toolCallId: meta?.toolCallId ?? null,
+  });
+  if (meta?.critical) {
+    await run;
+  } else {
+    await run.catch(() => undefined);
+  }
 }
 
-async function appendAudit(
+/**
+ * 检查点写入（不吞错）：把 ReAct 循环快照 merge 进 agent_task.context.checkpoint。
+ * 写失败 → runAgent 抛错 → 任务失败。宁可任务失败，不可「无检查点继续跑」
+ * （否则恢复会从旧状态重放工具）。
+ */
+export async function saveCheckpoint(taskId: string, checkpoint: ResumeCheckpoint): Promise<void> {
+  await db
+    .update(agentTask)
+    .set({
+      context: sql`coalesce(${agentTask.context}, '{}'::jsonb) || ${JSON.stringify({ checkpoint })}::jsonb`,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(agentTask.id, taskId));
+}
+
+/** 崩溃演练钩子：AI_CRASH_POINT 命中即退出进程（验证恢复链路用，env 不设则零开销） */
+function devCrashPoint(name: string): void {
+  if (process.env.AI_CRASH_POINT === name) {
+    log.warn('dev crash point triggered', { name });
+    process.exit(1);
+  }
+}
+
+export async function appendAudit(
   taskId: string,
   actor: string,
   action: string,
@@ -240,10 +294,11 @@ async function appendAudit(
 
 export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
   const t0 = Date.now();
-  let stepIdx = 0;
+  const cp = input.resumeCheckpoint;
+  let stepIdx = cp ? cp.stepIdx : 0;
   let costUsd = 0;
   let tokensUsed = 0;
-  const toolsUsed: string[] = [];
+  const toolsUsed: string[] = cp ? [...cp.toolsUsed] : [];
 
   const avatarRows = await db
     .select({
@@ -315,10 +370,12 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     maxRisk: input.maxRisk,
   });
 
-  let messages = buildPromptMessages(context.messages, input.trigger, input.ownerId, names);
+  let messages: ChatMessage[] = cp
+    ? cp.messages
+    : buildPromptMessages(context.messages, input.trigger, input.ownerId, names);
 
   // 审批恢复：把已批准的工具结果注入，要求据此生成回复
-  if (input.resume) {
+  if (!cp && input.resume) {
     messages = [
       ...messages,
       {
@@ -331,13 +388,23 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     ];
   }
 
-  await addStep(
-    input.taskId,
-    ++stepIdx,
-    'plan',
-    { mode: input.mode, peerName, memories: memories.length, tools: tools.length },
-    { ok: true },
-  );
+  if (cp) {
+    await addStep(
+      input.taskId,
+      ++stepIdx,
+      'recover',
+      { from: 'checkpoint', round: cp.round, toolsUsed: cp.toolsUsed },
+      { ok: true },
+    );
+  } else {
+    await addStep(
+      input.taskId,
+      ++stepIdx,
+      'plan',
+      { mode: input.mode, peerName, memories: memories.length, tools: tools.length },
+      { ok: true },
+    );
+  }
 
   let finalText = '';
   let confidence = 0.8;
@@ -348,7 +415,24 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     if (RISK_ORDER[r] > RISK_ORDER[maxRiskSeen]) maxRiskSeen = r;
   };
 
-  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+  const startRound = cp ? cp.round : 0;
+  const mkCheckpoint = (
+    round: number,
+    patch: Partial<ResumeCheckpoint> = {},
+  ): ResumeCheckpoint => ({
+    messages,
+    round,
+    stepIdx,
+    toolsUsed,
+    mode: input.mode,
+    allowCapabilities: input.allowCapabilities,
+    maxRisk: input.maxRisk,
+    ...patch,
+  });
+
+  for (let round = startRound; round <= MAX_TOOL_ROUNDS; round++) {
+    assertLeaseAlive(input.taskId);
+    devCrashPoint('before_model');
     let result: CompleteResult;
     const modelStart = Date.now();
     try {
@@ -390,6 +474,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
         latencyMs: Date.now() - modelStart,
       },
     );
+    devCrashPoint('after_model');
 
     if (result.handover) {
       handoverReason = result.handover;
@@ -403,7 +488,10 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
 
     // 工具循环
     messages.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls });
+    // 检查点：本轮模型输出已定；崩溃恢复时按账本补齐缺失的工具结果后续跑（recovery.ts）
+    await saveCheckpoint(input.taskId, mkCheckpoint(round));
     for (const call of result.toolCalls) {
+      assertLeaseAlive(input.taskId);
       toolsUsed.push(call.name);
       const tool = getTool(call.name);
       if (!tool) {
@@ -454,14 +542,18 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
           .update(agentTask)
           .set({
             status: 'waiting_approval',
-            context: {
+            // merge 保留审计字段，同时清掉检查点（审批续走 resume 路径，不再从轮次恢复）
+            context: sql`coalesce(${agentTask.context}, '{}'::jsonb) || ${JSON.stringify({
               mode: input.mode,
               allowCapabilities: input.allowCapabilities,
               maxRisk: input.maxRisk,
               convId: input.convId,
               confidence,
-            },
+              checkpoint: null,
+            })}::jsonb`,
             updatedAt: sql`now()`,
+            lockedBy: null,
+            leaseUntil: null,
           })
           .where(eq(agentTask.id, input.taskId));
         await addStep(
@@ -489,6 +581,21 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
         };
       }
 
+      // 幂等账本：非幂等工具执行前写意图标记（critical 不吞错）。
+      // 崩溃恢复三态判定：有标记无完成记录 = 不确定 → 保守转人工；无标记 = 确定未执行 → 安全补跑。
+      if (!decision.tool.idempotent) {
+        await addStep(
+          input.taskId,
+          ++stepIdx,
+          'tool_pending',
+          { tool: call.name, args: decision.args },
+          { ok: true },
+          { critical: true, toolCallId: call.id },
+        );
+        // 同步围栏：非幂等操作前确认租约仍在（堵住「过期但心跳未察觉」窗口）
+        if (!(await heartbeatOnce(input.taskId))) throw new LeaseLostError(input.taskId);
+      }
+      devCrashPoint('before_tool_exec');
       const toolStart = Date.now();
       let output: unknown;
       try {
@@ -509,8 +616,11 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
         output,
         {
           latencyMs: Date.now() - toolStart,
+          critical: true,
+          toolCallId: call.id,
         },
       );
+      devCrashPoint('after_tool_exec');
       await appendAudit(
         input.taskId,
         input.avatarId,
@@ -605,6 +715,9 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     toolsUsed,
     memoriesUsed: memories.map((m) => m.content),
   };
+
+  // 交付前同步围栏：发送回复是最后一种非幂等效果，确认租约仍在
+  if (!(await heartbeatOnce(input.taskId))) throw new LeaseLostError(input.taskId);
 
   // 交付：draft / auto 低置信度 → 草稿卡片；否则直接发送
   let outcome: AgentOutcome;
@@ -751,6 +864,8 @@ async function finishTask(
       error: fields.error ?? null,
       costUsd: sql`${agentTask.costUsd} + ${fields.costUsd}`,
       tokensUsed: sql`${agentTask.tokensUsed} + ${fields.tokensUsed}`,
+      lockedBy: null,
+      leaseUntil: null,
       updatedAt: sql`now()`,
     })
     .where(eq(agentTask.id, taskId));
@@ -759,7 +874,7 @@ async function finishTask(
 async function failTask(taskId: string, error: string): Promise<void> {
   await db
     .update(agentTask)
-    .set({ status: 'failed', error, updatedAt: sql`now()` })
+    .set({ status: 'failed', error, lockedBy: null, leaseUntil: null, updatedAt: sql`now()` })
     .where(eq(agentTask.id, taskId))
     .catch(() => undefined);
 }
@@ -796,33 +911,86 @@ export async function resumeFromApproval(
   const args =
     action === 'modify_approve' ? parseEditedArgs(approval.args, editedText) : approval.args;
   await resolveApproval(approvalId, action === 'modify_approve' ? 'modified' : 'approved', args);
+  devCrashPoint('approval_after_resolve');
 
-  // 执行已批准的工具
   const tool = getTool(approval.toolName);
   if (!tool) return null;
-  let result: unknown;
-  try {
-    result = await executeTool(tool, args, {
+
+  // 幂等账本：决议后、执行前写意图标记（崩溃恢复三态判定依据，防重复转账）
+  const approvalCallId = `apr_${approvalId}`;
+  await addStep(
+    approval.taskId,
+    98,
+    'tool_pending',
+    { tool: tool.id, args, approved: true },
+    { ok: true },
+    { critical: true, toolCallId: approvalCallId },
+  );
+
+  // 条件迁移 + 租约：0 行 = 任务已不在 waiting_approval（被恢复进程认领/已被取消），本侧让位
+  const moved = await db
+    .update(agentTask)
+    .set({
+      status: 'running',
+      lockedBy: RUNTIME_ID,
+      leaseUntil: sql`now() + ${LEASE_TTL_S} * interval '1 second'`,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(agentTask.id, approval.taskId), eq(agentTask.status, 'waiting_approval')))
+    .returning({ id: agentTask.id });
+  if (moved.length === 0) return null;
+
+  return withLease(approval.taskId, async () => {
+    let result: unknown;
+    try {
+      result = await executeTool(tool, args, {
+        avatarId: approval.avatarId,
+        ownerId: approval.approver,
+        taskId: approval.taskId,
+        traceId: approval.taskId,
+      });
+    } catch (e) {
+      result = { error: String(e) };
+    }
+    await setApprovalResult(approvalId, result);
+    await appendAudit(
+      approval.taskId,
+      approval.avatarId,
+      'tool.execute.approved',
+      { tool: tool.id, args },
+      result,
+      tool.risk,
+    );
+    await addStep(approval.taskId, 99, 'tool', { tool: tool.id, approved: true }, result, {
+      critical: true,
+      toolCallId: approvalCallId,
+    });
+
+    return runAfterApproval({
+      taskId: approval.taskId,
       avatarId: approval.avatarId,
       ownerId: approval.approver,
-      taskId: approval.taskId,
-      traceId: approval.taskId,
+      approvalId,
+      toolName: approval.toolName,
+      args,
+      result,
     });
-  } catch (e) {
-    result = { error: String(e) };
-  }
-  await setApprovalResult(approvalId, result);
-  await appendAudit(
-    approval.taskId,
-    approval.avatarId,
-    'tool.execute.approved',
-    { tool: tool.id, args },
-    result,
-    tool.risk,
-  );
-  await addStep(approval.taskId, 99, 'tool', { tool: tool.id, approved: true }, result);
+  });
+}
 
-  // 读取任务上下文，继续生成回复
+/**
+ * 审批续跑公共尾段：读回任务快照与触发消息 → runAgent(resume 注入)。
+ * 供 resumeFromApproval 与崩溃恢复（recovery.ts 分支 A）复用；调用方需持有租约。
+ */
+export async function runAfterApproval(params: {
+  taskId: string;
+  avatarId: string;
+  ownerId: string;
+  approvalId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result: unknown;
+}): Promise<AgentOutcome | null> {
   const taskRows = await db
     .select({
       triggerMsgId: agentTask.triggerMsgId,
@@ -832,7 +1000,7 @@ export async function resumeFromApproval(
       ownerId: agentTask.ownerId,
     })
     .from(agentTask)
-    .where(eq(agentTask.id, approval.taskId));
+    .where(eq(agentTask.id, params.taskId));
   const task = taskRows[0];
   const taskContext = task?.context
     ? (task.context as {
@@ -845,6 +1013,38 @@ export async function resumeFromApproval(
     : null;
   if (!task?.triggerMsgId || !task.triggerConvId) return null;
 
+  const trigger = await loadTriggerMessage(task.triggerMsgId);
+  if (!trigger) return null;
+
+  return runAgent({
+    avatarId: task.avatarId ?? params.avatarId,
+    ownerId: task.ownerId ?? params.ownerId,
+    taskId: params.taskId,
+    convId: task.triggerConvId,
+    trigger,
+    mode: taskContext?.mode ?? 'auto',
+    allowCapabilities: taskContext?.allowCapabilities ?? null,
+    maxRisk: taskContext?.maxRisk ?? 'L1',
+    classification: {
+      intent: 'task',
+      urgency: 'normal',
+      sentiment: 'neutral',
+      needReply: true,
+      topics: [],
+      summary: '',
+    },
+    traceId: params.taskId,
+    resume: {
+      approvalId: params.approvalId,
+      toolName: params.toolName,
+      args: params.args,
+      result: params.result,
+    },
+  });
+}
+
+/** 读回触发消息（崩溃恢复 / 审批续跑共用） */
+export async function loadTriggerMessage(triggerMsgId: string): Promise<Message | null> {
   const triggerRows = await db
     .select({
       msgId: messageTable.msgId,
@@ -861,45 +1061,19 @@ export async function resumeFromApproval(
       createdAt: messageTable.createdAt,
     })
     .from(messageTable)
-    .where(eq(messageTable.msgId, task.triggerMsgId))
+    .where(eq(messageTable.msgId, triggerMsgId))
     .limit(1);
   const triggerRow = triggerRows[0];
   if (!triggerRow) return null;
-  const trigger = {
+  return {
     ...triggerRow,
     content: triggerRow.content as Message['content'],
     aiMeta: triggerRow.aiMeta as Message['aiMeta'],
     createdAt: dayjs(triggerRow.createdAt).toISOString(),
   } as Message;
-
-  await db
-    .update(agentTask)
-    .set({ status: 'running', updatedAt: sql`now()` })
-    .where(eq(agentTask.id, approval.taskId));
-
-  return runAgent({
-    avatarId: task.avatarId,
-    ownerId: task.ownerId,
-    taskId: approval.taskId,
-    convId: task.triggerConvId,
-    trigger,
-    mode: taskContext?.mode ?? 'auto',
-    allowCapabilities: taskContext?.allowCapabilities ?? null,
-    maxRisk: taskContext?.maxRisk ?? 'L1',
-    classification: {
-      intent: 'task',
-      urgency: 'normal',
-      sentiment: 'neutral',
-      needReply: true,
-      topics: [],
-      summary: '',
-    },
-    traceId: approval.taskId,
-    resume: { approvalId, toolName: approval.toolName, args, result },
-  });
 }
 
-function parseEditedArgs(
+export function parseEditedArgs(
   original: Record<string, unknown>,
   editedText?: string,
 ): Record<string, unknown> {
