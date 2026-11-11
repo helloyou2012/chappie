@@ -1,0 +1,25 @@
+apps/web/src/components/ui/otp-field.tsx
+  s_5811db174623c3::t_fd916df48a45fe 10,19,30
+  s_5811db174623c3::t_c0468ad501fa6f 1-9,11-18,20-29,31-50
+apps/web/src/pages/login-page.tsx
+  s_5811db174623c3::t_ad3ff6a7287604 141-142,148,152,156-158,166
+  s_5811db174623c3::t_dee207c3429e5c 4,9
+  s_5811db174623c3::t_c7f8e74a603357 58-62,66,71,76-78
+  s_5811db174623c3::t_1b982ef95c0103 79-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "250374adfcf2c41be98305e5153a9c53819777b7",
+  "prompts": {},
+  "sessions": {
+    "s_5811db174623c3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e98bc37-7ffa-4938-82eb-dee572e126d7",
+        "model": "deepseek-flash"
+      },
+      "human_author": "helloyou2012 <helloyou2012@yeah.net>"
+    }
+  }
+}
