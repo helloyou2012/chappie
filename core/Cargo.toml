@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+im-core-common = { path = "crates/common" }
+im-core-store = { path = "crates/store" }
+im-core-chat = { path = "crates/chat" }
+im-core-internal-api = { path = "crates/internal-api" }
+im-core-gateway = { path = "crates/gateway" }
+
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "json", "migrate"] }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+dotenvy = "0.15"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+futures-util = "0.3"
+hex = "0.4"
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+[profile.release]
+lto = "thin"
+strip = true

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+target/
+.env
+.env.local
+*.local
+.DS_Store
+*.log
+apps/mobile/.expo/
+apps/mobile/ios/
+apps/mobile/android/
+apps/desktop/src-tauri/gen/
+packages/contract/fixtures.json
+.turbo/
+coverage/

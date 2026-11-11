@@ -1,0 +1,29 @@
+{
+  "name": "@chappie/ai",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../.env run src/index.ts",
+    "worker": "bun --env-file=../.env run src/index.ts --role=worker",
+    "admin": "bun --env-file=../.env run src/index.ts --role=admin",
+    "scheduler": "bun --env-file=../.env run src/index.ts --role=scheduler",
+    "migrate": "bun --env-file=../.env run src/migrate.ts",
+    "seed": "bun --env-file=../.env run src/seed.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chappie/contract": "workspace:*",
+    "dayjs": "^1.11.0",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.6.0",
+    "partial-json": "^0.1.7",
+    "postgres": "^4.1.1",
+    "uuid": "^14.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,377 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ==========================================================================
+   设计 token —— 双层：@theme inline（工具类名） → CSS 变量（运行时主题）
+   规范：docs/ui-guidelines.md
+   参考：linear-app（四档白罩 / 精确排版）+ grok-bot-app（玻璃质感 / 会话级强调色）
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ---- 表面 ---- */
+  --canvas: #f2f2f0;
+  --view: #f7f7f5;
+  --panel: #fcfcfb;
+  --elevated: #ffffff;
+
+  /* ---- 文本 ---- */
+  --ink-primary: #0a0a0a;
+  --ink-secondary: rgb(10 10 10 / 0.56);
+  --ink-tertiary: rgb(10 10 10 / 0.38);
+  --ink-quaternary: rgb(10 10 10 / 0.26);
+
+  /* ---- 交互罩（层级核心：veil → raised → hover → selected） ---- */
+  --surface-veil: rgb(10 10 10 / 0.03);
+  --surface-raised: rgb(10 10 10 / 0.05);
+  --surface-hover: rgb(10 10 10 / 0.075);
+  --surface-selected: rgb(10 10 10 / 0.1);
+
+  /* ---- 边框 ---- */
+  --line: rgb(10 10 10 / 0.1);
+  --line-strong: rgb(10 10 10 / 0.16);
+
+  /* ---- 品牌与语义 ---- */
+  --brand: #6e56cf;
+  --brand-strong: #5b46b4;
+  --brand-soft: rgb(110 86 207 / 0.12);
+  --info: #0a84ff;
+  --info-soft: rgb(10 132 255 / 0.12);
+  --success: #1f8a65;
+  --success-soft: rgb(31 138 101 / 0.12);
+  --warning: #b7791f;
+  --warning-soft: rgb(183 121 31 / 0.12);
+  --danger: #d33a3a;
+  --danger-soft: rgb(211 58 58 / 0.12);
+
+  /* ---- 分身强调色（会话级，由 .agent-accent-scope 注入） ---- */
+  --agent-accent: #54b9a6;
+  --agent-tint: rgb(84 185 166 / 0.1);
+
+  /* ---- 气泡 ---- */
+  --bubble-user: #111110;
+  --bubble-user-ink: #ffffff;
+  --bubble-other: rgb(10 10 10 / 0.045);
+  --bubble-agent: color-mix(in srgb, var(--agent-accent) 12%, transparent);
+  --bubble-agent-ink: color-mix(in srgb, var(--agent-accent) 72%, #0a0a0a);
+
+  /* ---- 阴影（深色主题另配） ---- */
+  --sh-pop: 0 4px 16px -4px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.06);
+  --edge-highlight: rgb(255 255 255 / 0.6);
+
+  /* ---- 动效 ---- */
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --default-transition-duration: 160ms;
+
+  /* ---- shadcn 语义别名（组件层使用，指向上述 token） ---- */
+  --background: var(--view);
+  --foreground: var(--ink-primary);
+  --card: var(--panel);
+  --card-foreground: var(--ink-primary);
+  --popover: var(--elevated);
+  --popover-foreground: var(--ink-primary);
+  --primary: var(--brand);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface-raised);
+  --secondary-foreground: var(--ink-secondary);
+  --muted: var(--surface-veil);
+  --muted-foreground: var(--ink-tertiary);
+  --accent: var(--surface-hover);
+  --accent-foreground: var(--ink-primary);
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--brand);
+  --ai-bubble: var(--bubble-agent);
+  --ai-bubble-foreground: var(--bubble-agent-ink);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --canvas: #0b0b0b;
+  --view: #101112;
+  --panel: #141414;
+  --elevated: #1c1c1c;
+
+  --ink-primary: #f2f2f2;
+  --ink-secondary: rgb(255 255 255 / 0.58);
+  --ink-tertiary: rgb(255 255 255 / 0.36);
+  --ink-quaternary: rgb(255 255 255 / 0.25);
+
+  --surface-veil: rgb(255 255 255 / 0.02);
+  --surface-raised: rgb(255 255 255 / 0.03);
+  --surface-hover: rgb(255 255 255 / 0.05);
+  --surface-selected: rgb(255 255 255 / 0.078);
+
+  --line: rgb(255 255 255 / 0.12);
+  --line-strong: rgb(255 255 255 / 0.18);
+
+  --brand: #8b7cf6;
+  --brand-strong: #a294ff;
+  --brand-soft: rgb(139 124 246 / 0.16);
+  --info: #64b5ff;
+  --info-soft: rgb(100 181 255 / 0.16);
+  --success: #3dbd8a;
+  --success-soft: rgb(61 189 138 / 0.16);
+  --warning: #f0bf00;
+  --warning-soft: rgb(240 191 0 / 0.16);
+  --danger: #f87171;
+  --danger-soft: rgb(248 113 113 / 0.16);
+
+  --bubble-user: #ecece8;
+  --bubble-user-ink: #141414;
+  --bubble-other: rgb(255 255 255 / 0.055);
+  --bubble-agent: color-mix(in srgb, var(--agent-accent) 16%, transparent);
+  --bubble-agent-ink: color-mix(in srgb, var(--agent-accent) 78%, #ffffff);
+
+  --primary-foreground: #141414;
+  --sh-pop: 0 4px 16px -4px rgb(0 0 0 / 0.4), 0 1px 2px rgb(0 0 0 / 0.3);
+  --edge-highlight: rgb(255 255 255 / 0.14);
+}
+
+/* ==========================================================================
+   Tailwind 主题映射
+   ========================================================================== */
+
+@theme inline {
+  /* tokens */
+  --color-canvas: var(--canvas);
+  --color-view: var(--view);
+  --color-panel: var(--panel);
+  --color-elevated: var(--elevated);
+  --color-ink: var(--ink-primary);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-tertiary: var(--ink-tertiary);
+  --color-ink-quaternary: var(--ink-quaternary);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-surface-veil: var(--surface-veil);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-selected: var(--surface-selected);
+
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-agent: var(--agent-accent);
+  --color-agent-tint: var(--agent-tint);
+  --color-info: var(--info);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+
+  /* shadcn 语义 */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ai: var(--ai-bubble);
+  --color-ai-foreground: var(--ai-bubble-foreground);
+  --color-bubble-user: var(--bubble-user);
+  --color-bubble-user-ink: var(--bubble-user-ink);
+  --color-bubble-other: var(--bubble-other);
+
+  /* 字体与字重（510 / 590 为 Linear 式非标准档） */
+  --font-sans:
+    "Inter", ui-sans-serif, -apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei",
+    system-ui, sans-serif;
+  --font-mono: "Berkeley Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-weight-medium: 510;
+  --font-weight-semibold: 590;
+
+  /* 圆角梯度：控件 6–8 / 容器 10–12 / 气泡 16 / 窗口 24 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 24px;
+
+  /* 阴影工具类 */
+  --shadow-pop: var(--sh-pop);
+
+  /* 动效 */
+  --animate-bubble-in: bubble-in 0.28s var(--ease-out-quad) both;
+}
+
+/* ==========================================================================
+   基础样式
+   ========================================================================== */
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--canvas);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.45;
+    letter-spacing: -0.011em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  ::selection {
+    background: var(--brand-soft);
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--brand) 65%, transparent);
+    outline-offset: 1px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.018em;
+  }
+}
+
+/* ==========================================================================
+   复合效果
+   ========================================================================== */
+
+/* 玻璃浮层：弹窗 / 下拉 / 输入区 */
+@utility glass {
+  background-color: color-mix(in srgb, var(--panel) 72%, transparent);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+
+/* 卡片边缘高光（Linear 式左上角打光） */
+@utility card-edge {
+  position: relative;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: radial-gradient(
+      ellipse 120px 120px at 0 0,
+      var(--edge-highlight),
+      transparent 70%
+    );
+    mask:
+      linear-gradient(#000, #000) content-box,
+      linear-gradient(#000, #000);
+    mask-composite: exclude;
+    -webkit-mask:
+      linear-gradient(#000, #000) content-box,
+      linear-gradient(#000, #000);
+    -webkit-mask-composite: xor;
+    pointer-events: none;
+  }
+}
+
+/* ==========================================================================
+   滚动条
+   ========================================================================== */
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--ink-primary) 18%, transparent) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--ink-primary) 18%, transparent);
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--ink-primary) 28%, transparent);
+}
+
+/* 输入区上方的消息渐隐：两段简单渐变（view → 透明） */
+.composer-fade {
+  background: linear-gradient(to top, var(--view), transparent);
+}
+
+/* ==========================================================================
+   动画
+   ========================================================================== */
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-bubble-in {
+  animation: var(--animate-bubble-in);
+}
+
+@keyframes typing-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.typing-dot {
+  animation: typing-dot 1.2s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

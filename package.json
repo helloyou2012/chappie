@@ -1,0 +1,31 @@
+{
+  "name": "chappie",
+  "private": true,
+  "packageManager": "pnpm@10.12.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "compose:up": "docker compose -f deploy/docker-compose.yml up -d",
+    "compose:down": "docker compose -f deploy/docker-compose.yml down",
+    "core": "cargo run --manifest-path core/Cargo.toml -p im-core",
+    "core:check": "cargo check --manifest-path core/Cargo.toml --workspace",
+    "ai": "pnpm --filter @chappie/ai dev",
+    "ai:migrate": "pnpm --filter @chappie/ai migrate",
+    "ai:seed": "pnpm --filter @chappie/ai seed",
+    "web": "pnpm --filter @chappie/web dev",
+    "web:build": "pnpm --filter @chappie/web build",
+    "desktop": "pnpm --filter @chappie/desktop dev",
+    "desktop:build": "pnpm --filter @chappie/desktop tauri build",
+    "mobile": "pnpm --filter @chappie/mobile start",
+    "test:contract": "pnpm --filter @chappie/contract test",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "icons": "bash scripts/gen-icons.sh"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.6"
+  }
+}

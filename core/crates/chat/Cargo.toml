@@ -1,0 +1,17 @@
+[package]
+name = "im-core-chat"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+im-core-common = { workspace = true }
+im-core-store = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true }
+redis = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }

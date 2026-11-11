@@ -1,0 +1,41 @@
+services:
+  postgres:
+    # 注：标准镜像即可（记忆向量用 REAL[] + 应用层余弦，不依赖 pgvector 扩展）。
+    # 若本地拉取困难，可先用加速源拉取并 docker tag，例如：
+    #   docker pull m.daocloud.io/docker.io/library/postgres:18
+    #   docker tag  m.daocloud.io/docker.io/library/postgres:18 postgres:18
+    image: postgres:18
+    container_name: chappie-pg
+    environment:
+      POSTGRES_USER: chappie
+      POSTGRES_PASSWORD: chappie
+      POSTGRES_DB: chappie
+    # 映射到 15432，避免与本机已有 PostgreSQL 冲突（见 .env.example 的 DATABASE_URL）
+    ports:
+      - "15432:5432"
+    # PostgreSQL 18+ 官方镜像约定：挂载父目录 /var/lib/postgresql（数据在 18/docker 子目录）
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chappie -d chappie"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:8
+    container_name: chappie-redis
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory 256mb --maxmemory-policy volatile-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  pgdata:
+  redisdata:
