@@ -1,0 +1,21 @@
+.github/workflows/deploy.yml
+  s_5811db174623c3::t_33b19452456daf 78
+README.md
+  s_5811db174623c3::t_e515064240ea30 266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2e5c875414e1cbff7ee575f2851b1731d01190f7",
+  "prompts": {},
+  "sessions": {
+    "s_5811db174623c3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e98bc37-7ffa-4938-82eb-dee572e126d7",
+        "model": "deepseek-flash"
+      },
+      "human_author": "helloyou2012 <helloyou2012@yeah.net>"
+    }
+  }
+}
