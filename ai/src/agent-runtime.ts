@@ -41,6 +41,7 @@ import {
 } from './common/task-lease';
 import {
   agentTask,
+  approval as approvalTable,
   auditLog,
   avatar as avatarTable,
   capabilityGrant,
@@ -1265,6 +1266,13 @@ async function rejectApproval(
   actorId: string,
   reason: string,
 ): Promise<void> {
+  // 审批未执行时同步关闭审批行，避免任务已取消但卡片仍显示「待确认」
+  await db
+    .update(approvalTable)
+    .set({ status: 'rejected', resolvedAt: sql`now()` })
+    .where(and(eq(approvalTable.id, approval.id), eq(approvalTable.status, 'pending')))
+    .catch(() => undefined);
+
   const rows = await db
     .update(agentTask)
     .set({ status: 'cancelled', error: redactSecrets(reason), updatedAt: sql`now()` })

@@ -1,6 +1,6 @@
 import { adminApi, type CapabilityGrant, RISK_LABELS } from '@chappie/shared';
 import { RiLoader4Line, RiToolsLine } from '@remixicon/react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -32,7 +32,7 @@ export function CapabilitiesTab() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await adminApi.listCapabilities();
@@ -42,7 +42,7 @@ export function CapabilitiesTab() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void load();

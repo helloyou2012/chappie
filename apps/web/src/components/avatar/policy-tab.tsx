@@ -8,7 +8,7 @@ import {
 } from '@chappie/shared';
 import { ShieldCheckIcon } from '@heroicons/react/24/outline';
 import { RiAddLine, RiDeleteBinLine, RiLoader4Line } from '@remixicon/react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -50,7 +50,7 @@ export function PolicyTab() {
   const [rateLimit, setRateLimit] = useState('20');
   const [denyTopics, setDenyTopics] = useState('money');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await adminApi.listPolicies();
@@ -60,7 +60,7 @@ export function PolicyTab() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void load();
