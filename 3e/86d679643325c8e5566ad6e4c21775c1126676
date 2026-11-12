@@ -1,0 +1,26 @@
+apps/web/src/components/avatar/policy-tab.tsx
+  s_16c95b141fcac1::t_1b9721173fe560 53,63
+  s_16c95b141fcac1::t_95ace44c63d967 11
+ai/src/agent-runtime.ts
+  s_16c95b141fcac1::t_205922aacced3c 44
+  s_16c95b141fcac1::t_7d0f70c5c42b1b 1269-1275
+apps/web/src/components/avatar/capabilities-tab.tsx
+  s_16c95b141fcac1::t_73e874968ac08c 3
+  s_16c95b141fcac1::t_5449dc03ee8aeb 35,45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3e86d679643325c8e5566ad6e4c21775c1126676",
+  "prompts": {},
+  "sessions": {
+    "s_16c95b141fcac1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d3e86229-78e0-4842-9cbf-7939502859a8",
+        "model": "deepseek-flash"
+      },
+      "human_author": "helloyou2012 <helloyou2012@yeah.net>"
+    }
+  }
+}
