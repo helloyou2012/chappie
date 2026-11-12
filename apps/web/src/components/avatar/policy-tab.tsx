@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
@@ -190,17 +191,13 @@ export function PolicyTab() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-xs font-medium">作用域</label>
-                <select
-                  value={scopeType}
-                  onChange={(e) => setScopeType(e.target.value)}
-                  className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-                >
+                <Select value={scopeType} onChange={(e) => setScopeType(e.target.value)}>
                   {Object.entries(SCOPE_LABEL).map(([v, label]) => (
                     <option key={v} value={v}>
                       {label}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium">

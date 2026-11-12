@@ -85,7 +85,7 @@ export function ChatPage() {
 
   if (!convId || !view) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-muted-foreground">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-center text-muted-foreground">
         <div className="flex size-16 items-center justify-center rounded-xl bg-surface-veil">
           <ChatBubbleLeftRightIcon className="size-8" />
         </div>
@@ -131,32 +131,42 @@ export function ChatPage() {
     : `${members.filter((m) => m.principalType === 'human').length} 位成员 · ${members.filter((m) => m.principalType === 'avatar').length} 个分身`;
 
   return (
-    <div className="flex flex-1 overflow-hidden">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center justify-between gap-3 bg-panel/50 px-4 backdrop-blur">
-          <div className="flex min-w-0 items-center gap-3">
+    <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <header
+          data-tauri-drag-region
+          className="flex h-14 shrink-0 select-none items-center justify-between gap-3 px-3"
+        >
+          <div data-tauri-drag-region className="flex min-w-0 items-center gap-2.5">
             <UserAvatar
               name={view.displayTitle}
               variant={isSelfConv ? 'avatar' : isGroup ? 'group' : 'human'}
-              className="size-8"
+              className="pointer-events-none size-8"
             />
-            <div className="min-w-0">
+            <div data-tauri-drag-region className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <h2 className="truncate text-[14px] font-semibold tracking-[-0.012em]">
+                <h2
+                  data-tauri-drag-region
+                  className="truncate text-[14px] font-semibold tracking-[-0.012em]"
+                >
                   {view.displayTitle}
                 </h2>
                 {isSelfConv ? (
-                  <Badge variant="ai">
-                    <SparklesIcon className="size-2.5" /> 分身会话
+                  <Badge variant="ai" className="pointer-events-none">
+                    <SparklesIcon className="size-2.5" /> 分身
                   </Badge>
                 ) : isGroup ? (
-                  <Badge variant="muted">群聊</Badge>
+                  <Badge variant="muted" className="pointer-events-none">
+                    群聊
+                  </Badge>
                 ) : null}
               </div>
-              <p className="truncate text-[11px] text-ink-tertiary">{subtitle}</p>
+              <p data-tauri-drag-region className="truncate text-[11px] text-ink-tertiary">
+                {subtitle}
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div data-tauri-drag-region className="flex shrink-0 items-center gap-2">
             <ModeSwitch
               convId={view.conversation.id}
               mode={view.myAiMode}

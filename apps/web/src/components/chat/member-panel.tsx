@@ -1,9 +1,11 @@
 import { type MemberView, MODE_LABELS, useAuthStore } from '@chappie/shared';
 import { HandRaisedIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import { RiRobot2Line } from '@remixicon/react';
+import { ResizeHandle } from '@/components/layout/resize-handle';
 import { UserAvatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useResizableWidth } from '@/lib/use-resizable-width';
 import { cn } from '@/lib/utils';
 
 export function MemberPanel({
@@ -20,11 +22,24 @@ export function MemberPanel({
   const myId = useAuthStore((s) => s.user?.id ?? '');
   const humans = members.filter((m) => m.principalType === 'human');
   const avatars = members.filter((m) => m.principalType === 'avatar');
+  const { width, onHandlePointerDown } = useResizableWidth({
+    storageKey: 'chappie.layout.memberWidth',
+    initial: 300,
+    min: 240,
+    max: 420,
+    invert: true,
+  });
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-l border-line bg-panel/40 backdrop-blur">
-      <div className="flex items-center justify-between px-4 py-3">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-tertiary">
+    <aside
+      style={{ width }}
+      className="relative flex shrink-0 flex-col border-l border-line bg-panel/40"
+    >
+      <div
+        data-tauri-drag-region
+        className="flex select-none items-center justify-between px-4 py-3"
+      >
+        <h3 data-tauri-drag-region className="text-[13px] font-semibold text-ink">
           成员 · {members.length}
         </h3>
       </div>
@@ -34,7 +49,7 @@ export function MemberPanel({
         ))}
         {avatars.length > 0 ? (
           <>
-            <p className="flex items-center gap-1 px-2 pb-1 text-[10px] font-medium uppercase text-muted-foreground">
+            <p className="flex items-center gap-1 px-2 pb-1 pt-2 text-[10px] font-medium uppercase text-muted-foreground">
               <SparklesIcon className="size-3" /> AI 分身
             </p>
             {avatars.map((m) => (
@@ -43,7 +58,7 @@ export function MemberPanel({
           </>
         ) : null}
       </div>
-      <div className="space-y-2 border-t p-3">
+      <div className="space-y-2 border-t border-line/60 p-3">
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground">我的分身档位</span>
           <Badge variant="ai">{MODE_LABELS[aiMode] ?? aiMode}</Badge>
@@ -60,6 +75,8 @@ export function MemberPanel({
           接管对话
         </Button>
       </div>
+
+      <ResizeHandle side="left" onPointerDown={onHandlePointerDown} label="调整成员栏宽度" />
     </aside>
   );
 }
@@ -67,7 +84,7 @@ export function MemberPanel({
 function MemberRow({ member, isMe }: { member: MemberView; isMe: boolean }) {
   const isAvatar = member.principalType === 'avatar';
   return (
-    <div className="flex items-center gap-2 rounded-md px-2 py-1.5">
+    <div className="flex items-center gap-2 rounded-xl px-2 py-2 transition-colors hover:bg-surface-veil">
       <div className="relative">
         <UserAvatar name={member.name} variant={isAvatar ? 'avatar' : 'human'} className="size-7" />
         {member.principalType === 'human' ? (

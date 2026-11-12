@@ -76,7 +76,7 @@ export function AvatarConsolePage() {
           <UserAvatar
             name={avatar?.name ?? '分身'}
             variant="avatar"
-            className="size-14 text-base"
+            className="size-11 text-base"
           />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">

@@ -96,7 +96,8 @@ export function MemoryTab() {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               placeholder="忘记某个主题/关键词…"
-              className="h-8 w-48 text-xs"
+              inputSize="sm"
+              className="w-48"
             />
             <Button
               size="sm"

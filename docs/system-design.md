@@ -2,6 +2,8 @@
 
 面向长期演进的架构设计:人与 AI 分身同处一个聊天应用,支持手动档/自动档,并为多分身协作、工具生态、企业化预留扩展点。
 
+> 实现现状、落地取舍与端云/UI 细节分别见 [README](../README.md)、[design-essence.md](design-essence.md)、[client-cloud.md](client-cloud.md)、[ui-guidelines.md](ui-guidelines.md)。
+
 ## 1. 目标与设计原则
 
 **产品目标**

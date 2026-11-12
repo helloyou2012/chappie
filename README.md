@@ -38,17 +38,18 @@
 chappie/
 ├── packages/
 │   ├── contract/   # 契约唯一真相（zod）：实体 / WS 帧 / REST DTO / 事件 / AI 数据
-│   └── shared/     # 三端复用：API 客户端、WS 客户端、zustand 状态
+│   └── shared/     # 三端复用：API/WS 客户端、zustand 状态、离线队列、设备能力、头像色板
 ├── core/           # Rust im-core（cargo workspace）
 │   ├── migrations/ # core 表（sqlx migrate，启动自动执行）
 │   └── crates/{common,store,chat,internal-api,gateway,im-core}
 ├── ai/             # Bun ai-platform（源码直跑）
 │   ├── migrations/ # AI 表（bun src/migrate.ts）
 │   └── src/        # router / policy / classifier / agent-runtime / tool-gateway /
-│                   # memory / model-gateway / approval / scheduler / admin-api 等
+│                   # trust / prompt / turn-guard / silence / memory / model-gateway /
+│                   # approval / recovery / scheduler / admin-api 等
 ├── apps/
 │   ├── web/        # React 19 + Vite 8 + Tailwind v4 + @base-ui/react
-│   ├── desktop/    # Tauri 2（直接复用 apps/web 前端）
+│   ├── desktop/    # Tauri 2（复用 apps/web；macOS 圆角图标、原生标题栏拖拽）
 │   └── mobile/     # Expo SDK 58 + expo-router（复用 packages/shared）
 ├── deploy/docker-compose.yml   # PostgreSQL 18 + Redis 8
 └── docs/                       # 设计与 UI 文档
@@ -110,6 +111,21 @@ pnpm mobile            # Expo Dev Server（按提示打开 iOS 模拟器/Expo Go
 - **分身控制台**：人设与风格预览、策略引擎、能力授权、记忆治理、用量与预算。
 - **分身日报**：每日 09:00 自动生成，也可手动触发。
 - **反馈闭环**：AI 消息支持点赞 / 纠正（写入偏好记忆）/ 举报。
+- **离线与多端**：断线时消息进入持久队列，重连 / 恢复联网 / 移动端回前台自动重放；
+  多端共享 seq，服务端 epoch 变化时自动重建本地投影。
+- **端侧能力**：客户端在 WS 鉴权时上报设备能力（相机 / 相册 / 文件 / 剪贴板 / 定位 / 通知等），
+  服务端可查询，为后续端侧动作桥接预留。
+- **桌面端**：Tauri 复用 Web 前端，支持 macOS 圆角图标、原生标题栏拖拽与平台识别。
+
+## 本版增强
+
+- **AI 安全**：权威分离、审批参数指纹 / 操作者 / 过期校验、严格 JSON 修改、回合级撤权、
+  合理沉默、有界上下文、错误脱敏。
+- **端云一体**：`Message.clientMsgId`、离线 `CommandOutbox`、设备能力上报、
+  服务端 epoch 快照重建、多端 seq 一致。
+- **桌面端**：Tauri 平台识别（`desktop`）、标题栏 / 图标栏拖拽权限、macOS 圆角图标。
+- **界面**：单卡三栏布局、可拖拽栏宽、会话栏仅聊天显示、头像深色纯色首字母、
+  Tabs 选中高亮、Input / Select 与 Button 等高。
 
 ## 配置
 
@@ -135,17 +151,20 @@ MODEL_NAME=gpt-4o-mini
 
 ### 端口与环境变量
 
-| 变量                 | 默认                                                 | 说明                                                    |
-| -------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
-| `GATEWAY_PORT`       | 7100                                                 | im-core 对外 HTTP/WS（避开 macOS AirPlay 占用的 7000）  |
-| `INTERNAL_PORT`      | 7001                                                 | im-core 内部 API（仅 127.0.0.1）                        |
-| `ADMIN_PORT`         | 7002                                                 | ai-platform 控制台 API                                  |
-| `DATABASE_URL`       | `postgres://chappie:chappie@127.0.0.1:15432/chappie` | compose 映射到 15432，避免与本机 PG 冲突                |
-| `REDIS_URL`          | `redis://127.0.0.1:6379`                             |                                                         |
-| `AUTH_CODE_DEV_ECHO` | `true`                                               | 开发模式验证码回显（生产请关闭并配置 `RESEND_API_KEY`） |
-| `RESEND_API_KEY`     | 空                                                   | Resend API key；配置后验证码通过邮件发送                |
-| `MAIL_FROM`          | `Chappie <no-reply@chappie.run>`                     | 发件人（域名需在 Resend 验证）                          |
-| `MAX_HOP_COUNT`      | 3                                                    | AI 对 AI 最大跳数                                       |
+| 变量                        | 默认                                                 | 说明                                                    |
+| --------------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
+| `GATEWAY_PORT`              | 7100                                                 | im-core 对外 HTTP/WS（避开 macOS AirPlay 占用的 7000）  |
+| `INTERNAL_PORT`             | 7001                                                 | im-core 内部 API（仅 127.0.0.1）                        |
+| `ADMIN_PORT`                | 7002                                                 | ai-platform 控制台 API                                  |
+| `DATABASE_URL`              | `postgres://chappie:chappie@127.0.0.1:15432/chappie` | compose 映射到 15432，避免与本机 PG 冲突                |
+| `REDIS_URL`                 | `redis://127.0.0.1:6379`                             |                                                         |
+| `AUTH_CODE_DEV_ECHO`        | `true`                                               | 开发模式验证码回显（生产请关闭并配置 `RESEND_API_KEY`） |
+| `RESEND_API_KEY`            | 空                                                   | Resend API key；配置后验证码通过邮件发送                |
+| `MAIL_FROM`                 | `Chappie <no-reply@chappie.run>`                     | 发件人（域名需在 Resend 验证）                          |
+| `MAX_HOP_COUNT`             | 3                                                    | AI 对 AI 最大跳数                                       |
+| `SERVER_EPOCH`              | 空                                                   | 多节点部署必须统一；客户端据此判断服务端重启            |
+| `AI_CONTEXT_CHAR_BUDGET`    | 6000                                                 | 提示词历史区字符预算（有界上下文）                      |
+| `AI_SILENCE_MIN_CONFIDENCE` | 0.6                                                  | 群聊自动档低置信度沉默阈值，0 = 关闭                    |
 
 ## 实现要点
 
@@ -180,21 +199,41 @@ Rust ↔ Bun 内部契约使用 **HTTP JSON**（`127.0.0.1:7001 /internal/v1/*`�
 ```
 outbox-worker ──► pipeline ──┬─► router（候选分身）
                              ├─► policy（档位/让位/冷却/限流/预算/禁区话题）
-                             ├─► classifier（规则意图分类）
+                             ├─► classifier（规则意图分类 + confidence）
                              └─► agent-runtime
-                                   ├─ 提示词分层装配 + 不可信数据隔离
-                                   ├─ 工具循环（最多 3 轮，L2 触发审批挂起）
+                                   ├─ prompt（有界上下文 + 主人/数据分区）
+                                   ├─ turn-guard（每轮/每工具/交付前撤权）
+                                   ├─ tool-gateway（L0-L3 + canonical args）
+                                   ├─ approval（参数指纹/操作者/过期/严格 JSON）
                                    ├─ 护栏（注入残留 / 敏感信息脱敏）
                                    └─ 交付：直接发送 / 草稿卡片 / 转交卡片
-scheduler：日报（每日 09:00）· 审批超时清理
+scheduler：日报（每日 09:00）· 审批超时清理 · 孤儿任务恢复
 ```
 
+- **权威分离**：只有主人本人的直接消息是 `owner_direct`；群成员、其他分身、工具结果、记忆都是数据。
+- **审批即数据**：审批行绑定 canonical args 指纹；执行只认落库参数；修改后批准重新校验并重算指纹。
+- **审批拒绝**：拒绝或非法修改会同步把审批行置为 `rejected`，避免任务取消后卡片仍显示「待确认」。
+- **回合级撤权**：冻结、静默、临时档到期、任务被接管后，后续模型调用/工具执行/发送立即中止。
+- **有界上下文**：历史按字符预算装载，单条截断并写入 `task_step` 可回放。
+- **合理沉默**：群聊自动档、未被 @、低置信度时不回复，并记录「已评估未响应」。
 - **档位合并**：会话档位优先；contact / schedule / global 策略作为兜底并叠加约束。
 - **让位**：主人在该会话在线且正在输入时自动暂停；一键「接管」会取消任务并冷却 15 分钟。
 - **不确定即转人**：资金/法律场景直接转交；auto 档置信度 < 0.7 自动转草稿。
 - **记忆**：按对话对象隔离，敏感记忆不用于对外对话；「纠正」会写入偏好记忆。
-- **审计**：`audit_log` 追加式 + 哈希链。
+- **审计**：`audit_log` 追加式 + 哈希链；关键入口统一脱敏错误。
 - 数据库统一使用 **Drizzle ORM**：AI 表可写、core 表只读（outbox 除外），复杂 SQL 用 `sql` 模板表达。
+
+### 端云一体
+
+客户端（Web / Tauri / Expo）与云端共享同一个 Agent 身份、事实、授权和任务生命周期：
+
+- **消息幂等**：`Message.clientMsgId` 透出，客户端用它精确对账乐观消息；
+- **离线队列**：`CommandOutbox` 持久化，鉴权成功 / 恢复联网 / 回前台自动重放，服务端幂等；
+- **设备能力**：鉴权时上报平台、版本与能力位，写入 `device` 表，内部接口可查；
+- **服务端 epoch**：`auth_ok.serverEpoch` 变化时重置投影并拉快照，离线队列保留；
+- **多端一致**：所有客户端共享 seq / WS 补洞 / 同一套事件折叠逻辑。
+
+完整设计见 **[docs/client-cloud.md](docs/client-cloud.md)**。
 
 ### 客户端
 
@@ -212,6 +251,13 @@ scheduler：日报（每日 09:00）· 审批超时清理
 - 交互层级：`surface-veil → raised → hover → selected`；
 - 字体：Inter 优先、14px 基准、负字距、510/590 非标准字重、数字 `tabular-nums`；
 - 圆角梯度 6 / 8 / 10 / 12 / 16px（窗口 24px、胶囊 9999px）；阴影仅用于浮层；
+- 应用外壳：左侧 72px 图标栏（60px 内容 + 左右 6px 边距）+ 一张统一圆角卡片；
+- 聊天页三栏单卡：会话栏 272px | 聊天区 | 成员栏 300px，内部 1px 边框分隔；
+  会话栏与成员栏可拖拽调整宽度并持久化；会话栏只在「聊天」路由出现；
+- 头像：20 组 duotone 深色纯色，按首字母稳定取色，白色首字（英文大写）；
+- 控件高度与 Button 对齐：Input / Select 默认 32px、sm 28px；
+- Tabs 选中态基于 `aria-selected`（Base UI 不输出 `data-selected`）；
+- 桌面端通过 `data-tauri-drag-region` 提供标题栏/图标栏拖拽；
 - 分身强调色（`--agent-accent`）以 tint、角标、focus 边框小面积出现；
 - 移动端 `apps/mobile/src/theme.ts` 与 Web token 同源。
 
@@ -246,9 +292,11 @@ pnpm test:rust                                               # Rust 纯工具 + 
 测试分层：
 
 - **契约**（`packages/contract`）：fixtures zod 校验 + 内容预览降级文案；
-- **shared**（`packages/shared/test`）：聊天归约（排序/去重/未读/补拉）、格式化、存储适配、WS 首帧鉴权与重连；
-- **AI**（`ai/test`）：意图分类、输出护栏、记忆抽取、mock 模型、工具网关授权/风险分级、
-  策略引擎（档位/禁区/预算），以及任务断连恢复（租约围栏、检查点续跑、账本复用、
+- **shared**（`packages/shared/test`）：聊天归约（排序/去重/未读/补拉）、格式化、存储适配、
+  WS 首帧鉴权与重连、离线队列持久化/重放、pending 精确对账、头像首字母取色；
+- **AI**（`ai/test`）：意图分类与置信度、输出护栏、记忆抽取、mock 模型、工具网关授权/风险分级、
+  策略引擎（档位/禁区/预算）、权威分区、提示词预算、合理沉默、回合撤权、
+  审批参数指纹/操作者/过期/严格 JSON，以及任务断连恢复（租约围栏、检查点续跑、账本复用、
   非幂等不确定转人工、审批续跑中断不重复转账、陈旧任务丢弃）。
 - **Rust**（`core`）：ID/时间工具单测 + 与 TS 共用的契约 fixtures 往返。
 - AI 集成测试自带隔离夹具并在结束后清理；数据库不可用或未迁移时自动跳过。
@@ -295,8 +343,8 @@ Caddy 将 `/api/*`、`/ws` 反代到 `127.0.0.1:7100`，`/admin/*` 反代到 `12
 ### 品牌资产
 
 - 唯一源文件：`apps/desktop/icon-source.svg`
-- `pnpm icons` 重新生成桌面图标、Expo 图标与 Web favicon（依赖本机 Chrome，
-  可用 `CHROME_BIN=/path/to/chrome pnpm icons` 覆盖）
+- `pnpm icons` 重新生成桌面图标（macOS 824×824 圆角安全区）、Expo 图标（满幅方图，
+  由系统遮罩）与 Web favicon（依赖本机 Chrome，可用 `CHROME_BIN=/path/to/chrome pnpm icons` 覆盖）
 - 运行中 UI 使用内联 SVG 组件（`apps/web/src/components/ui/logo.tsx`、
   `apps/mobile/src/components/logo.tsx`），修改图形时需同步更新
 
@@ -316,10 +364,14 @@ Caddy 将 `/api/*`、`/ws` 反代到 `127.0.0.1:7100`，`/admin/*` 反代到 `12
 
 按「依赖最少、边界清晰」原则落地，以下能力预留接口但未实现：
 
-- **推送通道**：APNs / FCM 为 stub（device 表已登记）。
+- **推送通道**：APNs / FCM 为 stub（device 表与 `pushToken` 注册已就绪，客户端原生推送 SDK 未接）。
 - **对象存储 / 文件消息**：类型已注册（image / file），未实现上传服务。
+- **端侧动作桥接**：设备能力已上报，相机/文件/剪贴板等具体调用尚未接成工具。
+- **端到端加密**：未实现；当前为服务端可读模型。
+- **按设备已读位点**：当前按成员维度记录，未按设备拆分。
 - **向量检索**：`memory_item.embedding` 用 `REAL[]` + 应用层余弦，无需 pgvector；接口已隔离。
 - **邮件投递**：已接入 Resend HTTP API（配置 `RESEND_API_KEY` 即真实发送），未配置时退化为日志输出。
 - **审批卡片刷新**：批准后的结果以新消息呈现，未回写卡片内容。
 - **多租户 / RLS / DLP / 插件市场 / 多渠道网关**：未实现。
-- **大规模部署**：fanout 已具备 Redis 多节点语义，未做分片扇出。
+- **大规模部署**：fanout 已具备 Redis 多节点语义，未做分片扇出；多节点需统一 `SERVER_EPOCH`。
+- **桌面端原生能力**：目前仅窗口容器、拖拽与图标；托盘 / 原生通知 / 自动更新未接。

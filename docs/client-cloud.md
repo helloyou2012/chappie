@@ -288,6 +288,7 @@ biometrics     可以使用生物识别
 | 设备能力查询(内部接口)                  | `core/crates/internal-api/src/lib.rs`、`ai/src/common/internal.ts`                                  |
 | 服务端 epoch                            | `core/crates/chat/src/state.rs`、`core/crates/gateway/src/ws.rs`、`packages/shared/src/ws.ts`       |
 | 移动端前台恢复                          | `apps/mobile/app/_layout.tsx`、`apps/mobile/src/realtime.ts`                                        |
+| 桌面端平台识别                          | `apps/web/src/components/layout/app-shell.tsx`（`__TAURI_INTERNALS__`）                             |
 | 消息幂等键透出                          | `packages/contract/src/chat.ts`、`core/crates/chat/src/model.rs`、`core/crates/chat/src/message.rs` |
 | 单写者消息 + seq + outbox               | `core/crates/chat/src/message.rs`                                                                   |
 | AI 旁路消费 + 租约 + 恢复               | `ai/src/outbox-worker.ts`、`ai/src/common/task-lease.ts`、`ai/src/recovery.ts`                      |
@@ -306,6 +307,7 @@ biometrics     可以使用生物识别
 | WS 无服务端 epoch          | `auth_ok` 返回 `serverEpoch`;客户端在变化时重置投影并拉快照                           |
 | 移动端前后台切换无恢复逻辑 | `AppState` 监听;回前台重连或重放队列                                                  |
 | 乐观消息主要靠内容匹配     | 优先 `clientMsgId` 精确对账,内容匹配仅作旧服务端兜底                                  |
+| 桌面端被误识别为 web       | AppShell 按 Tauri 运行时标记传 `platform=desktop`;设备注册与能力上报正确              |
 
 ---
 
@@ -333,6 +335,7 @@ biometrics     可以使用生物识别
 - [x] Agent 在云端继续执行,客户端可观察、审批、取消、接管。
 - [x] 审批跨端一致,参数不可偷换,非审批人不能批准。
 - [x] 端侧能力调用受权限、审批、审计约束。
+- [x] 桌面端以 `desktop` 平台注册,与 Web / 移动端共享同一会话。
 - [x] 云端 AI 故障时,聊天收发不受影响。
 - [x] 错误与日志统一脱敏。
 - [ ] 推送实际投递(待 provider 配置)。

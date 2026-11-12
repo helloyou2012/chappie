@@ -1178,24 +1178,25 @@ AI 主动发消息很容易变成骚扰;通知来源不可信、无法追溯、�
 
 ### 9.1 已落地
 
-| 设计精髓          | 当前实现                                                                         |
-| ----------------- | -------------------------------------------------------------------------------- |
-| 署名与权威分离    | `ai/src/trust.ts` 的 `authorityOf()`;提示词分区与数据区转义在 `ai/src/prompt.ts` |
-| 有界上下文        | `ai/src/prompt.ts`:条数 + 字符预算 + 截断统计,写入 `task_step`                   |
-| 审批即数据        | `ai/src/approval.ts`:canonical args hash + 域分离;审批迁移原子更新指纹           |
-| 修改后批准        | 严格 JSON + `tool.validate` 规范化;拒绝非对象/空对象/截断 JSON                   |
-| 审批只认人        | `resumeFromApproval` 校验 `actorId === approver`;过期审批不执行                  |
-| 一次性执行        | `tool_pending` 意图标记 + 条件状态迁移;恢复路径同样校验                          |
-| 结果未知          | 幂等账本三态:确定未执行/确定已执行/不确定;不确定转人工                           |
-| 租约与围栏        | `ai/src/common/task-lease.ts`;恢复写入条件更新 0 行即让位                        |
-| 重启调和          | `ai/src/recovery.ts`:检查点续跑、审批续跑、未起步重驱、时效丢弃                  |
-| 回合级撤权        | `ai/src/turn-guard.ts`:冻结/静默/临时档到期/任务被接管                           |
-| 合理沉默          | `ai/src/silence.ts` + `classifier.confidence` + `pipeline` 接线                  |
-| 错误消毒          | `ai/src/trust.ts` 的 `redactSecrets()`;任务/恢复/审批错误落库前脱敏              |
-| 单写者与事实源    | Rust 核心消息写入 + seq + outbox;AI 层经内部接口发送                             |
-| AI 旁路           | outbox 异步消费;AI 故障不影响聊天                                                |
-| 契约先行          | `packages/contract` zod 唯一真相 + fixtures 往返校验                             |
-| 条件能力段/反幻觉 | `buildSystemPrompt` 的数据/指令声明与「无工具证据不得声称已执行」                |
+| 设计精髓          | 当前实现                                                                            |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| 署名与权威分离    | `ai/src/trust.ts` 的 `authorityOf()`;提示词分区与数据区转义在 `ai/src/prompt.ts`    |
+| 有界上下文        | `ai/src/prompt.ts`:条数 + 字符预算 + 截断统计,写入 `task_step`                      |
+| 审批即数据        | `ai/src/approval.ts`:canonical args hash + 域分离;审批迁移原子更新指纹              |
+| 修改后批准        | 严格 JSON + `tool.validate` 规范化;拒绝非对象/空对象/截断 JSON                      |
+| 审批只认人        | `resumeFromApproval` 校验 `actorId === approver`;过期审批不执行                     |
+| 一次性执行        | `tool_pending` 意图标记 + 条件状态迁移;恢复路径同样校验                             |
+| 结果未知          | 幂等账本三态:确定未执行/确定已执行/不确定;不确定转人工                              |
+| 租约与围栏        | `ai/src/common/task-lease.ts`;恢复写入条件更新 0 行即让位                           |
+| 重启调和          | `ai/src/recovery.ts`:检查点续跑、审批续跑、未起步重驱、时效丢弃                     |
+| 回合级撤权        | `ai/src/turn-guard.ts`:冻结/静默/临时档到期/任务被接管                              |
+| 合理沉默          | `ai/src/silence.ts` + `classifier.confidence` + `pipeline` 接线                     |
+| 错误消毒          | `ai/src/trust.ts` 的 `redactSecrets()`;任务/恢复/审批错误落库前脱敏                 |
+| 单写者与事实源    | Rust 核心消息写入 + seq + outbox;AI 层经内部接口发送                                |
+| AI 旁路           | outbox 异步消费;AI 故障不影响聊天                                                   |
+| 契约先行          | `packages/contract` zod 唯一真相 + fixtures 往返校验                                |
+| 条件能力段/反幻觉 | `buildSystemPrompt` 的数据/指令声明与「无工具证据不得声称已执行」                   |
+| 端云一体          | `clientMsgId` 精确对账;`CommandOutbox` 离线重放;设备能力上报;`serverEpoch` 快照重建 |
 
 ### 9.2 部分落地 / 可增强
 
@@ -1236,3 +1237,8 @@ AI 主动发消息很容易变成骚扰;通知来源不可信、无法追溯、�
 6. **撤权检查每次需要多次小查询**;若成为热点,可合并为一条 join 查询。
 7. **冻结接口跨库写入不是原子的**。先冻结核心主体、再更新 AI 侧状态;若第二步失败,撤权守卫可能仍看到 active,需要顺序调整或补偿。
 8. **群聊的多人审批策略尚未实现**。当前审批人为主人;群管理员、委托、法定人数是后续能力。
+9. **推送投递尚未接入 provider**。设备注册与 `pushToken` 字段已就绪,客户端原生推送 SDK 未接。
+10. **端到端加密未实现**。当前为服务端可读模型;如需 E2E,需要端侧推理或可信执行环境。
+11. **端侧动作桥接未实现**。能力清单已上报,相机、文件、剪贴板等具体调用尚未接成工具。
+12. **按设备已读位点未实现**。当前按成员维度记录,多设备精细未读需增加 `device_read`。
+13. **文件/图片上传未实现**。内容类型已注册,上传服务与对象存储未接。

@@ -1,4 +1,5 @@
 export * from './api';
+export * from './avatar';
 export * from './constants';
 export * from './datetime';
 export * from './device';

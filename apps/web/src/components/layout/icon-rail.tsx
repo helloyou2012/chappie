@@ -52,27 +52,21 @@ export function IconRail() {
 
   return (
     <aside
+      data-tauri-drag-region
       className={cn(
-        'relative flex w-16 shrink-0 flex-col items-center gap-1 border-r border-line bg-canvas/90 pb-3',
+        'relative mx-1.5 flex w-15 shrink-0 flex-col items-center gap-1 pb-3',
         isMacDesktop ? 'pt-10' : 'pt-3',
       )}
     >
-      {isMacDesktop ? (
-        <div
-          data-tauri-drag-region
-          className="absolute inset-x-0 top-0 h-7 select-none"
-          aria-hidden
-        />
-      ) : null}
       <Link
         to="/chat"
         aria-label="Chappie"
-        className="mb-2 flex h-9 w-12 items-center justify-center"
+        className="mb-3 flex h-10 w-14 items-center justify-center"
       >
-        <Logo className="h-7 w-auto" />
+        <Logo className="h-8 w-8" />
       </Link>
 
-      <nav className="flex flex-col items-center gap-1">
+      <nav data-tauri-drag-region className="flex flex-col items-center gap-1">
         {ITEMS.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
@@ -81,28 +75,30 @@ export function IconRail() {
             aria-label={label}
             className={({ isActive }) =>
               cn(
-                'flex size-8 items-center justify-center rounded-md transition-colors duration-150',
+                'flex w-14 flex-col items-center gap-1 rounded-xl py-2 text-[11px] leading-none transition-colors duration-150',
                 isActive
-                  ? 'bg-surface-selected text-ink'
-                  : 'text-ink-tertiary hover:bg-surface-hover hover:text-ink',
+                  ? 'bg-panel text-ink shadow-card'
+                  : 'text-ink-tertiary hover:bg-surface-veil hover:text-ink',
               )
             }
           >
-            <Icon className="size-[18px]" />
+            <Icon className="size-5" />
+            <span>{label}</span>
           </NavLink>
         ))}
       </nav>
 
-      <div className="flex-1" />
+      <div data-tauri-drag-region className="flex-1" />
 
       <button
         type="button"
         onClick={() => setTheme(toggleTheme() === 'dark' ? 'dark' : 'light')}
-        className="flex size-8 items-center justify-center rounded-md text-ink-quaternary transition-colors hover:bg-surface-hover hover:text-ink"
+        className="flex w-14 flex-col items-center gap-1 rounded-xl py-2 text-[11px] leading-none text-ink-quaternary transition-colors hover:bg-surface-veil hover:text-ink"
         aria-label="切换主题"
         title="切换主题"
       >
-        {theme === 'dark' ? <RiSunLine className="size-4" /> : <RiMoonLine className="size-4" />}
+        {theme === 'dark' ? <RiSunLine className="size-5" /> : <RiMoonLine className="size-5" />}
+        <span>主题</span>
       </button>
 
       <DropdownMenu>
@@ -115,7 +111,7 @@ export function IconRail() {
             />
           }
         >
-          <UserAvatar name={user?.name ?? '?'} className="size-8" />
+          <UserAvatar name={user?.name ?? '?'} className="size-9" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
           <div className="px-2 py-1.5">

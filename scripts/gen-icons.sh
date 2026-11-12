@@ -4,9 +4,9 @@
 # 源文件：
 #   apps/desktop/icon-source.svg   （唯一品牌源）
 # 产物：
-#   apps/desktop/src-tauri/icons/* （Tauri 桌面图标）
+#   apps/desktop/src-tauri/icons/* （Tauri 桌面图标，macOS 圆角安全区）
 #   apps/desktop/src-tauri/icon.png（1024 渲染图，tauri icon 输入）
-#   apps/mobile/assets/icon.png    （Expo 应用图标）
+#   apps/mobile/assets/icon.png    （Expo 应用图标，满幅方图，由系统遮罩）
 #   apps/web/public/logo.svg       （favicon，与源文件同步）
 #
 # 用法：pnpm icons
@@ -17,9 +17,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$ROOT/apps/desktop/icon-source.svg"
 CHROME="${CHROME_BIN:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
-TMP_HTML="$(mktemp /tmp/chappie-icon-XXXXXX.html)"
+TMP_ICON_HTML="$(mktemp /tmp/chappie-icon-XXXXXX.html)"
+TMP_MOBILE_HTML="$(mktemp /tmp/chappie-mobile-icon-XXXXXX.html)"
 TMP_PNG="$(mktemp /tmp/chappie-icon-XXXXXX.png)"
-trap 'rm -f "$TMP_HTML" "$TMP_PNG"' EXIT
+TMP_MOBILE_PNG="$(mktemp /tmp/chappie-mobile-icon-XXXXXX.png)"
+trap 'rm -f "$TMP_ICON_HTML" "$TMP_MOBILE_HTML" "$TMP_PNG" "$TMP_MOBILE_PNG"' EXIT
 
 if [[ ! -f "$SRC" ]]; then
   echo "✗ 缺少品牌源文件: $SRC" >&2
@@ -32,17 +34,32 @@ if [[ ! -x "$CHROME" ]]; then
   exit 1
 fi
 
-# 白底 1024 画布 + 居中 700px 的 SVG（宽度由外层容器控制）
+# 桌面图标：824×824 圆角方（macOS Big Sur 图标网格）+ 透明外边距。
+# 不直接把整个 1024 画布填满，否则 Dock / Finder 里会显示为方形白块。
+{
+  echo '<!doctype html><html><body style="margin:0;width:1024px;height:1024px;display:flex;align-items:center;justify-content:center;background:transparent">'
+  echo '<div style="width:824px;height:824px;border-radius:185px;overflow:hidden;background:linear-gradient(180deg,#ffffff 0%,#f3f6fc 100%);display:flex;align-items:center;justify-content:center">'
+  echo '<div style="width:560px">'
+  sed 's/width="100%"/width="100%" style="display:block;width:100%;height:auto"/' "$SRC"
+  echo '</div></div></body></html>'
+} > "$TMP_ICON_HTML"
+
+# 移动端图标：满幅白底方图，交给 iOS / Android 自己的圆角/自适应遮罩处理。
 {
   echo '<!doctype html><html><body style="margin:0;width:1024px;height:1024px;display:flex;align-items:center;justify-content:center;background:#ffffff">'
   echo '<div style="width:700px">'
   sed 's/width="100%"/width="100%" style="display:block;width:100%;height:auto"/' "$SRC"
   echo '</div></body></html>'
-} > "$TMP_HTML"
+} > "$TMP_MOBILE_HTML"
 
-echo "→ 渲染 1024×1024 PNG …"
+echo "→ 渲染桌面图标 1024×1024 PNG（透明圆角）…"
 "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
-  --screenshot="$TMP_PNG" --window-size=1024,1024 "file://$TMP_HTML" >/dev/null 2>&1
+  --default-background-color=00000000 \
+  --screenshot="$TMP_PNG" --window-size=1024,1024 "file://$TMP_ICON_HTML" >/dev/null 2>&1
+
+echo "→ 渲染移动端图标 1024×1024 PNG（满幅方图）…"
+"$CHROME" --headless=new --disable-gpu --hide-scrollbars \
+  --screenshot="$TMP_MOBILE_PNG" --window-size=1024,1024 "file://$TMP_MOBILE_HTML" >/dev/null 2>&1
 
 echo "→ 生成 Tauri 图标 …"
 cp "$TMP_PNG" "$ROOT/apps/desktop/src-tauri/icon.png"
@@ -50,7 +67,7 @@ cp "$TMP_PNG" "$ROOT/apps/desktop/src-tauri/icon.png"
 
 echo "→ 生成 Expo 图标 …"
 mkdir -p "$ROOT/apps/mobile/assets"
-cp "$TMP_PNG" "$ROOT/apps/mobile/assets/icon.png"
+cp "$TMP_MOBILE_PNG" "$ROOT/apps/mobile/assets/icon.png"
 
 echo "→ 同步 favicon …"
 cp "$SRC" "$ROOT/apps/web/public/logo.svg"

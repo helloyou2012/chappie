@@ -113,13 +113,13 @@ export function ChatInput({ convId, members, replyTo, onCancelReply }: ChatInput
   };
 
   return (
-    <div className="relative z-1 px-4 pb-3">
+    <div className="relative z-1 px-3 pb-3">
       {/* 消息流渐隐层：贴在输入面板上方，四段渐变融入背景 */}
       <div
         aria-hidden
         className="composer-fade pointer-events-none absolute inset-x-0 bottom-full h-8"
       />
-      <div className="relative rounded-xl border border-line/70 bg-elevated/60 transition-colors focus-within:border-[color-mix(in_srgb,var(--brand)_45%,transparent)]">
+      <div className="relative rounded-2xl border border-line/70 bg-panel/95 shadow-pop transition-colors focus-within:border-[color-mix(in_srgb,var(--brand)_45%,transparent)]">
         {/* 回复条（面板内顶部） */}
         {replyTo ? (
           <div className="mx-2 mt-2 flex items-center gap-2 rounded-md border-l-2 border-brand bg-surface-veil px-2.5 py-1.5 text-[12px]">
@@ -180,9 +180,9 @@ export function ChatInput({ convId, members, replyTo, onCancelReply }: ChatInput
             }
             if (e.key === 'Escape') setMentionQuery(null);
           }}
-          placeholder="输入消息，@ 提及成员或对方的分身…"
+          placeholder="发消息，或 @ 提及成员…"
           rows={Math.min(5, Math.max(1, text.split('\n').length))}
-          className="block max-h-40 min-h-[44px] w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-[14px] leading-[1.5] text-ink placeholder:text-ink-quaternary focus-visible:outline-none"
+          className="block max-h-40 min-h-[48px] w-full resize-none bg-transparent px-4 pb-1 pt-3.5 text-[14px] leading-[1.5] text-ink placeholder:text-ink-quaternary focus-visible:outline-none"
         />
 
         {/* 已选提及 */}
@@ -210,7 +210,7 @@ export function ChatInput({ convId, members, replyTo, onCancelReply }: ChatInput
         ) : null}
 
         {/* 工具行：左提示 / 右发送 */}
-        <div className="flex items-center justify-between gap-2 px-2 pb-2">
+        <div className="flex items-center justify-between gap-2 px-2.5 pb-2">
           <div className="flex min-w-0 items-center gap-1">
             <button
               type="button"

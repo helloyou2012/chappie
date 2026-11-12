@@ -120,7 +120,7 @@ export function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"
-                    className="h-9 pl-8"
+                    className="pl-8"
                     required
                   />
                 </div>

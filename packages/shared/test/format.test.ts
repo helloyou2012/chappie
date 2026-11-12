@@ -23,15 +23,15 @@ describe('truncate', () => {
 
 describe('initials', () => {
   test('英文多词取首字母且大写', () => {
-    expect(initials('alice bob')).toBe('AB');
+    expect(initials('alice bob')).toBe('A');
   });
 
   test('英文单词取首字母', () => {
     expect(initials('alice')).toBe('A');
   });
 
-  test('中文取前两个字', () => {
-    expect(initials('张三丰')).toBe('张三');
+  test('中文取第一个字', () => {
+    expect(initials('张三丰')).toBe('张');
   });
 
   test('空字符串返回问号', () => {

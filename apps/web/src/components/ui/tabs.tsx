@@ -20,7 +20,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof BaseTa
   return (
     <BaseTabs.Tab
       className={cn(
-        'inline-flex h-7 items-center justify-center whitespace-nowrap rounded-sm px-2.5 text-xs font-medium transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-[selected]:bg-surface-raised data-[selected]:text-ink',
+        'inline-flex h-7 items-center justify-center whitespace-nowrap rounded-sm px-2.5 text-xs font-medium transition-colors hover:text-ink-secondary focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 aria-selected:bg-surface-selected aria-selected:text-ink aria-selected:hover:text-ink',
         className,
       )}
       {...props}

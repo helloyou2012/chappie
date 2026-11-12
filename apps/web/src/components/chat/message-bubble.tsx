@@ -45,11 +45,15 @@ export function MessageBubble({
   showSender = true,
   onReply,
 }: MessageBubbleProps) {
-  const myId = useAuthStore((s) => s.user?.id ?? '');
+  const me = useAuthStore((s) => s.user);
+  const myId = me?.id ?? '';
   const mine = message.senderId === myId;
   const isAvatar = message.senderType === 'avatar';
   const sender = members?.find((m) => m.principalId === message.senderId);
+  // 展示名与头像取色名分离：自己显示「我」，但头像必须用真实名称，
+  // 否则同一个人在消息流、成员栏、账户菜单会得到不同颜色。
   const senderName = mine ? '我' : (sender?.name ?? '成员');
+  const avatarName = mine ? (sender?.name ?? me?.name ?? '我') : (sender?.name ?? '成员');
   const canRecall = mine || message.onBehalfOf === myId;
 
   const [showExplain, setShowExplain] = useState(false);
@@ -88,7 +92,7 @@ export function MessageBubble({
     >
       {showSender ? (
         <UserAvatar
-          name={senderName}
+          name={avatarName}
           variant={isAvatar ? 'avatar' : 'human'}
           className="mt-4 size-8"
         />

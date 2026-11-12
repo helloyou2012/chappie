@@ -1,5 +1,6 @@
 import {
   api,
+  avatarColor,
   type ConversationView,
   formatTime,
   type User,
@@ -27,7 +28,7 @@ function ConvRow({
   const isSelf = view.conversation.systemTag === 'avatar_self';
   const preview = view.lastMsgPreview ?? '暂无消息';
   const fromMe = view.lastMsgSenderId === myId;
-  const initial = view.displayTitle.slice(0, 2);
+  const initial = (Array.from(view.displayTitle.trim())[0] ?? '?').toUpperCase();
 
   return (
     <Pressable
@@ -46,14 +47,12 @@ function ConvRow({
           width: 48,
           height: 48,
           borderRadius: 16,
-          backgroundColor: isSelf ? t.primary : t.bubble,
+          backgroundColor: avatarColor(view.displayTitle),
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <Text style={{ fontSize: 16, fontWeight: '600', color: isSelf ? t.primaryFg : t.text }}>
-          {isSelf ? 'AI' : initial}
-        </Text>
+        <Text style={{ fontSize: 16, fontWeight: '600', color: '#ffffff' }}>{initial}</Text>
       </View>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>

@@ -78,9 +78,10 @@ export function ReportsPage() {
           <div className="flex items-center gap-2">
             <Input
               type="date"
+              inputSize="sm"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="h-9 w-40"
+              className="w-40"
             />
             <Button variant="outline" size="sm" onClick={() => void load(date)} disabled={loading}>
               {loading ? (

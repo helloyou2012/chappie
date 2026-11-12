@@ -36,15 +36,9 @@ export function truncate(text: string, max = 40): string {
   return `${text.slice(0, max)}…`;
 }
 
+/** 头像占位字符：取第一个字符，英文自动大写。 */
 export function initials(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return '?';
-  return /^[\x00-\x7F]+$/.test(trimmed)
-    ? trimmed
-        .split(/\s+/)
-        .map((s) => s[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 2)
-    : trimmed.slice(0, 2);
+  return (Array.from(trimmed)[0] ?? '?').toUpperCase();
 }

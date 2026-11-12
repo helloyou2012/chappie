@@ -1,6 +1,6 @@
 import { useAuthStore, useChatStore } from '@chappie/shared';
 import { useEffect } from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { IconRail } from '@/components/layout/icon-rail';
 import { Sidebar } from '@/components/layout/sidebar';
 import { toast } from '@/components/ui/toast';
@@ -10,6 +10,9 @@ export function AppShell() {
   const status = useAuthStore((s) => s.status);
   const token = useAuthStore((s) => s.token);
   const loadConversations = useChatStore((s) => s.loadConversations);
+  const location = useLocation();
+  // 会话列表只在「聊天」路由出现；审批/分身/日报直接占满内容卡片
+  const showConversations = location.pathname.startsWith('/chat');
 
   useEffect(() => {
     if (status !== 'ready' || !token) return;
@@ -26,12 +29,14 @@ export function AppShell() {
   if (status !== 'ready') return <Navigate to="/login" replace />;
 
   return (
-    <div className="flex h-full overflow-hidden bg-canvas">
+    <div className="flex h-full overflow-hidden bg-canvas py-1 pr-1">
       <IconRail />
-      <Sidebar />
-      <main className="flex min-w-0 flex-1 flex-col bg-view">
-        <Outlet />
-      </main>
+      <section className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-line bg-view shadow-card">
+        {showConversations ? <Sidebar /> : null}
+        <main className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <Outlet />
+        </main>
+      </section>
     </div>
   );
 }
