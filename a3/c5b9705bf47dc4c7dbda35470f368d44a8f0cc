@@ -1,0 +1,21 @@
+apps/web/src/components/layout/app-shell.tsx
+  s_16c95b141fcac1::t_0fdf5532ac4747 16-19
+apps/web/src/components/layout/icon-rail.tsx
+  s_16c95b141fcac1::t_cc892a1e93263b 47-51,54-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a3c5b9705bf47dc4c7dbda35470f368d44a8f0cc",
+  "prompts": {},
+  "sessions": {
+    "s_16c95b141fcac1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d3e86229-78e0-4842-9cbf-7939502859a8",
+        "model": "deepseek-flash"
+      },
+      "human_author": "helloyou2012 <helloyou2012@yeah.net>"
+    }
+  }
+}
