@@ -46,4 +46,5 @@ export const STORAGE_KEYS = {
   serverUrl: 'chappie.serverUrl',
   adminUrl: 'chappie.adminUrl',
   draftPrefix: 'chappie.draft.',
+  serverEpoch: 'chappie.serverEpoch',
 } as const;

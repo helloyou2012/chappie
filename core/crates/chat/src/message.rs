@@ -134,6 +134,7 @@ pub async fn send_message(db: &Db, cfg: &Config, events: &EventTx, p: SendParams
         msg_id: msg_id.clone(),
         conv_id: p.conv_id.clone(),
         seq,
+        client_msg_id: Some(p.client_msg_id.clone()),
         sender_id: p.sender.id.clone(),
         sender_type: p.sender.principal_type.clone(),
         on_behalf_of: p.on_behalf_of.clone(),

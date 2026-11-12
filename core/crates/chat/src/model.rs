@@ -247,6 +247,9 @@ pub struct Message {
     pub msg_id: String,
     pub conv_id: String,
     pub seq: i64,
+    /// 客户端幂等键：用于客户端把乐观消息与服务端消息精确对账
+    #[serde(default)]
+    pub client_msg_id: Option<String>,
     pub sender_id: String,
     pub sender_type: String,
     #[serde(default)]
@@ -269,6 +272,7 @@ pub struct MessageRow {
     pub msg_id: String,
     pub conv_id: String,
     pub seq: i64,
+    pub client_msg_id: String,
     pub sender_id: String,
     pub sender_type: String,
     pub on_behalf_of: Option<String>,
@@ -301,6 +305,7 @@ impl TryFrom<MessageRow> for Message {
             msg_id: row.msg_id,
             conv_id: row.conv_id,
             seq: row.seq,
+            client_msg_id: Some(row.client_msg_id),
             sender_id: row.sender_id,
             sender_type: row.sender_type,
             on_behalf_of: row.on_behalf_of,
@@ -382,6 +387,10 @@ pub enum ClientFrame {
         platform: String,
         #[serde(default)]
         device_id: Option<String>,
+        #[serde(default)]
+        app_version: Option<String>,
+        #[serde(default)]
+        capabilities: Option<serde_json::Value>,
     },
     Heartbeat {
         #[allow(dead_code)]
@@ -424,6 +433,7 @@ pub enum ServerFrame {
     AuthOk {
         user: UserApi,
         server_time: String,
+        server_epoch: String,
     },
     AuthError {
         message: String,

@@ -147,18 +147,76 @@ async fn create_user(db: &Db, email: &str) -> AppResult<User> {
     Ok(user)
 }
 
-pub async fn register_device(db: &Db, user_id: &str, device_id: &str, platform: &str, push_token: Option<&str>) -> AppResult<()> {
+pub async fn register_device(
+    db: &Db,
+    user_id: &str,
+    device_id: &str,
+    platform: &str,
+    push_token: Option<&str>,
+    capabilities: Option<&serde_json::Value>,
+    app_version: Option<&str>,
+) -> AppResult<()> {
     sqlx::query(
-        "INSERT INTO device (user_id, device_id, platform, push_token, updated_at)
-         VALUES ($1, $2, $3, $4, now())
-         ON CONFLICT (user_id, device_id) DO UPDATE SET platform = $3, push_token = $4, updated_at = now()",
+        "INSERT INTO device (user_id, device_id, platform, push_token, capabilities, app_version, updated_at)
+         VALUES ($1, $2, $3, $4, COALESCE($5, '{}'::jsonb), $6, now())
+         ON CONFLICT (user_id, device_id) DO UPDATE SET
+           platform = $3,
+           push_token = COALESCE($4, device.push_token),
+           capabilities = COALESCE($5, device.capabilities),
+           app_version = COALESCE($6, device.app_version),
+           updated_at = now()",
     )
     .bind(user_id)
     .bind(device_id)
     .bind(platform)
     .bind(push_token)
+    .bind(capabilities)
+    .bind(app_version)
     .execute(&db.pg)
     .await?;
     // TODO(生产): push_token 到达时接入 APNs / FCM / 厂商通道（设计方案 §25.1 push crate 预留）
     Ok(())
+}
+
+/// 设备视图（内部接口 / 控制台用）
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceView {
+    pub device_id: String,
+    pub platform: String,
+    pub app_version: Option<String>,
+    pub capabilities: serde_json::Value,
+    pub push_token: Option<String>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct DeviceRow {
+    device_id: String,
+    platform: String,
+    app_version: Option<String>,
+    capabilities: serde_json::Value,
+    push_token: Option<String>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn list_devices(db: &Db, user_id: &str) -> AppResult<Vec<DeviceView>> {
+    let rows = sqlx::query_as::<_, DeviceRow>(
+        "SELECT device_id, platform, app_version, capabilities, push_token, updated_at
+         FROM device WHERE user_id = $1 ORDER BY updated_at DESC",
+    )
+    .bind(user_id)
+    .fetch_all(&db.pg)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| DeviceView {
+            device_id: r.device_id,
+            platform: r.platform,
+            app_version: r.app_version,
+            capabilities: r.capabilities,
+            push_token: r.push_token,
+            updated_at: time::iso(r.updated_at),
+        })
+        .collect())
 }

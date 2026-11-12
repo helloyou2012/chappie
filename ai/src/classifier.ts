@@ -15,6 +15,8 @@ export interface Classification {
   needReply: boolean;
   /** 命中的敏感话题（money/health/legal/privacy） */
   topics: string[];
+  /** 规则置信度（0..1）：用于群聊自动档的「合理沉默」与审计 */
+  confidence: number;
   /** 供审计/回放的一句话摘要 */
   summary: string;
 }
@@ -56,12 +58,24 @@ export function classify(text: string): Classification {
   const needReply =
     intent === 'question' || intent === 'task' || urgency === 'high' || intent === 'emotion';
 
+  // 规则强度：越明确的请求置信度越高；极短/纯问号消息更低（供合理沉默使用）
+  let confidence = 0.5;
+  if (QUESTION_RE.test(text)) confidence += 0.2;
+  if (TASK_RE.test(text)) confidence += 0.25;
+  if (URGENT_RE.test(text)) confidence += 0.3;
+  if (ANGRY_RE.test(text)) confidence += 0.3;
+  const compact = text.replace(/\s+/g, '');
+  if (compact.length < 4) confidence -= 0.2;
+  if (/^[?？]+$/.test(compact)) confidence -= 0.3;
+  confidence = Math.max(0, Math.min(1, confidence));
+
   return {
     intent,
     urgency,
     sentiment,
     needReply,
     topics,
+    confidence,
     summary: text.replace(/\s+/g, ' ').slice(0, 80),
   };
 }

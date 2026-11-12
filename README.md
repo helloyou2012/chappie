@@ -7,6 +7,8 @@
 ## 文档
 
 - **[docs/system-design.md](docs/system-design.md)** — 系统设计方案
+- **[docs/design-essence.md](docs/design-essence.md)** — 设计精髓与落地
+- **[docs/client-cloud.md](docs/client-cloud.md)** — 端云一体设计
 - **[docs/ui-guidelines.md](docs/ui-guidelines.md)** — UI 规范
 
 ## 架构
@@ -133,17 +135,17 @@ MODEL_NAME=gpt-4o-mini
 
 ### 端口与环境变量
 
-| 变量                 | 默认                                                 | 说明                                                   |
-| -------------------- | ---------------------------------------------------- | ------------------------------------------------------ |
-| `GATEWAY_PORT`       | 7100                                                 | im-core 对外 HTTP/WS（避开 macOS AirPlay 占用的 7000） |
-| `INTERNAL_PORT`      | 7001                                                 | im-core 内部 API（仅 127.0.0.1）                       |
-| `ADMIN_PORT`         | 7002                                                 | ai-platform 控制台 API                                 |
-| `DATABASE_URL`       | `postgres://chappie:chappie@127.0.0.1:15432/chappie` | compose 映射到 15432，避免与本机 PG 冲突               |
-| `REDIS_URL`          | `redis://127.0.0.1:6379`                             |                                                        |
-| `AUTH_CODE_DEV_ECHO` | `true`                                               | 开发模式验证码回显（生产请关闭并配置 `RESEND_API_KEY`）|
-| `RESEND_API_KEY`     | 空                                                   | Resend API key；配置后验证码通过邮件发送               |
-| `MAIL_FROM`          | `Chappie <no-reply@chappie.run>`                     | 发件人（域名需在 Resend 验证）                         |
-| `MAX_HOP_COUNT`      | 3                                                    | AI 对 AI 最大跳数                                      |
+| 变量                 | 默认                                                 | 说明                                                    |
+| -------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
+| `GATEWAY_PORT`       | 7100                                                 | im-core 对外 HTTP/WS（避开 macOS AirPlay 占用的 7000）  |
+| `INTERNAL_PORT`      | 7001                                                 | im-core 内部 API（仅 127.0.0.1）                        |
+| `ADMIN_PORT`         | 7002                                                 | ai-platform 控制台 API                                  |
+| `DATABASE_URL`       | `postgres://chappie:chappie@127.0.0.1:15432/chappie` | compose 映射到 15432，避免与本机 PG 冲突                |
+| `REDIS_URL`          | `redis://127.0.0.1:6379`                             |                                                         |
+| `AUTH_CODE_DEV_ECHO` | `true`                                               | 开发模式验证码回显（生产请关闭并配置 `RESEND_API_KEY`） |
+| `RESEND_API_KEY`     | 空                                                   | Resend API key；配置后验证码通过邮件发送                |
+| `MAIL_FROM`          | `Chappie <no-reply@chappie.run>`                     | 发件人（域名需在 Resend 验证）                          |
+| `MAX_HOP_COUNT`      | 3                                                    | AI 对 AI 最大跳数                                       |
 
 ## 实现要点
 
@@ -267,10 +269,10 @@ pnpm test:rust                                               # Rust 纯工具 + 
 
 需要在仓库 Settings → Environments → `deploy`（或仓库级）配置：
 
-| 名称 | 类型 | 说明 |
-| --- | --- | --- |
-| `DEPLOY_HOST` | Variable | 服务器地址（如 `13.158.45.159`），工作流以 `vars.DEPLOY_HOST` 引用 |
-| `DEPLOY_SSH_KEY` | Secret | 部署用 SSH 私钥全文 |
+| 名称             | 类型     | 说明                                                               |
+| ---------------- | -------- | ------------------------------------------------------------------ |
+| `DEPLOY_HOST`    | Variable | 服务器地址（如 `13.158.45.159`），工作流以 `vars.DEPLOY_HOST` 引用 |
+| `DEPLOY_SSH_KEY` | Secret   | 部署用 SSH 私钥全文                                                |
 
 注意：environment 级 secrets/variables 要到 job 启动后才解析，不能在 job 级 `if`
 中引用；工作流已改为 step 级引用，并在预检步骤对缺失给出明确报错。

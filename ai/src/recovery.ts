@@ -13,7 +13,7 @@
  *   C 未起步    → 无任何副作用，driveTask 从头重驱（策略/护栏重新生效）
  */
 
-import type { Message } from '@chappie/contract';
+import type { AvatarMode, Message } from '@chappie/contract';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   addStep,
@@ -23,7 +23,7 @@ import {
   runAfterApproval,
   runAgent,
 } from './agent-runtime';
-import { createApproval, setApprovalResult } from './approval';
+import { createApproval, setApprovalResult, verifyApprovalArgs } from './approval';
 import { classify } from './classifier';
 import { config } from './common/config';
 import { dayjs } from './common/datetime';
@@ -38,10 +38,12 @@ import {
   RUNTIME_ID,
   withLease,
 } from './common/task-lease';
-import { agentTask, approval, taskStep } from './db/schema';
+import { agentTask, approval, conversation, taskStep } from './db/schema';
 import type { ChatMessage, ToolCall } from './model-gateway';
 import { driveTask, SemaphoreFullError } from './pipeline';
 import { executeTool, getTool, prepareToolCall } from './tool-gateway';
+import { redactSecrets } from './trust';
+import { assertTurnAllowed, TurnRevokedError } from './turn-guard';
 
 /** 认领到的孤儿任务行 */
 type OrphanRow = {
@@ -254,6 +256,24 @@ async function recoverFromCheckpoint(
   const toolsUsed = [...cp.toolsUsed];
 
   for (const call of dangling) {
+    // 回合级撤权：恢复路径同样必须在每次工具执行前确认
+    try {
+      await assertTurnAllowed({
+        taskId: task.id,
+        avatarId: task.avatarId,
+        ownerId: task.ownerId,
+        convId: task.triggerConvId ?? '',
+        expectedMode: cp.mode,
+        phase: 'run',
+      });
+    } catch (e) {
+      if (e instanceof TurnRevokedError) {
+        await handoverRevoked(task, e.reason);
+        return;
+      }
+      throw e;
+    }
+
     const tool = getTool(call.name);
     if (!toolsUsed.includes(call.name)) toolsUsed.push(call.name);
 
@@ -390,12 +410,20 @@ async function recoverFromCheckpoint(
   const semKey = aiKeys.semAvatar(task.avatarId);
   if (!(await redisSemaphoreAcquire(semKey, 2, 180))) throw new SemaphoreFullError(task.id);
   try {
+    const convRows = await db
+      .select({ type: conversation.type })
+      .from(conversation)
+      .where(eq(conversation.id, task.triggerConvId ?? ''))
+      .limit(1);
+    const convType = (convRows[0]?.type === 'group' ? 'group' : 'direct') as 'direct' | 'group';
+
     await runAgent({
       avatarId: task.avatarId,
       ownerId: task.ownerId,
       taskId: task.id,
       convId: task.triggerConvId ?? '',
       trigger,
+      convType,
       mode: cp.mode,
       allowCapabilities: cp.allowCapabilities,
       maxRisk: cp.maxRisk,
@@ -434,13 +462,16 @@ async function recoverResolvedApproval(
   apr: typeof approval.$inferSelect,
 ): Promise<void> {
   // waiting_approval → running（心跳只对 planning/running 续约，也是续跑状态机要求）
-  await db
+  // 0 行 = 已被 takeover/取消/其他恢复进程处理，直接让位
+  const moved = await db
     .update(agentTask)
     .set({ status: 'running', updatedAt: sql`now()` })
-    .where(and(eq(agentTask.id, task.id), eq(agentTask.status, 'waiting_approval')));
+    .where(and(eq(agentTask.id, task.id), eq(agentTask.status, 'waiting_approval')))
+    .returning({ id: agentTask.id });
+  if (moved.length === 0) return;
 
   const callId = `apr_${apr.id}`;
-  const args = apr.modifiedArgs ?? apr.args;
+  let args = apr.modifiedArgs ?? apr.args;
   const tool = getTool(apr.toolName);
 
   // 确定已执行：账本完成记录，或审批行已回填结果（setApprovalResult 之后崩溃）
@@ -471,6 +502,60 @@ async function recoverResolvedApproval(
       await handoverUncertain(task, `已批准的操作引用了未知工具「${apr.toolName}」，无法恢复。`);
       return;
     }
+
+    // 参数规范化 + 审批指纹校验：执行、审计、回调使用同一份 safeArgs
+    const parsed = tool.validate.safeParse(args);
+    if (!parsed.success) {
+      await handoverUncertain(
+        task,
+        `已批准的操作参数不合法（${parsed.error.message.slice(0, 160)}），已转交你处理。`,
+      );
+      return;
+    }
+    const safeArgs = parsed.data as Record<string, unknown>;
+    const verified = verifyApprovalArgs(apr, safeArgs);
+    if (!verified.ok) {
+      await appendAudit(
+        task.id,
+        task.avatarId,
+        'approval.hash_mismatch',
+        { approvalId: apr.id, tool: apr.toolName },
+        { expected: verified.expected, actual: verified.actual },
+        null,
+      );
+      await handoverUncertain(task, '审批参数指纹不一致，为安全起见已转交你处理。');
+      return;
+    }
+    if (verified.legacy) {
+      await appendAudit(
+        task.id,
+        task.avatarId,
+        'approval.hash_legacy',
+        { approvalId: apr.id, tool: apr.toolName },
+        { ok: true },
+        null,
+      );
+    }
+
+    // 回合级撤权
+    try {
+      await assertTurnAllowed({
+        taskId: task.id,
+        avatarId: task.avatarId,
+        ownerId: task.ownerId,
+        convId: task.triggerConvId ?? '',
+        expectedMode: ((task.context?.mode as string | undefined) ?? 'manual') as AvatarMode,
+        phase: 'run',
+      });
+    } catch (e) {
+      if (e instanceof TurnRevokedError) {
+        await handoverRevoked(task, e.reason);
+        return;
+      }
+      throw e;
+    }
+    args = safeArgs;
+
     await addStep(
       task.id,
       230,
@@ -488,7 +573,7 @@ async function recoverResolvedApproval(
         traceId: task.traceId ?? task.id,
       });
     } catch (e) {
-      result = { error: String(e) };
+      result = { error: redactSecrets(String(e)) };
     }
     await setApprovalResult(apr.id, result);
     await addStep(
@@ -594,36 +679,77 @@ async function hasPendingMarker(taskId: string, toolCallId: string): Promise<boo
 
 /** 不确定 → 保守转人工：handover 卡片 + handed_over（宁过度谨慎，不静默重复执行） */
 async function handoverUncertain(task: OrphanRow, summary: string): Promise<void> {
-  await internal
-    .pushCard(task.ownerId, {
-      kind: 'handover',
-      taskId: task.id,
-      summary,
-      reason: '恢复时无法确认工具执行结果',
-    })
-    .catch(() => undefined);
-  await db
+  const safe = redactSecrets(summary);
+  const rows = await db
     .update(agentTask)
     .set({
       status: 'handed_over',
-      result: summary,
+      result: safe,
       decision: { action: 'handover', reason: '恢复时无法确认工具执行结果', confidence: 0 },
       lockedBy: null,
       leaseUntil: null,
       updatedAt: sql`now()`,
     })
-    .where(eq(agentTask.id, task.id));
-  await appendAudit(task.id, task.avatarId, 'recovery.unknown', { summary }, { ok: false }, null);
+    .where(and(eq(agentTask.id, task.id), inArray(agentTask.status, ['planning', 'running'])))
+    .returning({ id: agentTask.id });
+  if (rows.length === 0) return; // 已被 takeover/其他进程处理，不重复推卡
+
+  await internal
+    .pushCard(task.ownerId, {
+      kind: 'handover',
+      taskId: task.id,
+      summary: safe,
+      reason: '恢复时无法确认工具执行结果',
+    })
+    .catch(() => undefined);
+  await appendAudit(
+    task.id,
+    task.avatarId,
+    'recovery.unknown',
+    { summary: safe },
+    { ok: false },
+    null,
+  );
   log.warn('orphan task handed over (uncertain tool effect)', { taskId: task.id });
 }
 
+/** 恢复时发现回合已撤销：条件写 handed_over，0 行则静默让位。 */
+async function handoverRevoked(task: OrphanRow, reason: string): Promise<void> {
+  const safe = redactSecrets(reason);
+  const rows = await db
+    .update(agentTask)
+    .set({
+      status: 'handed_over',
+      result: `回合已撤销：${safe}`,
+      decision: { action: 'revoked', reason: safe, confidence: 0 },
+      lockedBy: null,
+      leaseUntil: null,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(agentTask.id, task.id), inArray(agentTask.status, ['planning', 'running'])))
+    .returning({ id: agentTask.id });
+  if (rows.length === 0) return;
+
+  await internal
+    .pushCard(task.ownerId, {
+      kind: 'handover',
+      taskId: task.id,
+      summary: `分身恢复时发现该回合已被暂停：${safe}。已完成的操作请复核。`,
+      reason: '回合撤销',
+    })
+    .catch(() => undefined);
+  await appendAudit(task.id, task.avatarId, 'turn.revoked', { reason: safe }, { ok: false }, null);
+  log.warn('orphan task revoked during recovery', { taskId: task.id, reason: safe });
+}
+
 async function failRecovered(task: OrphanRow, error: string): Promise<void> {
+  const safe = redactSecrets(error);
   await db
     .update(agentTask)
-    .set({ status: 'failed', error, lockedBy: null, leaseUntil: null, updatedAt: sql`now()` })
+    .set({ status: 'failed', error: safe, lockedBy: null, leaseUntil: null, updatedAt: sql`now()` })
     .where(eq(agentTask.id, task.id))
     .catch(() => undefined);
-  log.warn('orphan task failed during recovery', { taskId: task.id, error });
+  log.warn('orphan task failed during recovery', { taskId: task.id, error: safe });
 }
 
 /** 分身并发满：短租约让出，下个 tick 重新认领 */

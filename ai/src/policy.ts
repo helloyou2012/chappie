@@ -17,6 +17,7 @@ import { internal } from './common/internal';
 import { aiKeys, redisExists, redisIncrWindow, redisSetEx } from './common/redis';
 import { avatar as avatarTable, member, policy as policyTable } from './db/schema';
 import { todayCost } from './model-gateway';
+import { effectiveSessionMode } from './turn-guard';
 
 export interface PolicyInput {
   avatarId: string;
@@ -94,10 +95,8 @@ export async function evaluatePolicy(p: PolicyInput): Promise<PolicyEval> {
     .from(member)
     .where(and(eq(member.convId, p.conv.id), eq(member.principalId, p.ownerId)));
   const memberRow = memberRows[0];
-  let sessionMode: AvatarMode = (memberRow?.aiMode as AvatarMode) ?? 'manual';
-  if (memberRow?.aiModeUntil && dayjs(memberRow.aiModeUntil).isBefore(dayjs())) {
-    sessionMode = 'manual'; // 临时模式到期
-  }
+  // 临时模式到期自动回落 manual；与 turn-guard 共用同一算法
+  const sessionMode = effectiveSessionMode(memberRow?.aiMode, memberRow?.aiModeUntil);
   const sessionExplicit = sessionMode !== 'manual';
 
   // 策略（联系人 > 现场日程 > 全局）

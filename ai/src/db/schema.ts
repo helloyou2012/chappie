@@ -139,6 +139,8 @@ export const approval = pgTable('approval', {
   title: text('title').notNull(),
   toolName: text('tool_name').notNull(),
   args: jsonb('args').$type<Record<string, unknown>>().notNull().default({}),
+  /** 审批参数指纹（canonical JSON + domain separation）：执行前校验，防止参数被偷换 */
+  argsHash: text('args_hash'),
   status: text('status').$type<ApprovalApi['status']>().notNull(),
   modifiedArgs: jsonb('modified_args').$type<Record<string, unknown>>(),
   cardMsgId: text('card_msg_id'),

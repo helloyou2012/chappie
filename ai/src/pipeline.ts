@@ -10,13 +10,16 @@ import type { MemberSnapshot, Message } from '@chappie/contract';
 import { and, eq, sql } from 'drizzle-orm';
 import { runAgent } from './agent-runtime';
 import { type Classification, classify } from './classifier';
+import { config } from './common/config';
 import { db } from './common/db';
 import { log, newId, newTraceId } from './common/log';
 import { aiKeys, redisSemaphoreAcquire, redisSemaphoreRelease, redisSetNx } from './common/redis';
 import { LEASE_TTL_S, LeaseLostError, RUNTIME_ID, withLease } from './common/task-lease';
-import { agentTask, conversation } from './db/schema';
+import { agentTask, conversation, user } from './db/schema';
 import { evaluatePolicy } from './policy';
 import { findCandidates } from './router';
+import { shouldStaySilent } from './silence';
+import { redactSecrets } from './trust';
 
 /** 恢复重驱时分身并发已满：由 recovery 下个 tick 重试（区别于普通路径的 skip） */
 export class SemaphoreFullError extends Error {
@@ -187,6 +190,51 @@ export async function driveTask(
     return;
   }
 
+  // 合理沉默：群聊 auto 档、未被 @、低置信度时不打扰
+  if (
+    config.silenceMinConfidence > 0 &&
+    conv.type === 'group' &&
+    conv.systemTag !== 'avatar_self' &&
+    policy.mode === 'auto' &&
+    !mentioned &&
+    classification.needReply &&
+    classification.confidence < config.silenceMinConfidence
+  ) {
+    const ownerRows = await db
+      .select({ name: user.name })
+      .from(user)
+      .where(eq(user.id, task.ownerId))
+      .limit(1);
+    const text = trigger.content.type === 'text' ? trigger.content.text : '';
+    if (
+      shouldStaySilent({
+        convType: conv.type,
+        systemTag: conv.systemTag,
+        mode: policy.mode,
+        mentioned,
+        mentionsOwner: trigger.mentions?.includes(task.ownerId) ?? false,
+        senderId: trigger.senderId,
+        ownerId: task.ownerId,
+        hasReply: Boolean(trigger.replyTo),
+        urgency: classification.urgency,
+        sentiment: classification.sentiment,
+        topics: classification.topics,
+        text,
+        ownerName: ownerRows[0]?.name ?? null,
+        needReply: classification.needReply,
+        confidence: classification.confidence,
+        threshold: config.silenceMinConfidence,
+      })
+    ) {
+      await skip('低置信度选择沉默', {
+        intent: classification.intent,
+        intentConfidence: classification.confidence,
+        silence: true,
+      });
+      return;
+    }
+  }
+
   // 分身并发限制（每分身 2 个并发任务）
   const semKey = aiKeys.semAvatar(task.avatarId);
   if (!(await redisSemaphoreAcquire(semKey, 2, 180))) {
@@ -221,6 +269,7 @@ export async function driveTask(
         maxRisk: policy.maxRisk,
         classification,
         traceId: task.traceId,
+        convType: conv.type as 'direct' | 'group',
       }),
     );
   } catch (e) {
@@ -229,10 +278,14 @@ export async function driveTask(
       log.warn('lease lost during task run', { taskId: task.taskId });
       return;
     }
-    log.error('agent run failed', { taskId: task.taskId, error: String(e) });
+    log.error('agent run failed', { taskId: task.taskId, error: redactSecrets(String(e)) });
     await db
       .update(agentTask)
-      .set({ status: 'failed', error: String(e).slice(0, 500), updatedAt: sql`now()` })
+      .set({
+        status: 'failed',
+        error: redactSecrets(String(e)).slice(0, 500),
+        updatedAt: sql`now()`,
+      })
       .where(eq(agentTask.id, task.taskId))
       .catch(() => undefined);
   } finally {

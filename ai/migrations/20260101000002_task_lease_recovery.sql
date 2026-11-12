@@ -1,5 +1,5 @@
 -- 任务租约 + 检查点恢复（crash recovery）—— 设计方案 §26.3 时效丢弃 / §27.4 中断恢复 / §37 PG 为事实源
--- 租约模式参考 outbox.locked_at/locked_by；恢复认领由 scheduler 每 tick 原子执行。
+-- 租约模式沿用 outbox.locked_at/locked_by；恢复认领由 scheduler 每 tick 原子执行。
 
 ALTER TABLE agent_task ADD COLUMN locked_by TEXT;
 ALTER TABLE agent_task ADD COLUMN lease_until TIMESTAMPTZ;

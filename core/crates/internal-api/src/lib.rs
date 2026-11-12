@@ -21,6 +21,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/internal/v1/recall-message", post(recall_message))
         .route("/internal/v1/get-context", post(get_context))
         .route("/internal/v1/get-presence", post(get_presence))
+        .route("/internal/v1/get-devices", post(get_devices))
         .route("/internal/v1/push-card", post(push_card))
         .route("/internal/v1/update-card", post(update_card))
         .route("/internal/v1/freeze-avatar", post(freeze_avatar))
@@ -229,6 +230,21 @@ async fn get_presence(
 ) -> AppResult<Json<serde_json::Value>> {
     let presences = presence::get_presences(&state.db, &req.user_ids).await?;
     Ok(Json(serde_json::to_value(presences)?))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetDevicesReq {
+    user_id: String,
+}
+
+/// 查询用户设备与端侧能力清单（Agent 决定可用端侧动作）
+async fn get_devices(
+    State(state): State<AppState>,
+    Json(req): Json<GetDevicesReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    let devices = im_core_chat::auth::list_devices(&state.db, &req.user_id).await?;
+    Ok(Json(json!({ "devices": devices })))
 }
 
 /// 向用户推送卡片（草稿/确认/任务/转交/日报）—— 设计方案 §25.5 PushCard。

@@ -267,6 +267,8 @@ pub struct RegisterDeviceReq {
     device_id: String,
     platform: String,
     push_token: Option<String>,
+    app_version: Option<String>,
+    capabilities: Option<serde_json::Value>,
 }
 
 async fn register_device(
@@ -274,7 +276,16 @@ async fn register_device(
     axum::Extension(user): axum::Extension<CurrentUser>,
     Json(req): Json<RegisterDeviceReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    auth::register_device(&state.db, &user.0, &req.device_id, &req.platform, req.push_token.as_deref()).await?;
+    auth::register_device(
+        &state.db,
+        &user.0,
+        &req.device_id,
+        &req.platform,
+        req.push_token.as_deref(),
+        req.capabilities.as_ref(),
+        req.app_version.as_deref(),
+    )
+    .await?;
     Ok(Json(json!({ "ok": true })))
 }
 

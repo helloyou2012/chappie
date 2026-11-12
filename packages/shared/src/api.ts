@@ -8,6 +8,7 @@ import type {
   CardActionRequest,
   CreateConversationResponse,
   DailyReport,
+  DeviceCapabilities,
   FeedbackType,
   GetTaskResponse,
   ListApprovalsResponse,
@@ -161,6 +162,8 @@ export const api = {
   registerDevice: (req: {
     deviceId: string;
     platform: 'web' | 'desktop' | 'ios' | 'android';
+    appVersion?: string;
+    capabilities?: DeviceCapabilities;
     pushToken?: string;
   }) => s<{ ok: boolean }>('POST', '/api/v1/devices', req),
 };

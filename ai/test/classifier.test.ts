@@ -67,3 +67,28 @@ describe('classify 摘要', () => {
     expect(c.summary).not.toContain('\n');
   });
 });
+
+describe('classify 置信度（合理沉默依据）', () => {
+  test('明确任务 / 紧急 / 愤怒 → 高置信度', () => {
+    expect(classify('帮我订一张明天的票').confidence).toBeGreaterThanOrEqual(0.7);
+    expect(classify('尽快把材料发我').confidence).toBeGreaterThanOrEqual(0.7);
+    expect(classify('气死我了').confidence).toBeGreaterThanOrEqual(0.7);
+  });
+
+  test('极短消息 / 纯问号 → 低置信度', () => {
+    expect(classify('？').confidence).toBeLessThan(0.6);
+    expect(classify('在吗').confidence).toBeLessThan(0.6);
+  });
+
+  test('正常问句置信度高于裸问号', () => {
+    expect(classify('你明天有空吗？').confidence).toBeGreaterThan(classify('？').confidence);
+  });
+
+  test('置信度始终在 0..1', () => {
+    for (const text of ['', '？', '帮我转账 200 元并立刻处理', '谢谢']) {
+      const c = classify(text).confidence;
+      expect(c).toBeGreaterThanOrEqual(0);
+      expect(c).toBeLessThanOrEqual(1);
+    }
+  });
+});

@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import { Content, Message } from './chat';
+import { DeviceCapabilities } from './device';
 import { User } from './identity';
 
 // ---------------------------------------------------------------------------
@@ -19,6 +20,9 @@ export const ClientFrame = z.discriminatedUnion('type', [
     /** web | desktop | ios | android */
     platform: z.string().default('web'),
     deviceId: z.string().optional(),
+    appVersion: z.string().optional(),
+    /** 端侧能力清单：云端据此决定可以使用哪些设备动作 */
+    capabilities: DeviceCapabilities.optional(),
   }),
   z.object({ type: z.literal('heartbeat'), ts: z.number() }),
 
@@ -56,6 +60,8 @@ export const ServerFrame = z.discriminatedUnion('type', [
     type: z.literal('auth_ok'),
     user: User,
     serverTime: z.string(),
+    /** 服务端实例 epoch：变化表示服务端重启，客户端可据此刷新快照 */
+    serverEpoch: z.string(),
   }),
   z.object({ type: z.literal('auth_error'), message: z.string() }),
   z.object({ type: z.literal('heartbeat_ack'), ts: z.number() }),

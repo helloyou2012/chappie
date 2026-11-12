@@ -31,8 +31,29 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     // ---- 首帧鉴权 ----
     let user_id = match tokio::time::timeout(AUTH_TIMEOUT, receiver.next()).await {
         Ok(Some(Ok(Message::Text(text)))) => match serde_json::from_str::<ClientFrame>(&text) {
-            Ok(ClientFrame::Auth { token, .. }) => match auth::verify_token(&state.db, &token).await {
-                Ok(uid) => uid,
+            Ok(ClientFrame::Auth {
+                token,
+                platform,
+                device_id,
+                app_version,
+                capabilities,
+            }) => match auth::verify_token(&state.db, &token).await {
+                Ok(uid) => {
+                    // 端侧能力随鉴权上报：有 deviceId 才落库，缺失时不影响连接
+                    if let Some(device_id) = device_id.as_deref() {
+                        let _ = auth::register_device(
+                            &state.db,
+                            &uid,
+                            device_id,
+                            &platform,
+                            None,
+                            capabilities.as_ref(),
+                            app_version.as_deref(),
+                        )
+                        .await;
+                    }
+                    uid
+                }
                 Err(e) => {
                     send_frame(&mut sender, &ServerFrame::AuthError { message: e.to_string() }).await;
                     return;
@@ -52,7 +73,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     };
     send_frame(
         &mut sender,
-        &ServerFrame::AuthOk { user: user.to_api(), server_time: time::now_iso() },
+        &ServerFrame::AuthOk {
+            user: user.to_api(),
+            server_time: time::now_iso(),
+            server_epoch: state.epoch.clone(),
+        },
     )
     .await;
 

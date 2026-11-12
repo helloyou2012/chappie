@@ -55,6 +55,15 @@ export interface PresenceInfo {
   typingConvId: string | null;
 }
 
+export interface DeviceInfo {
+  deviceId: string;
+  platform: string;
+  appVersion: string | null;
+  capabilities: Record<string, boolean>;
+  pushToken: string | null;
+  updatedAt: string;
+}
+
 export const internal = {
   verifyToken: (token: string) => call<{ userId: string }>('/internal/v1/verify-token', { token }),
 
@@ -72,6 +81,10 @@ export const internal = {
 
   getPresence: (userIds: string[]) =>
     call<PresenceInfo[]>('/internal/v1/get-presence', { userIds }),
+
+  /** 查询用户设备与端侧能力清单（Agent 决定可用端侧动作） */
+  getDevices: (userId: string) =>
+    call<{ devices: DeviceInfo[] }>('/internal/v1/get-devices', { userId }),
 
   pushCard: (recipientUserId: string, card: CardPayload, targetConvId?: string) =>
     call<{ msgId: string }>('/internal/v1/push-card', { recipientUserId, card, targetConvId }),

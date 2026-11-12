@@ -68,4 +68,6 @@ pub struct AppState {
     pub events: EventTx,
     pub connections: std::sync::Arc<ConnectionRegistry>,
     pub node_id: String,
+    /// 进程级 epoch：每次启动变化，客户端据此判断是否需要重新拉快照
+    pub epoch: String,
 }

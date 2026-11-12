@@ -118,6 +118,8 @@ export const Message = z.object({
   msgId: z.string(),
   convId: z.string(),
   seq: z.number().int(),
+  /** 客户端幂等键：客户端用它把乐观消息与服务端消息精确对账；卡片/历史消息可能为 null */
+  clientMsgId: z.string().nullable().default(null),
   senderId: z.string(),
   senderType: PrincipalType,
   /** 分身代发时为主人 user id —— 设计方案 §2「发送者与代表者分离」 */

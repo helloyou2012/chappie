@@ -88,7 +88,7 @@ function ConvItem({ view, myId }: { view: ConversationView; myId: string }) {
 }
 
 /**
- * 会话列表栏（参考 Codex 侧边）：仅承载「消息」标题、新建会话与列表；
+ * 会话列表栏：仅承载「消息」标题、新建会话与列表；
  * 导航与账户菜单已移至最左侧的 IconRail。
  */
 export function Sidebar() {

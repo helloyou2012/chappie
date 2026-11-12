@@ -32,6 +32,10 @@ export interface AiConfig {
   recoveryApprovalGraceSeconds: number;
   /** 恢复清扫每 tick 认领上限 */
   recoveryBatch: number;
+  /** 提示词历史区字符预算（有界上下文） */
+  contextCharBudget: number;
+  /** 合理沉默阈值：低于该置信度且满足其他条件时沉默；0 = 关闭 */
+  silenceMinConfidence: number;
 }
 
 function env(key: string, def = ''): string {
@@ -64,6 +68,8 @@ export function loadConfig(): AiConfig {
     recoveryCreatedGraceSeconds: Number(env('AI_RECOVERY_CREATED_GRACE_S', '600')),
     recoveryApprovalGraceSeconds: Number(env('AI_RECOVERY_APPROVAL_GRACE_S', '120')),
     recoveryBatch: Number(env('AI_RECOVERY_BATCH', '5')),
+    contextCharBudget: Number(env('AI_CONTEXT_CHAR_BUDGET', '6000')),
+    silenceMinConfidence: Number(env('AI_SILENCE_MIN_CONFIDENCE', '0.6')),
   };
 }
 

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { FeedbackType } from './ai';
 import { CardActionRequest } from './cards';
 import { ConversationView, MemberView, Message } from './chat';
+import { DeviceCapabilities, DevicePlatform, DeviceView } from './device';
 import { AvatarMode, User } from './identity';
 
 // ---------------------------------------------------------------------------
@@ -87,9 +88,13 @@ export const FeedbackRequest = z.object({
 
 export const RegisterDeviceRequest = z.object({
   deviceId: z.string(),
-  platform: z.enum(['web', 'desktop', 'ios', 'android']),
+  platform: DevicePlatform,
+  appVersion: z.string().optional(),
+  capabilities: DeviceCapabilities.optional(),
   pushToken: z.string().optional(),
 });
+export const RegisterDeviceResponse = z.object({ ok: z.boolean() });
+export const ListDevicesResponse = z.object({ devices: z.array(DeviceView) });
 
 // ---------------------------------------------------------------------------
 // 通用错误体
@@ -133,3 +138,5 @@ export type UpdateConversationSettingsRequest = z.infer<typeof UpdateConversatio
 export type TakeoverResponse = z.infer<typeof TakeoverResponse>;
 export type FeedbackRequest = z.infer<typeof FeedbackRequest>;
 export type RegisterDeviceRequest = z.infer<typeof RegisterDeviceRequest>;
+export type RegisterDeviceResponse = z.infer<typeof RegisterDeviceResponse>;
+export type ListDevicesResponse = z.infer<typeof ListDevicesResponse>;

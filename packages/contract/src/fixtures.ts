@@ -9,6 +9,7 @@
 
 import type { AgentTask, Approval, DailyReport, MemoryItem, Policy } from './ai';
 import type { Conversation, Member, Message } from './chat';
+import type { DeviceCapabilities, DeviceRegistration } from './device';
 import type { ClientFrame, ServerFrame } from './frames';
 import type { Avatar, Principal, User } from './identity';
 
@@ -59,11 +60,32 @@ export const fixtureMember: Member = {
   joinedAt: '2026-11-01T08:00:00.000Z',
 };
 
+export const fixtureDeviceCapabilities: DeviceCapabilities = {
+  notifications: true,
+  camera: true,
+  photoLibrary: true,
+  files: true,
+  clipboard: true,
+  location: false,
+  localNetwork: false,
+  share: true,
+  biometrics: true,
+};
+
+export const fixtureDeviceRegistration: DeviceRegistration = {
+  deviceId: 'dev_00000000-0000-4000-8000-000000000001',
+  platform: 'web',
+  appVersion: '0.1.0',
+  capabilities: fixtureDeviceCapabilities,
+  pushToken: null,
+};
+
 /** 人类消息 */
 export const fixtureHumanMessage: Message = {
   msgId: 'm_00000000-0000-4000-8000-000000000001',
   convId: 'c_00000000-0000-4000-8000-000000000001',
   seq: 41,
+  clientMsgId: 'cm_00000000-0000-4000-8000-000000000011',
   senderId: 'u_00000000-0000-4000-8000-000000000002',
   senderType: 'human',
   onBehalfOf: null,
@@ -80,6 +102,7 @@ export const fixtureAvatarMessage: Message = {
   msgId: 'm_00000000-0000-4000-8000-000000000002',
   convId: 'c_00000000-0000-4000-8000-000000000001',
   seq: 42,
+  clientMsgId: null,
   senderId: 'a_00000000-0000-4000-8000-000000000001',
   senderType: 'avatar',
   onBehalfOf: 'u_00000000-0000-4000-8000-000000000001',
@@ -114,6 +137,7 @@ export const fixtureDraftCardMessage: Message = {
   msgId: 'm_00000000-0000-4000-8000-000000000003',
   convId: 'c_00000000-0000-4000-8000-000000000010',
   seq: 7,
+  clientMsgId: null,
   senderId: 'a_00000000-0000-4000-8000-000000000001',
   senderType: 'avatar',
   onBehalfOf: 'u_00000000-0000-4000-8000-000000000001',
@@ -142,6 +166,7 @@ export const fixtureApprovalCardMessage: Message = {
   msgId: 'm_00000000-0000-4000-8000-000000000004',
   convId: 'c_00000000-0000-4000-8000-000000000010',
   seq: 8,
+  clientMsgId: null,
   senderId: 'a_00000000-0000-4000-8000-000000000001',
   senderType: 'avatar',
   onBehalfOf: 'u_00000000-0000-4000-8000-000000000001',
@@ -171,6 +196,7 @@ export const fixtureTaskCardMessage: Message = {
   msgId: 'm_00000000-0000-4000-8000-000000000005',
   convId: 'c_00000000-0000-4000-8000-000000000010',
   seq: 9,
+  clientMsgId: null,
   senderId: 'a_00000000-0000-4000-8000-000000000001',
   senderType: 'avatar',
   onBehalfOf: 'u_00000000-0000-4000-8000-000000000001',
@@ -196,7 +222,14 @@ export const fixtureTaskCardMessage: Message = {
 };
 
 export const fixtureClientFrames: ClientFrame[] = [
-  { type: 'auth', token: 'tok_demo', platform: 'web' },
+  {
+    type: 'auth',
+    token: 'tok_demo',
+    platform: 'web',
+    deviceId: fixtureDeviceRegistration.deviceId,
+    appVersion: fixtureDeviceRegistration.appVersion,
+    capabilities: fixtureDeviceCapabilities,
+  },
   { type: 'heartbeat', ts: 1762833600000 },
   {
     type: 'send_message',
@@ -222,7 +255,12 @@ export const fixtureClientFrames: ClientFrame[] = [
 ];
 
 export const fixtureServerFrames: ServerFrame[] = [
-  { type: 'auth_ok', user: fixtureUser, serverTime: '2026-11-11T02:00:00.000Z' },
+  {
+    type: 'auth_ok',
+    user: fixtureUser,
+    serverTime: '2026-11-11T02:00:00.000Z',
+    serverEpoch: 'epoch_demo_001',
+  },
   { type: 'heartbeat_ack', ts: 1762833600000 },
   { type: 'message_created', message: fixtureHumanMessage },
   {
@@ -358,6 +396,8 @@ export const fixtures = {
   principal: fixturePrincipal,
   conversation: fixtureConversation,
   member: fixtureMember,
+  deviceCapabilities: fixtureDeviceCapabilities,
+  deviceRegistration: fixtureDeviceRegistration,
   humanMessage: fixtureHumanMessage,
   avatarMessage: fixtureAvatarMessage,
   draftCardMessage: fixtureDraftCardMessage,

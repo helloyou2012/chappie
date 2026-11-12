@@ -12,6 +12,7 @@ export * from './admin';
 export * from './ai';
 export * from './cards';
 export * from './chat';
+export * from './device';
 export * from './events';
 export * from './fixtures';
 export * from './frames';

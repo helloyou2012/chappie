@@ -179,10 +179,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         convs.unshift(updated);
       }
 
-      // 当前会话自动清理本地 pending（发送者是自己）
+      // 当前会话自动清理本地 pending（发送者是自己）：
+      // 同时按 clientMsgId 精确对账与内容兜底，覆盖旧服务端未回传 clientMsgId 的情况
       const pending = fromMe
         ? (s.pendingByConv[msg.convId] ?? []).filter(
-            (p) => contentText(p.content) !== contentText(msg.content),
+            (p) =>
+              p.clientMsgId !== msg.clientMsgId &&
+              contentText(p.content) !== contentText(msg.content),
           )
         : s.pendingByConv[msg.convId];
 

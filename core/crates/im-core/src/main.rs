@@ -26,6 +26,12 @@ async fn main() -> anyhow::Result<()> {
         events,
         connections: std::sync::Arc::new(ConnectionRegistry::default()),
         node_id: uuid::Uuid::new_v4().to_string(),
+        // 单节点默认进程级 epoch；多节点部署必须设置同一个 SERVER_EPOCH，
+        // 否则客户端在节点间重连会被误判为「服务端重启」。
+        epoch: std::env::var("SERVER_EPOCH")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
     };
 
     tokio::spawn(fanout::run_local_fanout(state.clone()));

@@ -14,6 +14,7 @@ function msg(seq: number, opts: Partial<Message> = {}): Message {
     msgId: `m_${seq}`,
     convId: CONV,
     seq,
+    clientMsgId: null,
     senderId: 'u_other',
     senderType: 'human',
     content: text(`消息 ${seq}`),
@@ -129,6 +130,27 @@ describe('服务端帧', () => {
       msgId: 'm_1',
       seq: 1,
       serverTime: new Date().toISOString(),
+    });
+    expect(useChatStore.getState().pendingByConv[CONV] ?? []).toHaveLength(0);
+  });
+
+  test('message_created 按 clientMsgId 精确移除 pending', () => {
+    seed();
+    useChatStore.getState().addPending({
+      clientMsgId: 'cm_exact',
+      convId: CONV,
+      content: text('本地草稿'),
+      mentions: [],
+      replyTo: null,
+      createdAt: new Date().toISOString(),
+    });
+    useChatStore.getState().applyServerFrame({
+      type: 'message_created',
+      message: msg(1, {
+        senderId: ME,
+        clientMsgId: 'cm_exact',
+        content: text('服务端规范化后的内容'),
+      }),
     });
     expect(useChatStore.getState().pendingByConv[CONV] ?? []).toHaveLength(0);
   });

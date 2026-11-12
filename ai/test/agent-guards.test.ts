@@ -35,41 +35,32 @@ describe('guardOutput 输出护栏', () => {
   });
 });
 
-describe('parseEditedArgs 修改后批准', () => {
+describe('parseEditedArgs 修改后批准（严格 JSON）', () => {
   const original = { amount: 200, currency: 'CNY' };
 
-  test('无编辑内容 → 保留原参数', () => {
-    expect(parseEditedArgs(original, undefined)).toEqual(original);
-    expect(parseEditedArgs(original, '')).toEqual(original);
+  test('无编辑内容 → 拒绝', () => {
+    expect(parseEditedArgs(original, undefined)).toBeNull();
+    expect(parseEditedArgs(original, '   ')).toBeNull();
   });
 
-  test('完整 JSON → 覆盖对应字段', () => {
+  test('完整 JSON 对象 → 覆盖对应字段', () => {
     expect(parseEditedArgs(original, '{"amount": 300}')).toEqual({
       amount: 300,
       currency: 'CNY',
     });
   });
 
-  test('截断的 JSON → 宽容解析并合并', () => {
-    expect(parseEditedArgs(original, '{"amount": 500')).toEqual({
-      amount: 500,
-      currency: 'CNY',
-    });
+  test('截断 JSON → 拒绝（不再宽容恢复）', () => {
+    expect(parseEditedArgs(original, '{"amount": 500')).toBeNull();
   });
 
-  test('非 JSON 文本 → 写入 note，原参数不变', () => {
-    expect(parseEditedArgs(original, '改成 500 吧')).toEqual({
-      amount: 200,
-      currency: 'CNY',
-      note: '改成 500 吧',
-    });
+  test('非 JSON 文本 → 拒绝（不再回退 note + 原参数）', () => {
+    expect(parseEditedArgs(original, '改成 500 吧')).toBeNull();
   });
 
-  test('JSON 数组不是合法编辑对象 → 作为 note 处理', () => {
-    expect(parseEditedArgs(original, '[1,2,3]')).toEqual({
-      amount: 200,
-      currency: 'CNY',
-      note: '[1,2,3]',
-    });
+  test('JSON 数组 / 空对象 / null → 拒绝', () => {
+    expect(parseEditedArgs(original, '[1,2,3]')).toBeNull();
+    expect(parseEditedArgs(original, '{}')).toBeNull();
+    expect(parseEditedArgs(original, 'null')).toBeNull();
   });
 });

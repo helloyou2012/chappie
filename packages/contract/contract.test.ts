@@ -7,6 +7,8 @@ import {
   Conversation,
   ConversationView,
   DailyReport,
+  DeviceCapabilities,
+  DeviceRegistration,
   fixtures,
   Member,
   MemoryItem,
@@ -37,6 +39,11 @@ describe('契约 fixtures 全部通过 zod 校验（与 Rust 侧共用同一数�
       const parsed = Message.safeParse(fixtures[key]);
       expect(parsed.success).toBe(true);
     }
+  });
+
+  test('device', () => {
+    expect(DeviceCapabilities.parse(fixtures.deviceCapabilities)).toBeTruthy();
+    expect(DeviceRegistration.parse(fixtures.deviceRegistration)).toBeTruthy();
   });
 
   test('frames', () => {

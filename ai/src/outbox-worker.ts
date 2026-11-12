@@ -435,7 +435,7 @@ async function handleDraftAction(
 }
 
 async function handleApprovalAction(
-  _actorId: string,
+  actorId: string,
   card: Extract<CardPayload, { kind: 'approval' }>,
   action: string,
   editedText?: string,
@@ -445,6 +445,7 @@ async function handleApprovalAction(
       card.approvalId,
       action as 'approve' | 'modify_approve' | 'reject',
       editedText,
+      actorId,
     );
   }
 }
