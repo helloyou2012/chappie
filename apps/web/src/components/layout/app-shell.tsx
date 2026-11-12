@@ -13,7 +13,10 @@ export function AppShell() {
 
   useEffect(() => {
     if (status !== 'ready' || !token) return;
-    connectRealtime('web');
+    // Tauri 复用了同一份 Web 前端，需要按注入的运行时标记区分桌面端
+    const platform =
+      typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window ? 'desktop' : 'web';
+    connectRealtime(platform);
     void loadConversations().catch((e) =>
       toast.error('加载会话失败', e instanceof Error ? e.message : String(e)),
     );

@@ -44,9 +44,26 @@ export function IconRail() {
   const [theme, setTheme] = useState<'light' | 'dark'>(
     document.documentElement.classList.contains('dark') ? 'dark' : 'light',
   );
+  const isMacDesktop =
+    typeof window !== 'undefined' &&
+    '__TAURI_INTERNALS__' in window &&
+    typeof navigator !== 'undefined' &&
+    /Mac/i.test(navigator.platform || navigator.userAgent);
 
   return (
-    <aside className="flex w-16 shrink-0 flex-col items-center gap-1 border-r border-line bg-canvas/90 py-3">
+    <aside
+      className={cn(
+        'relative flex w-16 shrink-0 flex-col items-center gap-1 border-r border-line bg-canvas/90 pb-3',
+        isMacDesktop ? 'pt-10' : 'pt-3',
+      )}
+    >
+      {isMacDesktop ? (
+        <div
+          data-tauri-drag-region
+          className="absolute inset-x-0 top-0 h-7 select-none"
+          aria-hidden
+        />
+      ) : null}
       <Link
         to="/chat"
         aria-label="Chappie"
