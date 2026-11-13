@@ -1,7 +1,7 @@
 {
   "name": "chappie",
   "private": true,
-  "packageManager": "pnpm@10.12.4",
+  "packageManager": "pnpm@12.18.0",
   "engines": {
     "node": ">=20"
   },
@@ -30,6 +30,6 @@
     "icons": "bash scripts/gen-icons.sh"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.6"
+    "@biomejs/biome": "^2.6.7"
   }
 }

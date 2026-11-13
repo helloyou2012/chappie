@@ -35,7 +35,7 @@ export const DeviceRegistration = z.object({
   deviceId: z.string().min(1),
   platform: DevicePlatform,
   appVersion: z.string().default(''),
-  capabilities: DeviceCapabilities.default({}),
+  capabilities: DeviceCapabilities.prefault({}),
   /** 推送 token（APNs/FCM/Expo 等），由客户端在获得权限后上报 */
   pushToken: z.string().nullable().optional(),
 });

@@ -13,11 +13,11 @@
   },
   "dependencies": {
     "@chappie/contract": "workspace:*",
-    "dayjs": "^1.11.0",
-    "uuid": "^14.0.0",
-    "zustand": "^5.0.0"
+    "dayjs": "^1.11.23",
+    "uuid": "^14.0.3",
+    "zustand": "^5.1.0"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.0"
+    "@types/bun": "^1.4.4"
   }
 }

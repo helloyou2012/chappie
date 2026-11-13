@@ -2,3 +2,5 @@ packages:
   - packages/*
   - apps/*
   - ai
+minimumReleaseAgeExclude:
+  - expo@58.0.25
