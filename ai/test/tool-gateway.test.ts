@@ -32,9 +32,24 @@ describe('内置工具注册表', () => {
     for (const id of ['calendar.read', 'todo.list', 'translate', 'summarize', 'web.search']) {
       expect(getTool(id)?.idempotent).toBe(true);
     }
-    for (const id of ['calendar.create', 'todo.add', 'payment.send']) {
+    for (const id of [
+      'calendar.create',
+      'calendar.update',
+      'calendar.delete',
+      'todo.add',
+      'todo.update',
+      'todo.delete',
+      'payment.send',
+    ]) {
       expect(getTool(id)?.idempotent).toBe(false);
     }
+  });
+
+  test('删改工具风险分级：修改是 L1，删除是 L2（需人工确认）', () => {
+    expect(getTool('calendar.update')?.risk).toBe('L1');
+    expect(getTool('todo.update')?.risk).toBe('L1');
+    expect(getTool('calendar.delete')?.risk).toBe('L2');
+    expect(getTool('todo.delete')?.risk).toBe('L2');
   });
 
   test('未知工具体不存在', () => {
@@ -47,9 +62,17 @@ describeDb('prepareToolCall 授权与风险', () => {
     await db
       .insert(capabilityGrant)
       .values(
-        ['calendar.read', 'calendar.create', 'todo.add', 'todo.list', 'payment.send'].map(
-          (capabilityId) => ({ avatarId: AVATAR, capabilityId, granted: true }),
-        ),
+        [
+          'calendar.read',
+          'calendar.create',
+          'calendar.update',
+          'calendar.delete',
+          'todo.add',
+          'todo.update',
+          'todo.delete',
+          'todo.list',
+          'payment.send',
+        ].map((capabilityId) => ({ avatarId: AVATAR, capabilityId, granted: true })),
       )
       .onConflictDoNothing();
   });
@@ -126,5 +149,81 @@ describeDb('prepareToolCall 授权与风险', () => {
       });
       expect(d.status).toBe('need_approval');
     }
+  });
+
+  test('修改日程/待办（L1）→ ok；删除日程/待办（L2）→ need_approval', async () => {
+    const d1 = await prepareToolCall({
+      ...base,
+      toolId: 'calendar.update',
+      rawArgs: { match: '周会', newTime: '明天 15:00' },
+    });
+    expect(d1.status).toBe('ok');
+
+    const d2 = await prepareToolCall({
+      ...base,
+      toolId: 'todo.update',
+      rawArgs: { match: '回邮件', done: true },
+    });
+    expect(d2.status).toBe('ok');
+
+    for (const toolId of ['calendar.delete', 'todo.delete']) {
+      const d = await prepareToolCall({
+        ...base,
+        toolId,
+        rawArgs: { match: '周会' },
+        maxRisk: 'L3',
+      });
+      expect(d.status).toBe('need_approval');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseEventTime：自由格式时间文本 → 具体日期 + HH:mm（日程日期准确性）
+// 纯函数，不依赖数据库
+// ---------------------------------------------------------------------------
+const { parseEventTime } = await import('../src/tool-gateway');
+const { dayjs: dayjsPure } = await import('../src/common/datetime');
+
+describe('parseEventTime', () => {
+  const today = dayjsPure().format('YYYY-MM-DD');
+  const tomorrow = dayjsPure().add(1, 'day').format('YYYY-MM-DD');
+  const dayAfterTomorrow = dayjsPure().add(2, 'day').format('YYYY-MM-DD');
+
+  test('英文相对日期 tomorrow 14:00', () => {
+    expect(parseEventTime('tomorrow 14:00')).toEqual({ date: tomorrow, time: '14:00' });
+  });
+
+  test('中文「明天 下午 3 点」→ 明天 15:00', () => {
+    expect(parseEventTime('明天 下午 3 点')).toEqual({ date: tomorrow, time: '15:00' });
+  });
+
+  test('「今天 10:30」→ 今天', () => {
+    expect(parseEventTime('今天 10:30')).toEqual({ date: today, time: '10:30' });
+  });
+
+  test('「后天 09:00」', () => {
+    expect(parseEventTime('后天 09:00')).toEqual({ date: dayAfterTomorrow, time: '09:00' });
+  });
+
+  test('具体日期「2026-11-14 09:00」', () => {
+    expect(parseEventTime('2026-11-14 09:00')).toEqual({ date: '2026-11-14', time: '09:00' });
+  });
+
+  test('中文日期「2026年11月14日 9:30」', () => {
+    expect(parseEventTime('2026年11月14日 9:30')).toEqual({ date: '2026-11-14', time: '09:30' });
+  });
+
+  test('只有时刻 "14:00" → 默认今天', () => {
+    expect(parseEventTime('14:00')).toEqual({ date: today, time: '14:00' });
+  });
+
+  test('「明天上午9点」无分隔符分钟', () => {
+    expect(parseEventTime('明天上午9点')).toEqual({ date: tomorrow, time: '09:00' });
+  });
+
+  test('没有小时数 → 无法解析返回 null', () => {
+    expect(parseEventTime('明天下午')).toBeNull();
+    expect(parseEventTime('')).toBeNull();
   });
 });

@@ -8,10 +8,12 @@ import type {
   AgentTask,
   Approval,
   Avatar,
+  CalendarItem,
   CapabilityGrant,
   DailyReport,
   Policy,
   PolicyRule,
+  TodoItem,
   UsageDay,
 } from '@chappie/contract';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
@@ -38,7 +40,7 @@ import {
 import { deleteMemory, forgetTopic, listMemories } from './memory';
 import { complete, recordUsage, todayCost } from './model-gateway';
 import { generateDailyReport } from './scheduler';
-import { listCapabilities } from './tool-gateway';
+import { listCapabilities, normalizeCalendarItem, readToolData, writeToolData } from './tool-gateway';
 
 type Env = { Variables: { userId: string } };
 
@@ -473,6 +475,78 @@ export function createAdminApp() {
       .orderBy(desc(approvalTable.createdAt))
       .limit(100);
     return c.json({ approvals: rows.map(approvalApi) });
+  });
+
+  // ---------------- 日程 / 待办 ----------------
+
+  /** 分身通过 calendar.create / todo.add 写入的数据，控制台「日程与待办」页读取 */
+
+  app.get('/admin/v1/calendar', async (c) => {
+    const avatar = await requireAvatar(c);
+    if (!avatar) return c.json(err('avatar_not_ready', '分身正在初始化'), 409);
+    const raw = await readToolData<
+      { title: string; time: string; date?: string | null }[]
+    >(avatar.id, 'calendar', []);
+    const items = raw
+      .map(normalizeCalendarItem)
+      .sort((a, b) => `${a.date ?? '9999'} ${a.time}`.localeCompare(`${b.date ?? '9999'} ${b.time}`));
+    return c.json({ items });
+  });
+
+  app.delete('/admin/v1/calendar/:index', async (c) => {
+    const avatar = await requireAvatar(c);
+    if (!avatar) return c.json(err('avatar_not_ready', '分身正在初始化'), 409);
+    const index = Number(c.req.param('index'));
+    if (!Number.isInteger(index) || index < 0) {
+      return c.json(err('bad_request', 'index 不合法'), 400);
+    }
+    const items = await readToolData<CalendarItem[]>(avatar.id, 'calendar', []);
+    if (index >= items.length) return c.json(err('not_found', '日程不存在'), 404);
+    items.splice(index, 1);
+    await writeToolData(avatar.id, 'calendar', items);
+    return c.json({ ok: true });
+  });
+
+  app.get('/admin/v1/todo', async (c) => {
+    const avatar = await requireAvatar(c);
+    if (!avatar) return c.json(err('avatar_not_ready', '分身正在初始化'), 409);
+    const items = await readToolData<TodoItem[]>(avatar.id, 'todo', []);
+    return c.json({ items });
+  });
+
+  app.patch('/admin/v1/todo/:index', async (c) => {
+    const avatar = await requireAvatar(c);
+    if (!avatar) return c.json(err('avatar_not_ready', '分身正在初始化'), 409);
+    const index = Number(c.req.param('index'));
+    if (!Number.isInteger(index) || index < 0) {
+      return c.json(err('bad_request', 'index 不合法'), 400);
+    }
+    const body = (await c.req.json().catch(() => ({}))) as { text?: string; done?: boolean };
+    if (body.text !== undefined && !body.text.trim()) {
+      return c.json(err('bad_request', 'text 不能为空'), 400);
+    }
+    const items = await readToolData<TodoItem[]>(avatar.id, 'todo', []);
+    if (index >= items.length) return c.json(err('not_found', '待办不存在'), 404);
+    items[index] = {
+      text: body.text?.trim() ?? items[index].text,
+      done: body.done ?? items[index].done,
+    };
+    await writeToolData(avatar.id, 'todo', items);
+    return c.json({ ok: true });
+  });
+
+  app.delete('/admin/v1/todo/:index', async (c) => {
+    const avatar = await requireAvatar(c);
+    if (!avatar) return c.json(err('avatar_not_ready', '分身正在初始化'), 409);
+    const index = Number(c.req.param('index'));
+    if (!Number.isInteger(index) || index < 0) {
+      return c.json(err('bad_request', 'index 不合法'), 400);
+    }
+    const items = await readToolData<TodoItem[]>(avatar.id, 'todo', []);
+    if (index >= items.length) return c.json(err('not_found', '待办不存在'), 404);
+    items.splice(index, 1);
+    await writeToolData(avatar.id, 'todo', items);
+    return c.json({ ok: true });
   });
 
   // ---------------- 用量 / 日报 ----------------

@@ -4,7 +4,7 @@ import {
   ChatBubbleLeftRightIcon,
   ShieldCheckIcon,
 } from '@heroicons/react/24/outline';
-import { RiLogoutBoxRLine, RiMoonLine, RiRobot2Line, RiSunLine } from '@remixicon/react';
+import { RiCalendarTodoLine, RiLogoutBoxRLine, RiMoonLine, RiRobot2Line, RiSunLine } from '@remixicon/react';
 import type { ComponentType } from 'react';
 import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
@@ -30,6 +30,7 @@ const ITEMS: RailItem[] = [
   { to: '/chat', label: '聊天', icon: ChatBubbleLeftRightIcon },
   { to: '/approvals', label: '审批', icon: ShieldCheckIcon },
   { to: '/avatar', label: '分身', icon: RiRobot2Line },
+  { to: '/schedule', label: '日程', icon: RiCalendarTodoLine },
   { to: '/reports', label: '日报', icon: CalendarDaysIcon },
 ];
 

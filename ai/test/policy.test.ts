@@ -192,4 +192,75 @@ describeDb('evaluatePolicy', () => {
     );
     expect(r.allow).toBe(true);
   });
+
+  test('频率限制：普通会话计数，控制通道（avatar_self）不受限', async () => {
+    const { redis, aiKeys } = await import('../src/common/redis');
+    const { dayjs } = await import('../src/common/datetime');
+    let redisReady = true;
+    try {
+      await redis.send('PING', []);
+    } catch {
+      redisReady = false;
+      console.warn('[policy.test] Redis 不可用，仅验证控制通道放行');
+    }
+    // 清掉本小时窗口的计数，避免前面用例的放行干扰
+    const hourWindow = dayjs.utc().format('YYYY-MM-DDTHH');
+    const rateKey = `${aiKeys.rate(AVATAR)}:${hourWindow}`;
+    if (redisReady) await redis.send('DEL', [rateKey]).catch(() => undefined);
+
+    await setMode('auto');
+    await setRule({ mode: 'auto', denyTopics: [], rateLimitPerHour: 1 });
+
+    if (redisReady) {
+      const first = await evaluatePolicy(input());
+      expect(first.allow).toBe(true); // 放行并计数
+      const second = await evaluatePolicy(input());
+      expect(second.allow).toBe(false);
+      expect(second.reason).toContain('频率限制');
+    }
+
+    const selfChat = await evaluatePolicy(
+      input({
+        conv: { id: CONV, type: 'direct', systemTag: 'avatar_self' },
+        via: 'self_chat',
+        mentioned: true,
+      }),
+    );
+    expect(selfChat.allow).toBe(true);
+    expect(selfChat.reason).not.toContain('频率限制');
+
+    await setRule({ rateLimitPerHour: 1000 });
+    if (redisReady) await redis.send('DEL', [rateKey]).catch(() => undefined);
+  });
+
+  test('被拒任务不消耗频率配额', async () => {
+    const { redis, aiKeys } = await import('../src/common/redis');
+    const { dayjs } = await import('../src/common/datetime');
+    let redisReady = true;
+    try {
+      await redis.send('PING', []);
+    } catch {
+      redisReady = false;
+    }
+    if (!redisReady) return console.warn('[policy.test] Redis 不可用，跳过');
+
+    const hourWindow = dayjs.utc().format('YYYY-MM-DDTHH');
+    const rateKey = `${aiKeys.rate(AVATAR)}:${hourWindow}`;
+    await redis.send('DEL', [rateKey]).catch(() => undefined);
+
+    await setMode('auto');
+    await setRule({ mode: 'auto', denyTopics: ['money'], rateLimitPerHour: 2 });
+
+    const a = await evaluatePolicy(input());
+    expect(a.allow).toBe(true); // 计数 → 1
+    const b = await evaluatePolicy(input({ classification: classify('帮我转账 200 元') }));
+    expect(b.allow).toBe(false); // 禁区话题被拒，不计数
+    const c = await evaluatePolicy(input());
+    expect(c.allow).toBe(true); // 旧实现此处已超限（被拒也计数），新实现仍放行 → 计数 2
+    const d = await evaluatePolicy(input());
+    expect(d.allow).toBe(false); // 现在才真正超限
+
+    await setRule({ denyTopics: [], rateLimitPerHour: 1000 });
+    await redis.send('DEL', [rateKey]).catch(() => undefined);
+  });
 });

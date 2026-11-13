@@ -14,7 +14,7 @@ import type { Classification } from './classifier';
 import { dayjs } from './common/datetime';
 import { db } from './common/db';
 import { internal } from './common/internal';
-import { aiKeys, redisExists, redisIncrWindow, redisSetEx } from './common/redis';
+import { aiKeys, redisExists, redisGet, redisIncrWindow, redisSetEx } from './common/redis';
 import { avatar as avatarTable, member, policy as policyTable } from './db/schema';
 import { todayCost } from './model-gateway';
 import { effectiveSessionMode } from './turn-guard';
@@ -154,11 +154,16 @@ export async function evaluatePolicy(p: PolicyInput): Promise<PolicyEval> {
     return deny('话题冷却中（主人刚介入过）', mode);
   }
 
-  // 频率限制：按小时窗口
+  // 频率限制：按小时窗口。
+  // - avatar_self 控制通道是主人显式指令，不占自动回复配额（限流针对分身对外代答）
+  // - 只有实际放行的任务才计数：先读当前值判断，放行时再 INCR，被拒任务不烧配额
   const hourWindow = dayjs.utc().format('YYYY-MM-DDTHH'); // YYYY-MM-DDTHH
-  const count = await redisIncrWindow(`${aiKeys.rate(p.avatarId)}:${hourWindow}`, 3600);
-  if (count > rateLimitPerHour) {
-    return deny(`超过频率限制（${rateLimitPerHour}/小时）`, mode);
+  const rateKey = `${aiKeys.rate(p.avatarId)}:${hourWindow}`;
+  if (!isSelfChat) {
+    const current = Number((await redisGet(rateKey)) ?? '0');
+    if (current >= rateLimitPerHour) {
+      return deny(`超过频率限制（${rateLimitPerHour}/小时）`, mode);
+    }
   }
 
   // 日预算：超额降级为手动档并提示一次
@@ -189,6 +194,9 @@ export async function evaluatePolicy(p: PolicyInput): Promise<PolicyEval> {
       downgraded,
     };
   }
+
+  // 放行时才计入频率配额（Redis 不可用时 INCR 静默失败，按放行处理）
+  if (!isSelfChat) await redisIncrWindow(rateKey, 3600);
 
   return {
     allow: true,

@@ -14,6 +14,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { db } from './common/db';
+import { dayjs } from './common/datetime';
 import { capabilityGrant, toolData } from './db/schema';
 import { complete } from './model-gateway';
 
@@ -45,6 +46,7 @@ export interface BuiltinTool {
 
 interface CalendarItem {
   title: string;
+  date: string | null;
   time: string;
 }
 interface TodoItem {
@@ -52,7 +54,79 @@ interface TodoItem {
   done: boolean;
 }
 
-async function readToolData<T>(avatarId: string, kind: string, fallback: T): Promise<T> {
+/**
+ * 把模型给的自由格式时间文本（"tomorrow 14:00"、"明天 下午 3 点"、"2026-11-14 09:00"）
+ * 解析成具体日期 + HH:mm。无法解析（如缺小时数）时返回 null，调用方按旧数据兜底展示。
+ */
+export function parseEventTime(input: string): { date: string; time: string } | null {
+  const text = input.trim();
+  if (!text) return null;
+
+  const now = dayjs();
+
+  // 事件时刻：小时[:分][点]，可带时段前缀（上午/下午/晚上/中午/早上）
+  const timeMatch =
+    /(上午|早上|凌晨|中午|下午|傍晚|晚上)?\s*(\d{1,2})\s*[:：点]\s*(\d{1,2})?\s*分?/.exec(text);
+  if (!timeMatch) return null;
+  const period = timeMatch[1];
+  let hour = Number(timeMatch[2]);
+  const minute = Number(timeMatch[3] ?? 0);
+  if (!Number.isInteger(hour) || hour > 23 || minute > 59) return null;
+  if ((period === '下午' || period === '傍晚' || period === '晚上') && hour < 12) hour += 12;
+  if (period === '中午' && hour < 11) hour += 12;
+  const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+
+  // 具体日期：2026-11-14 / 2026/11/14 / 2026年11月14日
+  const dateMatch = /(\d{4})\s*[-/年]\s*(\d{1,2})\s*[-/月]\s*(\d{1,2})\s*日?/.exec(text);
+  if (dateMatch) {
+    const d = dayjs(
+      `${dateMatch[1]}-${dateMatch[2].padStart(2, '0')}-${dateMatch[3].padStart(2, '0')}`,
+      'YYYY-MM-DD',
+    );
+    if (d.isValid()) return { date: d.format('YYYY-MM-DD'), time };
+    return null;
+  }
+
+  // 相对日期词
+  const weekDayMap: Record<string, number> = {
+    一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 0, 天: 0,
+  };
+  let day = now;
+  if (/今天|今晚|today/i.test(text)) {
+    day = now;
+  } else if (/明天|明晚|tomorrow/i.test(text)) {
+    day = now.add(1, 'day');
+  } else if (/后天/.test(text)) {
+    day = now.add(2, 'day');
+  } else {
+    const weekMatch = /(?:下周|星期|周)([一二三四五六日天])/.exec(text);
+    if (weekMatch) {
+      const target = weekDayMap[weekMatch[1]] ?? 1;
+      let delta = (target - now.day() + 7) % 7;
+      if (delta === 0) delta = 7; // 「下周三」说本周三时指向下周
+      if (text.includes('下周') && now.day() !== 0 && target <= now.day()) delta += 7;
+      day = now.add(delta, 'day');
+    } else {
+      day = now; // 只有时刻（如 "14:00"）默认今天
+    }
+  }
+  return { date: day.format('YYYY-MM-DD'), time };
+}
+
+/** 归一化存储的日程条目：旧数据（无 date 字段）尽量解析补全 */
+export function normalizeCalendarItem(raw: {
+  title: string;
+  time: string;
+  date?: string | null;
+}): CalendarItem {
+  if (raw.date) return { title: raw.title, date: raw.date, time: raw.time };
+  const parsed = parseEventTime(raw.time);
+  if (parsed) return { title: raw.title, date: parsed.date, time: parsed.time };
+  return { title: raw.title, date: null, time: raw.time };
+}
+
+/** 供 admin-api（日程/待办页）复用：读 avatar 级工具数据，无记录时返回 fallback */
+export async function readToolData<T>(avatarId: string, kind: string, fallback: T): Promise<T> {
   const rows = await db
     .select({ data: toolData.data })
     .from(toolData)
@@ -60,7 +134,7 @@ async function readToolData<T>(avatarId: string, kind: string, fallback: T): Pro
   return rows.length ? ((rows[0].data as T) ?? fallback) : fallback;
 }
 
-async function writeToolData(avatarId: string, kind: string, data: unknown): Promise<void> {
+export async function writeToolData(avatarId: string, kind: string, data: unknown): Promise<void> {
   await db
     .insert(toolData)
     .values({ avatarId, kind, data })
@@ -71,10 +145,11 @@ async function writeToolData(avatarId: string, kind: string, data: unknown): Pro
 }
 
 function todayCalendar(): CalendarItem[] {
+  const today = dayjs().format('YYYY-MM-DD');
   return [
-    { title: '产品评审会', time: '10:00' },
-    { title: '与 Bob 的 1:1', time: '11:30' },
-    { title: '健身', time: '19:00' },
+    { title: '产品评审会', date: today, time: '10:00' },
+    { title: '与 Bob 的 1:1', date: today, time: '11:30' },
+    { title: '健身', date: today, time: '19:00' },
   ];
 }
 
@@ -107,13 +182,27 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     validate: z.object({ day: z.enum(['today', 'tomorrow', 'week']).default('today') }),
     async exec(_args, ctx) {
-      const stored = await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', todayCalendar());
-      const items = stored.slice(0, 8).map((x) => `${x.time} ${x.title}`);
+      const day = String(_args.day ?? 'today') as 'today' | 'tomorrow' | 'week';
+      const stored = (await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', todayCalendar()))
+        .map(normalizeCalendarItem);
+      const today = dayjs();
+      const matchDay = (item: CalendarItem): boolean => {
+        if (!item.date) return day === 'today'; // 无法解析的旧数据只在「今天」里兜底展示
+        if (day === 'today') return item.date === today.format('YYYY-MM-DD');
+        if (day === 'tomorrow') return item.date === today.add(1, 'day').format('YYYY-MM-DD');
+        const diff = dayjs(item.date, 'YYYY-MM-DD').startOf('day').diff(today.startOf('day'), 'day');
+        return diff >= 0 && diff < 7;
+      };
+      const items = stored
+        .filter(matchDay)
+        .slice(0, 8)
+        .map((x) => (x.date ? `${x.date} ${x.time} ${x.title}` : `${x.time} ${x.title}`));
+      const label = day === 'today' ? '今天' : day === 'tomorrow' ? '明天' : '未来一周';
       return {
         summary:
           items.length === 0
-            ? '日程是空的，今天没有安排。'
-            : `今天共有 ${items.length} 项安排：${items.join('；')}`,
+            ? `日程是空的，${label}没有安排。`
+            : `${label}共有 ${items.length} 项安排：${items.join('；')}`,
         items,
       };
     },
@@ -129,23 +218,32 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       required: ['title'],
       properties: {
         title: { type: 'string', description: '日程标题' },
-        time: { type: 'string', description: '时间，如 tomorrow 10:00' },
+        time: {
+          type: 'string',
+          description: '时间，如 "明天 15:00"、"2026-11-14 09:30"、"tomorrow 10:00"',
+        },
       },
     },
     validate: z.object({
       title: z.string().min(1).max(100),
-      time: z.string().default('tomorrow 10:00'),
+      time: z.string().default('明天 10:00'),
     }),
     async exec(args, ctx) {
       const title = String(args.title);
-      const time = String(args.time ?? 'tomorrow 10:00');
-      const stored = await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', todayCalendar());
-      stored.push({ title, time });
+      const timeInput = String(args.time ?? '明天 10:00');
+      const parsed = parseEventTime(timeInput);
+      const stored = await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', []);
+      stored.push(
+        parsed
+          ? { title, date: parsed.date, time: parsed.time }
+          : { title, date: null, time: timeInput },
+      );
       await writeToolData(ctx.avatarId, 'calendar', stored);
+      const when = parsed ? `${parsed.date} ${parsed.time}` : timeInput;
       return {
         ok: true,
-        message: `已创建日程：${time} ${title}`,
-        summary: `已帮你创建日程「${title}」（${time}）✅`,
+        message: `已创建日程：${when} ${title}`,
+        summary: `已帮你创建日程「${title}」（${when}）✅`,
       };
     },
   },
@@ -185,6 +283,178 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       items.push({ text: String(args.text), done: false });
       await writeToolData(ctx.avatarId, 'todo', items);
       return { ok: true, summary: `已加入待办：${String(args.text)}` };
+    },
+  },
+  {
+    id: 'calendar.update',
+    name: '修改日程',
+    description: '修改一条已有日程的标题或时间（低风险写操作）',
+    risk: 'L1',
+    idempotent: false,
+    jsonSchema: {
+      type: 'object',
+      required: ['match'],
+      properties: {
+        match: { type: 'string', description: '要修改的日程标题（完整或包含关键词）' },
+        newTitle: { type: 'string', description: '新标题，不修改则不传' },
+        newTime: { type: 'string', description: '新时间，如 "明天 15:00"，不修改则不传' },
+      },
+    },
+    validate: z.object({
+      match: z.string().min(1).max(100),
+      newTitle: z.string().min(1).max(100).optional(),
+      newTime: z.string().min(1).max(60).optional(),
+    }),
+    async exec(args, ctx) {
+      const match = String(args.match).trim();
+      const stored = (await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', [])).map(
+        normalizeCalendarItem,
+      );
+      const hits = stored.filter((x) => x.title.includes(match));
+      if (hits.length === 0) {
+        return { ok: false, summary: `没找到标题包含「${match}」的日程，请确认后再试。` };
+      }
+      if (hits.length > 1) {
+        const list = hits.map((x) => `${x.date ?? ''} ${x.time} ${x.title}`).join('；');
+        return {
+          ok: false,
+          summary: `找到 ${hits.length} 条匹配「${match}」的日程（${list}），请说得更具体一些。`,
+        };
+      }
+      const index = stored.findIndex((x) => x.title.includes(match));
+      const item = stored[index]!;
+      const before = `${item.date ?? ''} ${item.time} ${item.title}`.trim();
+      if (args.newTitle !== undefined) item.title = String(args.newTitle);
+      if (args.newTime !== undefined) {
+        const parsed = parseEventTime(String(args.newTime));
+        if (!parsed) {
+          return { ok: false, summary: `新时间「${String(args.newTime)}」无法识别，请换种说法。` };
+        }
+        item.date = parsed.date;
+        item.time = parsed.time;
+      }
+      stored[index] = item;
+      await writeToolData(ctx.avatarId, 'calendar', stored);
+      const after = `${item.date ?? ''} ${item.time} ${item.title}`.trim();
+      return {
+        ok: true,
+        summary: `已修改日程：${before} → ${after}`,
+      };
+    },
+  },
+  {
+    id: 'calendar.delete',
+    name: '删除日程',
+    description: '删除一条日程（高风险，需主人确认）',
+    risk: 'L2',
+    idempotent: false,
+    jsonSchema: {
+      type: 'object',
+      required: ['match'],
+      properties: {
+        match: { type: 'string', description: '要删除的日程标题（完整或包含关键词）' },
+      },
+    },
+    validate: z.object({ match: z.string().min(1).max(100) }),
+    async exec(args, ctx) {
+      const match = String(args.match).trim();
+      const stored = (await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', [])).map(
+        normalizeCalendarItem,
+      );
+      const hits = stored.filter((x) => x.title.includes(match));
+      if (hits.length === 0) {
+        return { ok: false, summary: `没找到标题包含「${match}」的日程，无需删除。` };
+      }
+      if (hits.length > 1) {
+        const list = hits.map((x) => `${x.date ?? ''} ${x.time} ${x.title}`).join('；');
+        return {
+          ok: false,
+          summary: `找到 ${hits.length} 条匹配「${match}」的日程（${list}），请说得更具体一些。`,
+        };
+      }
+      const index = stored.findIndex((x) => x.title.includes(match));
+      const removed = stored.splice(index, 1)[0]!;
+      await writeToolData(ctx.avatarId, 'calendar', stored);
+      const when = `${removed.date ?? ''} ${removed.time}`.trim();
+      return {
+        ok: true,
+        summary: `已删除日程：${when} ${removed.title}`,
+      };
+    },
+  },
+  {
+    id: 'todo.update',
+    name: '修改待办',
+    description: '修改一条待办的内容或完成状态（低风险写操作）',
+    risk: 'L1',
+    idempotent: false,
+    jsonSchema: {
+      type: 'object',
+      required: ['match'],
+      properties: {
+        match: { type: 'string', description: '要修改的待办内容（完整或包含关键词）' },
+        newText: { type: 'string', description: '新内容，不修改则不传' },
+        done: { type: 'boolean', description: '完成状态，不修改则不传' },
+      },
+    },
+    validate: z.object({
+      match: z.string().min(1).max(200),
+      newText: z.string().min(1).max(200).optional(),
+      done: z.boolean().optional(),
+    }),
+    async exec(args, ctx) {
+      const match = String(args.match).trim();
+      const items = await readToolData<TodoItem[]>(ctx.avatarId, 'todo', []);
+      const hits = items.filter((x) => x.text.includes(match));
+      if (hits.length === 0) {
+        return { ok: false, summary: `没找到内容包含「${match}」的待办。` };
+      }
+      if (hits.length > 1) {
+        return {
+          ok: false,
+          summary: `找到 ${hits.length} 条匹配「${match}」的待办（${hits.map((x) => x.text).join('；')}），请说得更具体一些。`,
+        };
+      }
+      const index = items.findIndex((x) => x.text.includes(match));
+      const before = `${items[index]!.done ? '[已完成] ' : ''}${items[index]!.text}`;
+      if (args.newText !== undefined) items[index]!.text = String(args.newText);
+      if (args.done !== undefined) items[index]!.done = Boolean(args.done);
+      await writeToolData(ctx.avatarId, 'todo', items);
+      const after = `${items[index]!.done ? '[已完成] ' : ''}${items[index]!.text}`;
+      return { ok: true, summary: `已修改待办：${before} → ${after}` };
+    },
+  },
+  {
+    id: 'todo.delete',
+    name: '删除待办',
+    description: '删除一条待办（高风险，需主人确认）',
+    risk: 'L2',
+    idempotent: false,
+    jsonSchema: {
+      type: 'object',
+      required: ['match'],
+      properties: {
+        match: { type: 'string', description: '要删除的待办内容（完整或包含关键词）' },
+      },
+    },
+    validate: z.object({ match: z.string().min(1).max(200) }),
+    async exec(args, ctx) {
+      const match = String(args.match).trim();
+      const items = await readToolData<TodoItem[]>(ctx.avatarId, 'todo', []);
+      const hits = items.filter((x) => x.text.includes(match));
+      if (hits.length === 0) {
+        return { ok: false, summary: `没找到内容包含「${match}」的待办，无需删除。` };
+      }
+      if (hits.length > 1) {
+        return {
+          ok: false,
+          summary: `找到 ${hits.length} 条匹配「${match}」的待办（${hits.map((x) => x.text).join('；')}），请说得更具体一些。`,
+        };
+      }
+      const index = items.findIndex((x) => x.text.includes(match));
+      const removed = items.splice(index, 1)[0]!;
+      await writeToolData(ctx.avatarId, 'todo', items);
+      return { ok: true, summary: `已删除待办：${removed.text}` };
     },
   },
   {

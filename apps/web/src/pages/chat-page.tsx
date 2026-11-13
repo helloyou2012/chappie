@@ -39,6 +39,12 @@ export function ChatPage() {
   const [takeoverBusy, setTakeoverBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);
+  const lastScrollKeyRef = useRef<{
+    convId?: string;
+    lastMsgId: string | null;
+    lastPendingId: string | null;
+  }>({ lastMsgId: null, lastPendingId: null });
   const now = useNow(1000);
 
   const view = conversations.find((c) => c.conversation.id === convId);
@@ -76,12 +82,32 @@ export function ChatPage() {
     }
   }, [convId]);
 
-  // 滚动到底部（新消息）
+  // 滚动到底部：切换会话直接跳底；自己发消息（含回复）总是跟随；
+  // 收到新消息时仅当原本停留在底部附近才跟随，避免打断向上翻阅历史
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  const lastMsgId = lastMsg?.msgId ?? null;
+  const lastMsgSenderId = lastMsg?.senderId;
+  const lastPendingId = pending.length > 0 ? pending[pending.length - 1]?.clientMsgId ?? null : null;
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-  }, []);
+    const prev = lastScrollKeyRef.current;
+    lastScrollKeyRef.current = { convId, lastMsgId, lastPendingId };
+
+    if (prev.convId !== convId) {
+      atBottomRef.current = true;
+      el.scrollTo({ top: el.scrollHeight });
+      return;
+    }
+    // 最后一条没变（如加载更早消息只是前插）时不滚动
+    if (prev.lastMsgId === lastMsgId && prev.lastPendingId === lastPendingId) return;
+    const own = lastPendingId !== prev.lastPendingId || lastMsgSenderId === myId;
+    if (own || atBottomRef.current) {
+      atBottomRef.current = true;
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }
+  }, [convId, lastMsgId, lastMsgSenderId, lastPendingId, myId]);
 
   if (!convId || !view) {
     return (
@@ -175,7 +201,14 @@ export function ChatPage() {
           </div>
         </header>
 
-        <div ref={scrollRef} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto py-3">
+        <div
+          ref={scrollRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+          }}
+          className="scrollbar-thin min-h-0 flex-1 overflow-y-auto py-3"
+        >
           {messages.length > 0 ? (
             <div className="mb-2 flex justify-center">
               <Button

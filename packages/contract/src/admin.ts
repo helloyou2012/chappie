@@ -7,12 +7,14 @@ import { z } from 'zod';
 import {
   AgentTask,
   Approval,
+  CalendarItem,
   Capability,
   CapabilityGrant,
   DailyReport,
   MemoryItem,
   Policy,
   TaskStep,
+  TodoItem,
   UsageDay,
 } from './ai';
 import { Avatar } from './identity';
@@ -86,6 +88,19 @@ export const ListApprovalsQuery = z.object({
 });
 export const ListApprovalsResponse = z.object({ approvals: z.array(Approval) });
 
+// ---- 日程 / 待办 ----
+
+export const GetCalendarResponse = z.object({ items: z.array(CalendarItem) });
+export const DeleteCalendarItemResponse = z.object({ ok: z.boolean() });
+
+export const GetTodoResponse = z.object({ items: z.array(TodoItem) });
+export const UpdateTodoItemRequest = z.object({
+  text: z.string().min(1).max(200).optional(),
+  done: z.boolean().optional(),
+});
+export const UpdateTodoItemResponse = z.object({ ok: z.boolean() });
+export const DeleteTodoItemResponse = z.object({ ok: z.boolean() });
+
 // ---- 用量 / 日报 ----
 
 export const GetUsageQuery = z.object({ days: z.number().int().min(1).max(90).default(14) });
@@ -127,3 +142,9 @@ export type GetUsageResponse = z.infer<typeof GetUsageResponse>;
 export type GetDailyReportQuery = z.infer<typeof GetDailyReportQuery>;
 export type GetDailyReportResponse = z.infer<typeof GetDailyReportResponse>;
 export type GenerateReportResponse = z.infer<typeof GenerateReportResponse>;
+export type GetCalendarResponse = z.infer<typeof GetCalendarResponse>;
+export type DeleteCalendarItemResponse = z.infer<typeof DeleteCalendarItemResponse>;
+export type GetTodoResponse = z.infer<typeof GetTodoResponse>;
+export type UpdateTodoItemRequest = z.infer<typeof UpdateTodoItemRequest>;
+export type UpdateTodoItemResponse = z.infer<typeof UpdateTodoItemResponse>;
+export type DeleteTodoItemResponse = z.infer<typeof DeleteTodoItemResponse>;

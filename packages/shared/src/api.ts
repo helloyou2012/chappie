@@ -10,7 +10,9 @@ import type {
   DailyReport,
   DeviceCapabilities,
   FeedbackType,
+  GetCalendarResponse,
   GetTaskResponse,
+  GetTodoResponse,
   ListApprovalsResponse,
   ListCapabilitiesResponse,
   ListConversationsResponse,
@@ -24,6 +26,7 @@ import type {
   PolicyRule,
   PreviewResponse,
   SendCodeResponse,
+  UpdateTodoItemRequest,
   UsageDay,
   User,
   VerifyCodeResponse,
@@ -226,6 +229,15 @@ export const adminApi = {
     return a<ListApprovalsResponse>('GET', `/admin/v1/approvals${qs ? `?${qs}` : ''}`);
   },
 
+  // 日程 / 待办（分身工具数据）
+  listCalendar: () => a<GetCalendarResponse>('GET', '/admin/v1/calendar'),
+  deleteCalendarItem: (index: number) =>
+    a<{ ok: boolean }>('DELETE', `/admin/v1/calendar/${index}`),
+  listTodo: () => a<GetTodoResponse>('GET', '/admin/v1/todo'),
+  updateTodoItem: (index: number, req: UpdateTodoItemRequest) =>
+    a<{ ok: boolean }>('PATCH', `/admin/v1/todo/${index}`, req),
+  deleteTodoItem: (index: number) => a<{ ok: boolean }>('DELETE', `/admin/v1/todo/${index}`),
+
   getUsage: (days = 14) =>
     a<{ usage: UsageDay[]; todayCostUsd: number; dailyBudgetUsd: number }>(
       'GET',
@@ -244,6 +256,7 @@ export type {
   Approval,
   Avatar,
   AvatarMode,
+  CalendarItem,
   Capability,
   CapabilityGrant,
   CardAction,
@@ -265,6 +278,7 @@ export type {
   ScheduleWindow,
   StyleProfile,
   TaskStep,
+  TodoItem,
   UsageDay,
   User,
 } from '@chappie/contract';

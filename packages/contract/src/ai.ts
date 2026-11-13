@@ -269,3 +269,22 @@ export const DailyReport = z.object({
   createdAt: z.string(),
 });
 export type DailyReport = z.infer<typeof DailyReport>;
+
+// ---------------------------------------------------------------------------
+// 日程 / 待办（分身工具 toolData：calendar / todo）—— 设计方案 §8 内置能力
+// ---------------------------------------------------------------------------
+
+export const CalendarItem = z.object({
+  title: z.string(),
+  /** 事件日期 YYYY-MM-DD；旧数据可能是自由文本时间、无法解析时为 null */
+  date: z.string().nullable().default(null),
+  /** 时间 HH:mm；旧数据可能是自由文本（如 "tomorrow 14:00"） */
+  time: z.string(),
+});
+export type CalendarItem = z.infer<typeof CalendarItem>;
+
+export const TodoItem = z.object({
+  text: z.string(),
+  done: z.boolean().default(false),
+});
+export type TodoItem = z.infer<typeof TodoItem>;
