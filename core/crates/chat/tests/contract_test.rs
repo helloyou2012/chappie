@@ -57,6 +57,7 @@ fn message_fixtures_roundtrip() {
         "draftCardMessage",
         "approvalCardMessage",
         "taskCardMessage",
+        "calendarReminderCardMessage",
     ] {
         roundtrip::<Message>(&fx[key], key);
     }

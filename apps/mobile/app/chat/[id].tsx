@@ -10,22 +10,14 @@ import {
 } from '@chappie/shared';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import {
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import Icon from 'react-native-remix-icon';
+import { FlatList, KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MemberSheet } from '@/components/member-sheet';
 import { type CardAction, MessageBubble } from '@/components/message';
 import { useTheme } from '@/hooks/use-theme';
 import { realtime } from '@/realtime';
 import { modeLabels } from '@/theme';
+import { Badge, BottomSheet, Button, Chip, IconButton, Input, Text } from '@/ui';
 
 const MODE_CYCLE = ['manual', 'draft', 'auto', 'off'] as const;
 
@@ -40,6 +32,7 @@ export default function ChatScreen() {
   const messagesByConv = useChatStore((s) => s.messagesByConv);
   const membersByConv = useChatStore((s) => s.membersByConv);
   const pendingByConv = useChatStore((s) => s.pendingByConv);
+  const typingByConv = useChatStore((s) => s.typingByConv);
   const loadMessages = useChatStore((s) => s.loadMessages);
   const loadMembers = useChatStore((s) => s.loadMembers);
   const setActiveConv = useChatStore((s) => s.setActiveConv);
@@ -62,11 +55,24 @@ export default function ChatScreen() {
 
   const [text, setText] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
+  const [memberSheetOpen, setMemberSheetOpen] = useState(false);
+  const [modeSheetOpen, setModeSheetOpen] = useState(false);
+  const [replyTo, setReplyTo] = useState<{ msgId: string; preview: string } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [olderExhausted, setOlderExhausted] = useState(false);
+  const [, setTypingTick] = useState(0);
   const listRef = useRef<FlatList>(null);
+
+  // typing 事件带截止时间：定时重渲染以便过期的「正在输入」自动消失
+  useEffect(() => {
+    const timer = setInterval(() => setTypingTick((n) => n + 1), 3000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!convId) return;
     setActiveConv(convId);
+    setOlderExhausted(false);
     void loadMessages(convId).catch(() => undefined);
     void loadMembers(convId).catch(() => undefined);
     return () => setActiveConv(null);
@@ -93,77 +99,107 @@ export default function ChatScreen() {
     const ws = realtime();
     if (!ws?.isOpen) return;
     const content = { type: 'text' as const, schemaVersion: 1, text: value };
-    const clientMsgId = ws.sendMessage(convId, content, { mentions });
+    const clientMsgId = ws.sendMessage(convId, content, {
+      mentions,
+      replyTo: replyTo?.msgId ?? null,
+    });
     addPending({
       clientMsgId,
       convId,
       content,
       mentions,
-      replyTo: null,
+      replyTo: replyTo?.msgId ?? null,
       createdAt: dayjs().toISOString(),
     });
     setText('');
     setMentions([]);
+    setReplyTo(null);
   };
 
-  const onCardAction = (msgId: string, action: CardAction) => {
-    void api.cardAction(msgId, { action }).catch(() => undefined);
+  const onCardAction = (msgId: string, action: CardAction, editedText?: string) => {
+    void api.cardAction(msgId, { action, editedText }).catch(() => undefined);
   };
 
-  const cycleMode = () => {
-    if (!view || !convId) return;
-    const idx = MODE_CYCLE.indexOf(view.myAiMode as (typeof MODE_CYCLE)[number]);
-    const next = MODE_CYCLE[(idx + 1) % MODE_CYCLE.length];
-    void updateMode(convId, next).catch(() => undefined);
+  const loadMore = async () => {
+    if (loadingMore || olderExhausted || !convId || messages.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const before = messages.length;
+      await loadMessages(convId, { before: true });
+      const after = useChatStore.getState().messagesByConv[convId]?.length ?? 0;
+      if (after === before) setOlderExhausted(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const chooseMode = (mode: (typeof MODE_CYCLE)[number], tempHours?: number) => {
+    if (!convId) return;
+    setModeSheetOpen(false);
+    void updateMode(convId, mode, tempHours).catch(() => undefined);
+  };
+
+  const takeover = () => {
+    if (!convId) return;
+    setModeSheetOpen(false);
+    void api.takeover(convId).catch(() => undefined);
   };
 
   const mentionCandidates = members.filter((m) => m.principalId !== myId);
+  const now = Date.now();
+  const typingNames = Object.entries(typingByConv[convId] ?? {})
+    .filter(([pid, until]) => pid !== myId && until > now)
+    .map(([pid]) => members.find((m) => m.principalId === pid)?.name ?? '成员');
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: t.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={0}
     >
       {/* 头部 */}
       <View
         style={{
           paddingTop: insets.top + 6,
-          paddingBottom: 10,
-          paddingHorizontal: 14,
+          paddingBottom: 8,
+          paddingHorizontal: 8,
           backgroundColor: t.card,
           borderBottomWidth: 1,
           borderBottomColor: t.border,
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 10,
+          gap: 6,
         }}
       >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Icon name="arrow-left-s-line" size={24} color={t.primary} />
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 16, fontWeight: '600', color: t.text }} numberOfLines={1}>
-            {view?.displayTitle ?? '会话'}
-          </Text>
-          <Text style={{ fontSize: 11, color: t.textMuted }}>
+        <IconButton
+          icon="arrow-left-s-line"
+          label="返回"
+          tone="primary"
+          onPress={() => router.back()}
+        />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Text variant="subtitle" numberOfLines={1} style={{ flexShrink: 1 }}>
+              {view?.displayTitle ?? '会话'}
+            </Text>
+            {view?.conversation.systemTag === 'avatar_self' ? (
+              <Badge label="分身" tone="ai" />
+            ) : null}
+          </View>
+          <Text variant="micro" tone="muted" numberOfLines={1}>
             {members.filter((m) => m.principalType === 'human').length} 位成员 ·{' '}
             {members.filter((m) => m.principalType === 'avatar').length} 个分身
           </Text>
         </View>
-        <Pressable
-          onPress={cycleMode}
-          style={{
-            borderRadius: 10,
-            backgroundColor: t.bg,
-            paddingHorizontal: 10,
-            paddingVertical: 6,
-          }}
-        >
-          <Text style={{ fontSize: 12, fontWeight: '600', color: t.primary }}>
-            {modeLabels[view?.myAiMode ?? 'manual']}
-          </Text>
-        </Pressable>
+        <Button
+          size="sm"
+          variant="secondary"
+          fullWidth={false}
+          label={`${modeLabels[view?.myAiMode ?? 'manual']}${view?.myAiModeUntil ? ' · 临时' : ''}`}
+          onPress={() => setModeSheetOpen(true)}
+        />
+        {view && view.conversation.type === 'group' && view.conversation.systemTag === null ? (
+          <IconButton icon="team-line" label="成员管理" onPress={() => setMemberSheetOpen(true)} />
+        ) : null}
       </View>
 
       <FlatList
@@ -183,7 +219,7 @@ export default function ChatScreen() {
                   opacity: 0.6,
                 }}
               >
-                <Text style={{ fontSize: 10, color: t.textMuted, marginBottom: 3 }}>
+                <Text variant="micro" tone="muted" style={{ marginBottom: 3 }}>
                   我 · {formatTime(item.pending.createdAt)} · 发送中
                 </Text>
                 <View
@@ -204,14 +240,35 @@ export default function ChatScreen() {
           }
           return (
             <MessageBubble
-              message={item}
+              message={item.message}
               members={members}
               myId={myId}
               onCardAction={onCardAction}
+              onReply={(msgId, preview) => setReplyTo({ msgId, preview })}
             />
           );
         }}
         contentContainerStyle={{ paddingVertical: 10 }}
+        onScroll={({ nativeEvent }) => {
+          if (nativeEvent.contentOffset.y < 40) void loadMore();
+        }}
+        scrollEventThrottle={120}
+        ListHeaderComponent={
+          loadingMore ? (
+            <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+              <Text variant="micro" tone="muted">
+                加载更早消息…
+              </Text>
+            </View>
+          ) : undefined
+        }
+        ListEmptyComponent={
+          <View style={{ alignItems: 'center', paddingVertical: 60 }}>
+            <Text variant="bodySm" tone="muted">
+              还没有消息，打个招呼吧
+            </Text>
+          </View>
+        }
       />
 
       {/* 提及候选 */}
@@ -219,91 +276,153 @@ export default function ChatScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={{ maxHeight: 40, borderTopWidth: 1, borderTopColor: t.border }}
-          contentContainerStyle={{ paddingHorizontal: 10, paddingVertical: 5, gap: 6 }}
+          style={{ maxHeight: 42, borderTopWidth: 1, borderTopColor: t.border }}
+          contentContainerStyle={{ paddingHorizontal: 10, paddingVertical: 6, gap: 6 }}
         >
-          {mentionCandidates.map((m) => {
-            const active = mentions.includes(m.principalId);
-            return (
-              <Pressable
-                key={m.principalId}
-                onPress={() =>
-                  setMentions((prev) =>
-                    prev.includes(m.principalId)
-                      ? prev.filter((x) => x !== m.principalId)
-                      : [...prev, m.principalId],
-                  )
-                }
-                style={{
-                  borderRadius: 999,
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                  backgroundColor: active ? t.primary : t.card,
-                  borderWidth: 1,
-                  borderColor: active ? t.primary : t.border,
-                }}
-              >
-                <Text style={{ fontSize: 12, color: active ? t.primaryFg : t.text }}>
-                  @{m.name}
-                  {m.principalType === 'avatar' ? ' ✨' : ''}
-                </Text>
-              </Pressable>
-            );
-          })}
+          {mentionCandidates.map((m) => (
+            <Chip
+              key={m.principalId}
+              label={`@${m.name}${m.principalType === 'avatar' ? ' ✨' : ''}`}
+              active={mentions.includes(m.principalId)}
+              onPress={() =>
+                setMentions((prev) =>
+                  prev.includes(m.principalId)
+                    ? prev.filter((x) => x !== m.principalId)
+                    : [...prev, m.principalId],
+                )
+              }
+            />
+          ))}
         </ScrollView>
+      ) : null}
+
+      {/* 正在输入 */}
+      {typingNames.length > 0 ? (
+        <View style={{ paddingHorizontal: 16, paddingVertical: 4 }}>
+          <Text variant="micro" tone="muted">
+            {typingNames.join('、')} 正在输入…
+          </Text>
+        </View>
       ) : null}
 
       {/* 输入栏 */}
       <View
         style={{
-          flexDirection: 'row',
-          alignItems: 'flex-end',
-          gap: 8,
-          paddingHorizontal: 12,
-          paddingTop: 8,
-          paddingBottom: Math.max(insets.bottom, 10),
           borderTopWidth: 1,
           borderTopColor: t.border,
           backgroundColor: t.card,
+          paddingBottom: Math.max(insets.bottom, 10),
         }}
       >
-        <TextInput
-          value={text}
-          onChangeText={(v) => {
-            setText(v);
-            realtime()?.typing(convId);
-          }}
-          placeholder="输入消息…"
-          placeholderTextColor={t.textMuted}
-          multiline
+        {replyTo ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              marginHorizontal: 12,
+              marginTop: 8,
+              paddingHorizontal: 10,
+              paddingVertical: 4,
+              borderRadius: 8,
+              backgroundColor: t.bg,
+              borderLeftWidth: 2,
+              borderLeftColor: t.primary,
+            }}
+          >
+            <Text variant="caption" tone="muted" numberOfLines={1} style={{ flex: 1 }}>
+              回复:{replyTo.preview}
+            </Text>
+            <IconButton
+              icon="close-line"
+              label="取消回复"
+              size={28}
+              tone="muted"
+              onPress={() => setReplyTo(null)}
+            />
+          </View>
+        ) : null}
+        <View
           style={{
-            flex: 1,
-            maxHeight: 110,
-            borderRadius: 18,
-            borderWidth: 1,
-            borderColor: t.border,
-            paddingHorizontal: 14,
-            paddingVertical: 9,
-            fontSize: 15,
-            color: t.text,
-            backgroundColor: t.bg,
-          }}
-        />
-        <Pressable
-          onPress={send}
-          disabled={!text.trim()}
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            backgroundColor: text.trim() ? t.primary : t.border,
-            alignItems: 'center',
-            justifyContent: 'center',
+            flexDirection: 'row',
+            alignItems: 'flex-end',
+            gap: 8,
+            paddingHorizontal: 12,
+            paddingTop: 8,
           }}
         >
-          <Icon name="send-plane-fill" size={17} color={t.primaryFg} />
-        </Pressable>
+          <Input
+            value={text}
+            onChangeText={(v) => {
+              setText(v);
+              realtime()?.typing(convId);
+            }}
+            placeholder="输入消息…"
+            multiline
+            style={{ flex: 1, maxHeight: 110, borderRadius: 22, paddingVertical: 9 }}
+          />
+          <IconButton
+            icon="send-plane-fill"
+            label="发送"
+            size={44}
+            tone="primary"
+            filled
+            disabled={!text.trim()}
+            onPress={send}
+          />
+        </View>
       </View>
+
+      {view ? (
+        <MemberSheet
+          visible={memberSheetOpen}
+          onClose={() => setMemberSheetOpen(false)}
+          convId={convId}
+          view={view}
+          members={members}
+          onLeft={() => router.back()}
+        />
+      ) : null}
+
+      {/* 档位选择（含临时 2 小时与接管） */}
+      <BottomSheet
+        visible={modeSheetOpen}
+        onClose={() => setModeSheetOpen(false)}
+        title="我的分身档位"
+        description="选择后立即生效；临时档位到期自动回落。"
+      >
+        {MODE_CYCLE.map((m) => {
+          const active = view?.myAiMode === m && !view?.myAiModeUntil;
+          return (
+            <View
+              key={m}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}
+            >
+              <Button
+                size="sm"
+                variant={active ? 'primary' : 'outline'}
+                label={`${modeLabels[m] ?? m}${active ? '（当前）' : ''}`}
+                onPress={() => chooseMode(m)}
+                style={{ flex: 1 }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                fullWidth={false}
+                label="临时 2h"
+                onPress={() => chooseMode(m, 2)}
+              />
+            </View>
+          );
+        })}
+        <Button
+          variant="outline"
+          tone="warning"
+          label="接管对话（暂停分身并冷却 15 分钟）"
+          onPress={takeover}
+          style={{ marginTop: 14 }}
+        />
+      </BottomSheet>
     </KeyboardAvoidingView>
   );
 }

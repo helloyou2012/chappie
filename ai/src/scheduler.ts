@@ -15,14 +15,23 @@ import {
   agentTask,
   approval,
   avatar as avatarTable,
+  calendarReminder,
   dailyReport,
   feedback,
   schedulerJob,
+  toolData,
 } from './db/schema';
 import { sweepOrphanTasks } from './recovery';
+import { normalizeCalendarItem } from './tool-gateway';
 
 const TICK_MS = 30_000;
 const REPORT_HOUR_MINUTE = '09:00';
+/** 日程提醒提前量（分钟） */
+const CALENDAR_REMIND_AHEAD_MIN = 10;
+/** 超过开始时刻多久内仍补发提醒（分钟）；再晚即落入时效线丢弃 */
+const CALENDAR_REMIND_GRACE_MIN = 15;
+/** 每 tick 最多提醒条数（避免扫库风暴） */
+const CALENDAR_REMIND_BATCH = 50;
 
 export async function runScheduler(signal?: AbortSignal): Promise<void> {
   log.info('scheduler started');
@@ -30,6 +39,8 @@ export async function runScheduler(signal?: AbortSignal): Promise<void> {
     try {
       await sweepExpiredApprovals();
       await runDueReports();
+      // 日程到点提醒（调度触发：分身第一次「主动开口」—— 设计方案 §7.3 定时/事件触发）
+      await sweepCalendarReminders();
       // 孤儿任务恢复（租约过期 = worker 崩溃 —— 设计方案 §27.4 中断恢复）
       await sweepOrphanTasks();
     } catch (e) {
@@ -38,6 +49,114 @@ export async function runScheduler(signal?: AbortSignal): Promise<void> {
     await sleep(TICK_MS);
   }
   log.info('scheduler stopped');
+}
+
+// ---------------------------------------------------------------------------
+// 日程提醒：toolData(calendar) 扫描 + calendar_reminder 台账去重
+// ---------------------------------------------------------------------------
+
+export type ReminderWindow = 'wait' | 'fire' | 'missed';
+
+/** 纯函数：某日程在当前时刻应等待 / 提醒 / 过时效丢弃（时效线 —— 设计方案 §26.3） */
+export function reminderWindow(startAt: Date, now: Date = new Date()): ReminderWindow {
+  const remindAt = startAt.getTime() - CALENDAR_REMIND_AHEAD_MIN * 60_000;
+  const t = now.getTime();
+  if (t < remindAt) return 'wait';
+  if (t > startAt.getTime() + CALENDAR_REMIND_GRACE_MIN * 60_000) return 'missed';
+  return 'fire';
+}
+
+export async function sweepCalendarReminders(): Promise<number> {
+  // 有日程数据的分身（tool_data 只有真实写入过才会有行）
+  const avatars = await db
+    .select({
+      avatarId: toolData.avatarId,
+      ownerId: avatarTable.ownerId,
+      data: toolData.data,
+    })
+    .from(toolData)
+    .innerJoin(avatarTable, eq(avatarTable.id, toolData.avatarId))
+    .where(and(eq(toolData.kind, 'calendar'), eq(avatarTable.status, 'active')));
+
+  let fired = 0;
+  outer: for (const row of avatars) {
+    const raw = Array.isArray(row.data) ? (row.data as Record<string, unknown>[]) : [];
+    const items = raw
+      .map((x) =>
+        normalizeCalendarItem({
+          id: typeof x.id === 'string' ? x.id : undefined,
+          title: String(x.title ?? ''),
+          time: String(x.time ?? ''),
+          date: typeof x.date === 'string' ? x.date : null,
+        }),
+      )
+      .filter((x) => x.date);
+    for (const item of items) {
+      const start = dayjs(`${item.date} ${item.time}`);
+      if (!start.isValid()) continue;
+      const window = reminderWindow(start.toDate());
+      if (window === 'wait') continue;
+      if (window === 'missed') {
+        // 时效线外：写台账（错过可见），不打扰主人
+        await db
+          .insert(calendarReminder)
+          .values({
+            id: newId('cr'),
+            avatarId: row.avatarId,
+            ownerId: row.ownerId,
+            entryId: item.id,
+            title: item.title,
+            startAt: start.toDate(),
+            remindAt: start.subtract(CALENDAR_REMIND_AHEAD_MIN, 'minute').toDate(),
+            status: 'missed',
+          })
+          .onConflictDoNothing();
+        continue;
+      }
+      // fire：occurrence 唯一键条件认领 —— 只有真正插入成功的那一次才推卡片
+      const inserted = await db
+        .insert(calendarReminder)
+        .values({
+          id: newId('cr'),
+          avatarId: row.avatarId,
+          ownerId: row.ownerId,
+          entryId: item.id,
+          title: item.title,
+          startAt: start.toDate(),
+          remindAt: start.subtract(CALENDAR_REMIND_AHEAD_MIN, 'minute').toDate(),
+          status: 'fired',
+        })
+        .onConflictDoNothing()
+        .returning({ id: calendarReminder.id });
+      if (inserted.length === 0) continue;
+
+      const minutes = start.diff(dayjs(), 'minute');
+      const when = minutes > 0 ? `${minutes} 分钟后开始` : '已经开始';
+      try {
+        await internal.pushCard(row.ownerId, {
+          kind: 'calendar_reminder',
+          entryId: item.id,
+          title: item.title,
+          startAt: start.toISOString(),
+          summary: `你安排的日程「${item.title}」${start.format('MM-DD HH:mm')}，${when}。`,
+        });
+        fired += 1;
+        log.info('calendar reminder fired', {
+          avatarId: row.avatarId,
+          entryId: item.id,
+          title: item.title,
+        });
+      } catch (e) {
+        log.error('calendar reminder push failed', {
+          avatarId: row.avatarId,
+          entryId: item.id,
+          error: String(e),
+        });
+      }
+      if (fired >= CALENDAR_REMIND_BATCH) break outer;
+    }
+  }
+  return fired;
 }
 
 async function runDueReports(): Promise<void> {

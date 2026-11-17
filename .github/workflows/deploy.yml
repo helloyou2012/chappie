@@ -37,7 +37,16 @@ jobs:
           pnpm test:shared
           cd ai && bun test
 
+      # 移动端不参与部署产物，但需在 CI 保证类型与路由不回归
+      - name: Typecheck mobile
+        run: pnpm --filter @chappie/mobile exec tsc --noEmit
+
       - name: Build web
+        # 自建部署可配置 vars.VITE_SERVER_URL / VITE_ADMIN_URL；
+        # chappie.run 走同源反代，留空即回退 window.location.origin
+        env:
+          VITE_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+          VITE_ADMIN_URL: ${{ vars.VITE_ADMIN_URL }}
         run: pnpm web:build
 
       - uses: dtolnay/rust-toolchain@stable

@@ -40,7 +40,12 @@ import {
 import { deleteMemory, forgetTopic, listMemories } from './memory';
 import { complete, recordUsage, todayCost } from './model-gateway';
 import { generateDailyReport } from './scheduler';
-import { listCapabilities, normalizeCalendarItem, readToolData, writeToolData } from './tool-gateway';
+import {
+  listCapabilities,
+  normalizeCalendarItem,
+  readToolData,
+  writeToolData,
+} from './tool-gateway';
 
 type Env = { Variables: { userId: string } };
 
@@ -484,13 +489,41 @@ export function createAdminApp() {
   app.get('/admin/v1/calendar', async (c) => {
     const avatar = await requireAvatar(c);
     if (!avatar) return c.json(err('avatar_not_ready', '分身正在初始化'), 409);
-    const raw = await readToolData<
-      { title: string; time: string; date?: string | null }[]
-    >(avatar.id, 'calendar', []);
+    const raw = await readToolData<{ title: string; time: string; date?: string | null }[]>(
+      avatar.id,
+      'calendar',
+      [],
+    );
     const items = raw
       .map(normalizeCalendarItem)
-      .sort((a, b) => `${a.date ?? '9999'} ${a.time}`.localeCompare(`${b.date ?? '9999'} ${b.time}`));
+      .sort((a, b) =>
+        `${a.date ?? '9999'} ${a.time}`.localeCompare(`${b.date ?? '9999'} ${b.time}`),
+      );
     return c.json({ items });
+  });
+
+  /** 手动创建日程：与分身的 calendar.create 工具写同一份 toolData */
+  app.post('/admin/v1/calendar', async (c) => {
+    const avatar = await requireAvatar(c);
+    if (!avatar) return c.json(err('avatar_not_ready', '分身正在初始化'), 409);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      title?: string;
+      date?: string | null;
+      time?: string;
+    };
+    const title = body.title?.trim();
+    const time = body.time?.trim();
+    if (!title) return c.json(err('bad_request', 'title 不能为空'), 400);
+    if (title.length > 100) return c.json(err('bad_request', 'title 过长'), 400);
+    if (!time || time.length > 20) return c.json(err('bad_request', 'time 不合法'), 400);
+    const date = body.date?.trim() || null;
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return c.json(err('bad_request', 'date 需为 YYYY-MM-DD'), 400);
+    }
+    const items = await readToolData<CalendarItem[]>(avatar.id, 'calendar', []);
+    items.push({ id: newId('cal'), title, date, time });
+    await writeToolData(avatar.id, 'calendar', items);
+    return c.json({ ok: true });
   });
 
   app.delete('/admin/v1/calendar/:index', async (c) => {
@@ -500,10 +533,18 @@ export function createAdminApp() {
     if (!Number.isInteger(index) || index < 0) {
       return c.json(err('bad_request', 'index 不合法'), 400);
     }
-    const items = await readToolData<CalendarItem[]>(avatar.id, 'calendar', []);
-    if (index >= items.length) return c.json(err('not_found', '日程不存在'), 404);
-    items.splice(index, 1);
-    await writeToolData(avatar.id, 'calendar', items);
+    // GET 返回的是「归一化 + 按时间排序」后的顺序，这里保持同一口径，
+    // 按目标条目的稳定 id 删除，避免原始数组顺序与展示顺序不一致时删错
+    const raw = await readToolData<CalendarItem[]>(avatar.id, 'calendar', []);
+    const normalized = raw
+      .map((x) => normalizeCalendarItem(x))
+      .sort((a, b) =>
+        `${a.date ?? '9999'} ${a.time}`.localeCompare(`${b.date ?? '9999'} ${b.time}`),
+      );
+    if (index >= normalized.length) return c.json(err('not_found', '日程不存在'), 404);
+    const targetId = normalized[index]?.id;
+    const remaining = raw.filter((x) => normalizeCalendarItem(x).id !== targetId);
+    await writeToolData(avatar.id, 'calendar', remaining);
     return c.json({ ok: true });
   });
 
@@ -512,6 +553,20 @@ export function createAdminApp() {
     if (!avatar) return c.json(err('avatar_not_ready', '分身正在初始化'), 409);
     const items = await readToolData<TodoItem[]>(avatar.id, 'todo', []);
     return c.json({ items });
+  });
+
+  /** 手动创建待办 */
+  app.post('/admin/v1/todo', async (c) => {
+    const avatar = await requireAvatar(c);
+    if (!avatar) return c.json(err('avatar_not_ready', '分身正在初始化'), 409);
+    const body = (await c.req.json().catch(() => ({}))) as { text?: string };
+    const text = body.text?.trim();
+    if (!text) return c.json(err('bad_request', 'text 不能为空'), 400);
+    if (text.length > 200) return c.json(err('bad_request', 'text 过长'), 400);
+    const items = await readToolData<TodoItem[]>(avatar.id, 'todo', []);
+    items.push({ text, done: false });
+    await writeToolData(avatar.id, 'todo', items);
+    return c.json({ ok: true });
   });
 
   app.patch('/admin/v1/todo/:index', async (c) => {

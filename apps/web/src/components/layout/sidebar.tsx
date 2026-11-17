@@ -1,11 +1,20 @@
 import {
+  api,
   type ConversationView,
+  type DeviceView,
   formatTime,
   type RealtimeStatus,
   useAuthStore,
   useChatStore,
 } from '@chappie/shared';
-import { RiAddLine, RiWifiLine, RiWifiOffLine } from '@remixicon/react';
+import {
+  RiAddLine,
+  RiComputerLine,
+  RiNotificationOffLine,
+  RiSmartphoneLine,
+  RiWifiLine,
+  RiWifiOffLine,
+} from '@remixicon/react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { NewConversationDialog } from '@/components/layout/new-conversation-dialog';
@@ -45,6 +54,14 @@ function ConvItem({ view, myId }: { view: ConversationView; myId: string }) {
   const isGroup = view.conversation.type === 'group';
   const preview = view.lastMsgPreview ?? '暂无消息';
   const fromMe = view.lastMsgSenderId === myId;
+  // 群聊预览带发送者（「陈美丽: 内容」），与微信/飞书一致
+  const previewPrefix =
+    isGroup && !fromMe && view.lastMsgSenderName
+      ? `${view.lastMsgSenderName}：`
+      : fromMe
+        ? '我：'
+        : '';
+  const muted = view.myAiMode === 'off';
 
   return (
     <Link
@@ -65,6 +82,9 @@ function ConvItem({ view, myId }: { view: ConversationView; myId: string }) {
             AI
           </span>
         ) : null}
+        {view.unreadCount > 0 ? (
+          <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-panel bg-destructive" />
+        ) : null}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
@@ -79,6 +99,12 @@ function ConvItem({ view, myId }: { view: ConversationView; myId: string }) {
                 群聊
               </Badge>
             ) : null}
+            {muted ? (
+              <RiNotificationOffLine
+                className="size-3 shrink-0 text-ink-quaternary"
+                aria-label="静默"
+              />
+            ) : null}
           </div>
           <span className="shrink-0 text-[11px] text-ink-quaternary">
             {formatTime(view.lastMsgAt)}
@@ -86,7 +112,7 @@ function ConvItem({ view, myId }: { view: ConversationView; myId: string }) {
         </div>
         <div className="mt-1 flex items-center justify-between gap-2">
           <span className="truncate text-[12px] text-ink-tertiary">
-            {fromMe ? '我：' : ''}
+            {previewPrefix}
             {preview}
           </span>
           {view.unreadCount > 0 ? (
@@ -120,6 +146,31 @@ export function Sidebar() {
 
   const myId = user?.id ?? '';
 
+  // 多端在线条（参考微信「Mac已登录」）：展示最近活跃的其他端
+  const [otherDevice, setOtherDevice] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const currentPlatform =
+      typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window ? 'desktop' : 'web';
+    api
+      .listDevices()
+      .then((res) => {
+        if (cancelled) return;
+        const platformLabel: Record<string, string> = {
+          ios: '手机端',
+          android: '手机端',
+          desktop: '桌面端',
+          web: '网页端',
+        };
+        const other = (res.devices as DeviceView[]).find((d) => d.platform !== currentPlatform);
+        setOtherDevice(other ? (platformLabel[other.platform] ?? other.platform) : null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <aside
       style={{ width }}
@@ -143,6 +194,17 @@ export function Sidebar() {
           }
         />
       </div>
+
+      {otherDevice ? (
+        <div className="mx-2 mb-1 flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] text-ink-tertiary">
+          {otherDevice === '桌面端' || otherDevice === '网页端' ? (
+            <RiComputerLine className="size-3.5" />
+          ) : (
+            <RiSmartphoneLine className="size-3.5" />
+          )}
+          <span className="truncate">{otherDevice}已登录</span>
+        </div>
+      ) : null}
 
       <div className="scrollbar-thin flex-1 overflow-y-auto px-2 pb-2">
         {loading && conversations.length === 0 ? (

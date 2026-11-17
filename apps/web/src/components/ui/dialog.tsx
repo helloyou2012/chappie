@@ -16,7 +16,8 @@ function DialogContent({
       <BaseDialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[4px] transition-opacity duration-200 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0" />
       <BaseDialog.Popup
         className={cn(
-          'glass fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-line p-5 text-popover-foreground shadow-pop outline-none transition-all duration-200 data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0 data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0',
+          // 弹窗用不透明底（浅色为白色 / 深色为 elevated），保证内容可读、不与背后聊天内容混色
+          'fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-line bg-popover p-5 text-popover-foreground shadow-pop outline-none transition-all duration-200 data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0 data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0',
           className,
         )}
         {...props}

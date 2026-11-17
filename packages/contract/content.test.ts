@@ -37,5 +37,8 @@ describe('contentText', () => {
     expect(contentText(card({ kind: 'task', title: '查询日程' }))).toBe('[任务卡片] 查询日程');
     expect(contentText(card({ kind: 'handover' }))).toBe('[转交卡片]');
     expect(contentText(card({ kind: 'report', day: '2026-01-01' }))).toBe('[分身日报] 2026-01-01');
+    expect(contentText(card({ kind: 'calendar_reminder', title: '评审会' }))).toBe(
+      '[日程提醒] 评审会',
+    );
   });
 });

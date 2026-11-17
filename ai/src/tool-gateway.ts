@@ -13,8 +13,9 @@ import type { RiskLevel } from '@chappie/contract';
 import { and, eq, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
-import { db } from './common/db';
+import { fingerprint } from './common/canonical';
 import { dayjs } from './common/datetime';
+import { db } from './common/db';
 import { capabilityGrant, toolData } from './db/schema';
 import { complete } from './model-gateway';
 
@@ -45,6 +46,8 @@ export interface BuiltinTool {
 // ---------------------------------------------------------------------------
 
 interface CalendarItem {
+  /** 稳定条目 id：日程提醒台账按 (avatarId, entryId, startAt) 去重 */
+  id: string;
   title: string;
   date: string | null;
   time: string;
@@ -89,7 +92,14 @@ export function parseEventTime(input: string): { date: string; time: string } | 
 
   // 相对日期词
   const weekDayMap: Record<string, number> = {
-    一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 0, 天: 0,
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    日: 0,
+    天: 0,
   };
   let day = now;
   if (/今天|今晚|today/i.test(text)) {
@@ -113,16 +123,23 @@ export function parseEventTime(input: string): { date: string; time: string } | 
   return { date: day.format('YYYY-MM-DD'), time };
 }
 
-/** 归一化存储的日程条目：旧数据（无 date 字段）尽量解析补全 */
+/**
+ * 归一化存储的日程条目：旧数据（无 date / id 字段）尽量解析补全。
+ * 缺 id 时用内容指纹兜底：确定性生成，保证台账去重键在多次读取间稳定。
+ */
 export function normalizeCalendarItem(raw: {
+  id?: string;
   title: string;
   time: string;
   date?: string | null;
 }): CalendarItem {
-  if (raw.date) return { title: raw.title, date: raw.date, time: raw.time };
+  const id =
+    raw.id ??
+    `cal_${fingerprint('calendar-entry:v1', { title: raw.title, time: raw.time }).slice(0, 32)}`;
+  if (raw.date) return { id, title: raw.title, date: raw.date, time: raw.time };
   const parsed = parseEventTime(raw.time);
-  if (parsed) return { title: raw.title, date: parsed.date, time: parsed.time };
-  return { title: raw.title, date: null, time: raw.time };
+  if (parsed) return { id, title: raw.title, date: parsed.date, time: parsed.time };
+  return { id, title: raw.title, date: null, time: raw.time };
 }
 
 /** 供 admin-api（日程/待办页）复用：读 avatar 级工具数据，无记录时返回 fallback */
@@ -147,9 +164,9 @@ export async function writeToolData(avatarId: string, kind: string, data: unknow
 function todayCalendar(): CalendarItem[] {
   const today = dayjs().format('YYYY-MM-DD');
   return [
-    { title: '产品评审会', date: today, time: '10:00' },
-    { title: '与 Bob 的 1:1', date: today, time: '11:30' },
-    { title: '健身', date: today, time: '19:00' },
+    { id: 'cal_demo_1', title: '产品评审会', date: today, time: '10:00' },
+    { id: 'cal_demo_2', title: '与 Bob 的 1:1', date: today, time: '11:30' },
+    { id: 'cal_demo_3', title: '健身', date: today, time: '19:00' },
   ];
 }
 
@@ -183,14 +200,17 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     validate: z.object({ day: z.enum(['today', 'tomorrow', 'week']).default('today') }),
     async exec(_args, ctx) {
       const day = String(_args.day ?? 'today') as 'today' | 'tomorrow' | 'week';
-      const stored = (await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', todayCalendar()))
-        .map(normalizeCalendarItem);
+      const stored = (
+        await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', todayCalendar())
+      ).map(normalizeCalendarItem);
       const today = dayjs();
       const matchDay = (item: CalendarItem): boolean => {
         if (!item.date) return day === 'today'; // 无法解析的旧数据只在「今天」里兜底展示
         if (day === 'today') return item.date === today.format('YYYY-MM-DD');
         if (day === 'tomorrow') return item.date === today.add(1, 'day').format('YYYY-MM-DD');
-        const diff = dayjs(item.date, 'YYYY-MM-DD').startOf('day').diff(today.startOf('day'), 'day');
+        const diff = dayjs(item.date, 'YYYY-MM-DD')
+          .startOf('day')
+          .diff(today.startOf('day'), 'day');
         return diff >= 0 && diff < 7;
       };
       const items = stored
@@ -235,8 +255,8 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       const stored = await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', []);
       stored.push(
         parsed
-          ? { title, date: parsed.date, time: parsed.time }
-          : { title, date: null, time: timeInput },
+          ? { id: `cal_${uuidv4()}`, title, date: parsed.date, time: parsed.time }
+          : { id: `cal_${uuidv4()}`, title, date: null, time: timeInput },
       );
       await writeToolData(ctx.avatarId, 'calendar', stored);
       const when = parsed ? `${parsed.date} ${parsed.time}` : timeInput;

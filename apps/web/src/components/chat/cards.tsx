@@ -46,6 +46,8 @@ export function CardView({ msgId, card }: CardViewProps) {
       return <ReportCardView card={card} />;
     case 'handover':
       return <HandoverCardView card={card} />;
+    case 'calendar_reminder':
+      return <CalendarReminderCardView card={card} />;
     default:
       return null;
   }
@@ -356,8 +358,8 @@ function TaskCardView({
       }
     >
       <div className="space-y-1.5">
-        {card.steps.map((s, i) => (
-          <div key={i} className="flex items-start gap-2 text-xs">
+        {card.steps.map((s) => (
+          <div key={`${s.name}-${s.status}`} className="flex items-start gap-2 text-xs">
             {s.status === 'done' ? (
               <RiCheckboxCircleLine className="mt-0.5 size-3.5 text-success" />
             ) : s.status === 'running' ? (
@@ -427,6 +429,32 @@ function HandoverCardView({ card }: { card: Extract<CardPayload, { kind: 'handov
       {card.reason ? (
         <p className="mt-2 text-xs text-muted-foreground">原因：{card.reason}</p>
       ) : null}
+    </CardShell>
+  );
+}
+
+function CalendarReminderCardView({
+  card,
+}: {
+  card: Extract<CardPayload, { kind: 'calendar_reminder' }>;
+}) {
+  const navigate = useNavigate();
+  return (
+    <CardShell
+      icon={<RiTimeLine className="size-4" />}
+      title="日程提醒"
+      badge={<Badge variant="ai">分身</Badge>}
+    >
+      <div className="space-y-2">
+        <p className="text-sm font-medium">{card.title}</p>
+        <p className="text-xs text-muted-foreground">{dayjs(card.startAt).format('MM-DD HH:mm')}</p>
+        {card.summary ? (
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">{card.summary}</p>
+        ) : null}
+        <Button size="sm" variant="outline" className="mt-1" onClick={() => navigate('/schedule')}>
+          查看日程安排 <RiArrowRightLine className="size-3" />
+        </Button>
+      </div>
     </CardShell>
   );
 }

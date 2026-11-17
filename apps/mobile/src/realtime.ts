@@ -83,9 +83,9 @@ export function realtime(): RealtimeClient | null {
 
 /** 回到前台时调用：连接已断开则重连，否则直接重放离线队列。 */
 export function resumeRealtime(): void {
-  if (!client || !client.isOpen) {
-    connectRealtime();
-  } else {
+  if (client?.isOpen) {
     void client.flushOutbox().catch(() => undefined);
+  } else {
+    connectRealtime();
   }
 }

@@ -5,6 +5,7 @@
 
 import type { CardPayload, Content, MemberView, Message } from '@chappie/contract';
 import { config } from './config';
+import { notifyForCard } from './push';
 
 export class InternalApiError extends Error {
   constructor(
@@ -86,8 +87,20 @@ export const internal = {
   getDevices: (userId: string) =>
     call<{ devices: DeviceInfo[] }>('/internal/v1/get-devices', { userId }),
 
-  pushCard: (recipientUserId: string, card: CardPayload, targetConvId?: string) =>
-    call<{ msgId: string }>('/internal/v1/push-card', { recipientUserId, card, targetConvId }),
+  /**
+   * 推卡片给主人（落库为消息，经 WS 实时投递）。
+   * 成功后 fire-and-forget 触发推送通知（approval / handover / 日程提醒 / 日报）——
+   * 唯一推送入口，业务模块不各自发推送（design-essence §8）。
+   */
+  async pushCard(recipientUserId: string, card: CardPayload, targetConvId?: string) {
+    const res = await call<{ msgId: string }>('/internal/v1/push-card', {
+      recipientUserId,
+      card,
+      targetConvId,
+    });
+    void notifyForCard(recipientUserId, card);
+    return res;
+  },
 
   updateCard: (msgId: string, card: CardPayload) =>
     call<Message>('/internal/v1/update-card', { msgId, card }),

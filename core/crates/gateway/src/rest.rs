@@ -2,11 +2,11 @@
 
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use im_core_chat::model::{ConversationView, Principal, User};
 use im_core_chat::{auth, conversation, message, AppState};
-use im_core_common::{AppError, AppResult};
+use im_core_common::{time, AppError, AppResult};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -28,15 +28,20 @@ pub fn public_routes() -> Router<AppState> {
 pub fn protected_routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/api/v1/me", get(me))
-        .route("/api/v1/directory", get(directory))
+        .route("/api/v1/contacts", get(list_contacts).post(add_contact))
+        .route(
+            "/api/v1/contacts/{peer_id}",
+            delete(remove_contact).patch(update_contact),
+        )
         .route("/api/v1/conversations", get(list_conversations).post(create_conversation))
         .route("/api/v1/conversations/{id}/messages", get(list_messages))
-        .route("/api/v1/conversations/{id}/members", get(list_members))
+        .route("/api/v1/conversations/{id}/members", get(list_members).post(add_members))
+        .route("/api/v1/conversations/{id}/members/{principal_id}", delete(remove_member))
         .route("/api/v1/conversations/{id}/settings", axum::routing::patch(update_settings))
         .route("/api/v1/conversations/{id}/takeover", post(takeover))
         .route("/api/v1/cards/{msg_id}/action", post(card_action))
         .route("/api/v1/messages/{msg_id}/feedback", post(submit_feedback))
-        .route("/api/v1/devices", post(register_device))
+        .route("/api/v1/devices", get(list_devices).post(register_device))
         .layer(axum::middleware::from_fn_with_state(state, auth_middleware))
 }
 
@@ -106,19 +111,79 @@ async fn me(
     Ok(Json(json!({ "user": user.to_api() })))
 }
 
-/// 简单用户目录（演示环境）：用于新建会话时选择联系人。
-/// 生产应由组织通讯录/好友关系提供（设计文档 §11 开放平台）。
-async fn directory(
+/// 联系人列表（取代旧的全站目录：用户只看得到自己添加的联系人）
+async fn list_contacts(
     State(state): State<AppState>,
     axum::Extension(user): axum::Extension<CurrentUser>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let rows: Vec<User> = sqlx::query_as(
-        "SELECT * FROM \"user\" WHERE id <> $1 ORDER BY created_at ASC LIMIT 100",
+    let contacts = conversation::list_contacts(&state.db, &user.0).await?;
+    Ok(Json(json!({
+        "contacts": contacts.iter().map(|c| json!({
+            "user": c.user.to_api(),
+            "alias": c.alias,
+            "createdAt": time::iso(c.created_at),
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct AddContactReq {
+    email: String,
+}
+
+async fn add_contact(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
+    Json(req): Json<AddContactReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !req.email.contains('@') || req.email.len() < 5 {
+        return Err(AppError::bad("邮箱格式不正确"));
+    }
+    let contact = conversation::add_contact(&state.db, &user.0, &req.email).await?;
+    Ok(Json(json!({
+        "contact": {
+            "user": contact.user.to_api(),
+            "alias": contact.alias,
+            "createdAt": time::iso(contact.created_at),
+        }
+    })))
+}
+
+async fn remove_contact(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
+    Path(peer_id): Path<String>,
+) -> AppResult<Json<serde_json::Value>> {
+    conversation::remove_contact(&state.db, &user.0, &peer_id).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateContactReq {
+    alias: Option<String>,
+}
+
+/// 更新联系人备注名；alias 为空串/null/缺省时清除
+async fn update_contact(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
+    Path(peer_id): Path<String>,
+    Json(req): Json<UpdateContactReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    let contact = conversation::set_contact_alias(
+        &state.db,
+        &user.0,
+        &peer_id,
+        req.alias.as_deref(),
     )
-    .bind(&user.0)
-    .fetch_all(&state.db.pg)
     .await?;
-    Ok(Json(json!({ "users": rows.iter().map(|u| u.to_api()).collect::<Vec<_>>() })))
+    Ok(Json(json!({
+        "contact": {
+            "user": contact.user.to_api(),
+            "alias": contact.alias,
+            "createdAt": time::iso(contact.created_at),
+        }
+    })))
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +253,32 @@ async fn list_members(
     message::ensure_member(&state.db.pg, &id, &user.0).await?;
     let members = conversation::get_members(&state.db, &id).await?;
     Ok(Json(json!({ "members": members })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddMembersReq {
+    member_user_ids: Vec<String>,
+}
+
+async fn add_members(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
+    Path(id): Path<String>,
+    Json(req): Json<AddMembersReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    conversation::add_members(&state.db, &state.events, &user.0, &id, &req.member_user_ids).await?;
+    let members = conversation::get_members(&state.db, &id).await?;
+    Ok(Json(json!({ "members": members })))
+}
+
+async fn remove_member(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
+    Path((id, principal_id)): Path<(String, String)>,
+) -> AppResult<Json<serde_json::Value>> {
+    conversation::remove_member(&state.db, &state.events, &user.0, &id, &principal_id).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 #[derive(Deserialize)]
@@ -269,6 +360,14 @@ pub struct RegisterDeviceReq {
     push_token: Option<String>,
     app_version: Option<String>,
     capabilities: Option<serde_json::Value>,
+}
+
+async fn list_devices(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
+) -> AppResult<Json<serde_json::Value>> {
+    let devices = auth::list_devices(&state.db, &user.0).await?;
+    Ok(Json(json!({ "devices": devices })))
 }
 
 async fn register_device(

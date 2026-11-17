@@ -72,12 +72,24 @@ export const ReportCard = z.object({
 });
 export type ReportCard = z.infer<typeof ReportCard>;
 
+/** 日程提醒卡片：分身按日历时间主动提醒（调度触发，非消息触发） */
+export const CalendarReminderCard = z.object({
+  kind: z.literal('calendar_reminder'),
+  entryId: z.string(),
+  title: z.string(),
+  /** 日程开始时刻（ISO） */
+  startAt: z.string(),
+  summary: z.string().default(''),
+});
+export type CalendarReminderCard = z.infer<typeof CalendarReminderCard>;
+
 export const CardPayload = z.discriminatedUnion('kind', [
   DraftCard,
   ApprovalCard,
   TaskCard,
   HandoverCard,
   ReportCard,
+  CalendarReminderCard,
 ]);
 export type CardPayload = z.infer<typeof CardPayload>;
 

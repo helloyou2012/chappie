@@ -34,9 +34,9 @@
   --line-strong: rgb(10 10 10 / 0.16);
 
   /* ---- 品牌与语义 ---- */
-  --brand: #6e56cf;
-  --brand-strong: #5b46b4;
-  --brand-soft: rgb(110 86 207 / 0.12);
+  --brand: #0285f7;
+  --brand-strong: #0169c4;
+  --brand-soft: rgb(2 133 247 / 0.12);
   --info: #0a84ff;
   --info-soft: rgb(10 132 255 / 0.12);
   --success: #1f8a65;
@@ -110,9 +110,9 @@
   --line: rgb(255 255 255 / 0.12);
   --line-strong: rgb(255 255 255 / 0.18);
 
-  --brand: #8b7cf6;
-  --brand-strong: #a294ff;
-  --brand-soft: rgb(139 124 246 / 0.16);
+  --brand: #4da3f8;
+  --brand-strong: #7bbcff;
+  --brand-soft: rgb(77 163 248 / 0.16);
   --info: #64b5ff;
   --info-soft: rgb(100 181 255 / 0.16);
   --success: #3dbd8a;

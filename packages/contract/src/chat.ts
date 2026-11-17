@@ -78,6 +78,8 @@ export function contentText(c: Content | null | undefined): string {
           return '[转交卡片]';
         case 'report':
           return `[分身日报] ${k.day}`;
+        case 'calendar_reminder':
+          return `[日程提醒] ${k.title}`;
       }
       return '[卡片]';
     }
@@ -194,5 +196,7 @@ export const ConversationView = z.object({
   lastMsgPreview: z.string().nullable().default(null),
   lastMsgAt: z.string().nullable().default(null),
   lastMsgSenderId: z.string().nullable().default(null),
+  /** 最后一条消息发送者名称（群聊列表展示「发送者: 内容」） */
+  lastMsgSenderName: z.string().nullable().default(null),
 });
 export type ConversationView = z.infer<typeof ConversationView>;

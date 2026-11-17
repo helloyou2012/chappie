@@ -14,6 +14,7 @@
   "dependencies": {
     "@chappie/contract": "workspace:*",
     "dayjs": "^1.11.23",
+    "pinyin-pro": "^3.29.5",
     "uuid": "^14.0.3",
     "zustand": "^5.1.0"
   },

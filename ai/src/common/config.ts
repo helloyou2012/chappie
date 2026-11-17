@@ -36,6 +36,10 @@ export interface AiConfig {
   contextCharBudget: number;
   /** 合理沉默阈值：低于该置信度且满足其他条件时沉默；0 = 关闭 */
   silenceMinConfidence: number;
+  /** Expo Push access token（未配置则推送降级跳过，功能不报错） */
+  expoPushToken: string;
+  /** Expo push 服务地址（自建/代理可覆盖） */
+  expoPushUrl: string;
 }
 
 function env(key: string, def = ''): string {
@@ -70,6 +74,8 @@ export function loadConfig(): AiConfig {
     recoveryBatch: Number(env('AI_RECOVERY_BATCH', '5')),
     contextCharBudget: Number(env('AI_CONTEXT_CHAR_BUDGET', '6000')),
     silenceMinConfidence: Number(env('AI_SILENCE_MIN_CONFIDENCE', '0.6')),
+    expoPushToken: env('EXPO_ACCESS_TOKEN'),
+    expoPushUrl: env('EXPO_PUSH_URL', 'https://exp.host/--/api/v2/push/send'),
   };
 }
 

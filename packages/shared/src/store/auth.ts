@@ -25,6 +25,18 @@ interface AuthState {
 
 let configured = false;
 
+/**
+ * 平台默认服务地址（构建期配置）：
+ * Web/桌面默认同源，移动端由 `EXPO_PUBLIC_*` 注入。仅在本地未保存过地址时生效。
+ */
+let defaultServerUrl: string = DEFAULT_SERVER_URL;
+let defaultAdminUrl: string = DEFAULT_ADMIN_URL;
+
+export function setDefaultServerUrls(serverUrl: string, adminUrl: string): void {
+  defaultServerUrl = serverUrl;
+  defaultAdminUrl = adminUrl;
+}
+
 function ensureConfigured(serverUrl: string, adminUrl: string) {
   configureApi({
     serverUrl,
@@ -47,8 +59,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   restore: async () => {
     set({ restoring: true });
-    const serverUrl = (await storageGet(STORAGE_KEYS.serverUrl)) ?? DEFAULT_SERVER_URL;
-    const adminUrl = (await storageGet(STORAGE_KEYS.adminUrl)) ?? DEFAULT_ADMIN_URL;
+    const serverUrl = (await storageGet(STORAGE_KEYS.serverUrl)) ?? defaultServerUrl;
+    const adminUrl = (await storageGet(STORAGE_KEYS.adminUrl)) ?? defaultAdminUrl;
     ensureConfigured(serverUrl, adminUrl);
 
     const token = await storageGet(STORAGE_KEYS.token);

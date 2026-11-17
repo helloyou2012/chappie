@@ -65,6 +65,40 @@ export const ListMessagesResponse = z.object({
 
 export const ListMembersResponse = z.object({ members: z.array(MemberView) });
 
+// ---------------------------------------------------------------------------
+// 联系人（取代演示用的全站目录：只看得到自己添加的联系人）
+// ---------------------------------------------------------------------------
+
+export const ContactView = z.object({
+  user: User,
+  /** 备注名，可选 */
+  alias: z.string().nullable().default(null),
+  createdAt: z.string(),
+});
+
+export const ListContactsResponse = z.object({ contacts: z.array(ContactView) });
+
+/** 按邮箱添加联系人（对方需已注册） */
+export const AddContactRequest = z.object({ email: z.string().email() });
+export const AddContactResponse = z.object({ contact: ContactView });
+export const RemoveContactResponse = z.object({ ok: z.boolean() });
+
+/** 更新联系人备注名；传空串或 null 清除 */
+export const UpdateContactRequest = z.object({
+  alias: z.string().max(40).nullable(),
+});
+export const UpdateContactResponse = z.object({ contact: ContactView });
+
+// ---------------------------------------------------------------------------
+// 会话成员管理（群聊）
+// ---------------------------------------------------------------------------
+
+export const AddMembersRequest = z.object({
+  memberUserIds: z.array(z.string()).min(1),
+});
+export const AddMembersResponse = z.object({ members: z.array(MemberView) });
+export const RemoveMemberResponse = z.object({ ok: z.boolean() });
+
 /** 会话设置：切换我的分身在此会话的档位（支持临时模式） */
 export const UpdateConversationSettingsRequest = z.object({
   aiMode: AvatarMode.optional(),
@@ -134,6 +168,16 @@ export type ListConversationsResponse = z.infer<typeof ListConversationsResponse
 export type ListMessagesQuery = z.infer<typeof ListMessagesQuery>;
 export type ListMessagesResponse = z.infer<typeof ListMessagesResponse>;
 export type ListMembersResponse = z.infer<typeof ListMembersResponse>;
+export type ContactView = z.infer<typeof ContactView>;
+export type ListContactsResponse = z.infer<typeof ListContactsResponse>;
+export type AddContactRequest = z.infer<typeof AddContactRequest>;
+export type AddContactResponse = z.infer<typeof AddContactResponse>;
+export type RemoveContactResponse = z.infer<typeof RemoveContactResponse>;
+export type UpdateContactRequest = z.infer<typeof UpdateContactRequest>;
+export type UpdateContactResponse = z.infer<typeof UpdateContactResponse>;
+export type AddMembersRequest = z.infer<typeof AddMembersRequest>;
+export type AddMembersResponse = z.infer<typeof AddMembersResponse>;
+export type RemoveMemberResponse = z.infer<typeof RemoveMemberResponse>;
 export type UpdateConversationSettingsRequest = z.infer<typeof UpdateConversationSettingsRequest>;
 export type TakeoverResponse = z.infer<typeof TakeoverResponse>;
 export type FeedbackRequest = z.infer<typeof FeedbackRequest>;

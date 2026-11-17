@@ -1,3 +1,4 @@
+import { useChatStore } from '@chappie/shared';
 import { Tabs } from 'expo-router';
 import type { ColorValue } from 'react-native';
 import Icon, { type IconName } from 'react-native-remix-icon';
@@ -9,6 +10,7 @@ function TabIcon({ name, color }: { name: IconName; color: ColorValue }) {
 
 export default function TabsLayout() {
   const t = useTheme();
+  const totalUnread = useChatStore((s) => s.conversations.reduce((n, c) => n + c.unreadCount, 0));
   return (
     <Tabs
       screenOptions={{
@@ -22,6 +24,8 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: '消息',
+          tabBarBadge: totalUnread > 0 ? (totalUnread > 99 ? '99+' : totalUnread) : undefined,
+          tabBarBadgeStyle: { backgroundColor: t.danger, fontSize: 10 },
           tabBarIcon: ({ focused, color }) => (
             <TabIcon name={focused ? 'chat-3-fill' : 'chat-3-line'} color={color} />
           ),
@@ -37,6 +41,15 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="schedule"
+        options={{
+          title: '日程',
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name={focused ? 'calendar-fill' : 'calendar-line'} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="avatar"
         options={{
           title: '分身',
@@ -46,11 +59,11 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="reports"
+        name="profile"
         options={{
-          title: '日报',
+          title: '我的',
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon name={focused ? 'calendar-fill' : 'calendar-line'} color={color} />
+            <TabIcon name={focused ? 'account-circle-fill' : 'account-circle-line'} color={color} />
           ),
         }}
       />

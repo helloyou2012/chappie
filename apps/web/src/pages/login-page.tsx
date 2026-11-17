@@ -178,44 +178,47 @@ export function LoginPage() {
           )}
         </div>
 
-        <div className="mt-4 text-center">
-          <button
-            type="button"
-            onClick={() => setShowServer((v) => !v)}
-            className="inline-flex items-center gap-1 text-[11px] text-ink-tertiary transition-colors hover:text-ink"
-          >
-            <RiSettings3Line className="size-3" /> 服务器设置
-          </button>
-          {showServer ? (
-            <div className="glass mt-3 space-y-2 rounded-xl border border-line p-3 text-left">
-              <div className="space-y-1">
-                <label htmlFor="server-url" className="text-[11px] text-ink-tertiary">
-                  网关地址
-                </label>
-                <Input
-                  id="server-url"
-                  value={serverDraft}
-                  onChange={(e) => setServerDraft(e.target.value)}
-                  className="h-8 text-xs"
-                />
+        {/* 服务地址仅开发构建可配；生产版本由构建期 VITE_SERVER_URL 固定 */}
+        {import.meta.env.DEV ? (
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => setShowServer((v) => !v)}
+              className="inline-flex items-center gap-1 text-[11px] text-ink-tertiary transition-colors hover:text-ink"
+            >
+              <RiSettings3Line className="size-3" /> 服务器设置（开发）
+            </button>
+            {showServer ? (
+              <div className="glass mt-3 space-y-2 rounded-xl border border-line p-3 text-left">
+                <div className="space-y-1">
+                  <label htmlFor="server-url" className="text-[11px] text-ink-tertiary">
+                    网关地址
+                  </label>
+                  <Input
+                    id="server-url"
+                    value={serverDraft}
+                    onChange={(e) => setServerDraft(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label htmlFor="admin-url" className="text-[11px] text-ink-tertiary">
+                    控制台地址
+                  </label>
+                  <Input
+                    id="admin-url"
+                    value={adminDraft}
+                    onChange={(e) => setAdminDraft(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <Button size="sm" className="w-full" onClick={() => void saveServer()}>
+                  保存
+                </Button>
               </div>
-              <div className="space-y-1">
-                <label htmlFor="admin-url" className="text-[11px] text-ink-tertiary">
-                  控制台地址
-                </label>
-                <Input
-                  id="admin-url"
-                  value={adminDraft}
-                  onChange={(e) => setAdminDraft(e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-              <Button size="sm" className="w-full" onClick={() => void saveServer()}>
-                保存
-              </Button>
-            </div>
-          ) : null}
-        </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );

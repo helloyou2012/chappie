@@ -47,4 +47,6 @@ export const STORAGE_KEYS = {
   adminUrl: 'chappie.adminUrl',
   draftPrefix: 'chappie.draft.',
   serverEpoch: 'chappie.serverEpoch',
+  /** light | dark | system（与 Web 端同 key，Web 只存 light/dark） */
+  theme: 'chappie.theme',
 } as const;

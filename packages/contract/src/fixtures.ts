@@ -221,6 +221,33 @@ export const fixtureTaskCardMessage: Message = {
   createdAt: '2026-11-11T02:15:00.000Z',
 };
 
+/** 日程提醒卡片消息（分身按日历时间主动提醒） */
+export const fixtureCalendarReminderCardMessage: Message = {
+  msgId: 'm_00000000-0000-4000-8000-000000000007',
+  convId: 'c_00000000-0000-4000-8000-000000000010',
+  seq: 10,
+  clientMsgId: null,
+  senderId: 'a_00000000-0000-4000-8000-000000000001',
+  senderType: 'avatar',
+  onBehalfOf: 'u_00000000-0000-4000-8000-000000000001',
+  content: {
+    type: 'card',
+    schemaVersion: 1,
+    card: {
+      kind: 'calendar_reminder',
+      entryId: 'cal_00000000-0000-4000-8000-000000000001',
+      title: '与客户的产品评审会',
+      startAt: '2026-11-11T03:00:00.000Z',
+      summary: '你安排的日程马上开始，别忘了准备评审材料。',
+    },
+  },
+  mentions: [],
+  replyTo: null,
+  aiMeta: null,
+  recalled: false,
+  createdAt: '2026-11-11T02:50:00.000Z',
+};
+
 export const fixtureClientFrames: ClientFrame[] = [
   {
     type: 'auth',
@@ -403,6 +430,7 @@ export const fixtures = {
   draftCardMessage: fixtureDraftCardMessage,
   approvalCardMessage: fixtureApprovalCardMessage,
   taskCardMessage: fixtureTaskCardMessage,
+  calendarReminderCardMessage: fixtureCalendarReminderCardMessage,
   clientFrames: fixtureClientFrames,
   serverFrames: fixtureServerFrames,
   policy: fixturePolicy,

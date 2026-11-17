@@ -4,9 +4,17 @@
  */
 
 import type {
+  AddContactRequest,
+  AddContactResponse,
+  AddMembersRequest,
+  AddMembersResponse,
   Avatar,
   CardActionRequest,
+  CreateCalendarItemRequest,
+  CreateCalendarItemResponse,
   CreateConversationResponse,
+  CreateTodoItemRequest,
+  CreateTodoItemResponse,
   DailyReport,
   DeviceCapabilities,
   FeedbackType,
@@ -15,7 +23,9 @@ import type {
   GetTodoResponse,
   ListApprovalsResponse,
   ListCapabilitiesResponse,
+  ListContactsResponse,
   ListConversationsResponse,
+  ListDevicesResponse,
   ListMembersResponse,
   ListMemoriesResponse,
   ListMessagesResponse,
@@ -25,10 +35,12 @@ import type {
   Policy,
   PolicyRule,
   PreviewResponse,
+  RemoveMemberResponse,
   SendCodeResponse,
+  UpdateContactRequest,
+  UpdateContactResponse,
   UpdateTodoItemRequest,
   UsageDay,
-  User,
   VerifyCodeResponse,
 } from '@chappie/contract';
 import { DEFAULT_ADMIN_URL, DEFAULT_SERVER_URL } from './constants';
@@ -133,7 +145,13 @@ export const api = {
     s<VerifyCodeResponse>('POST', '/api/v1/auth/code/verify', { email, code }),
   logout: () => s<{ ok: boolean }>('POST', '/api/v1/auth/logout'),
   me: () => s<MeResponse>('GET', '/api/v1/me'),
-  directory: () => s<{ users: User[] }>('GET', '/api/v1/directory'),
+
+  // 联系人
+  listContacts: () => s<ListContactsResponse>('GET', '/api/v1/contacts'),
+  addContact: (req: AddContactRequest) => s<AddContactResponse>('POST', '/api/v1/contacts', req),
+  updateContact: (peerId: string, req: UpdateContactRequest) =>
+    s<UpdateContactResponse>('PATCH', `/api/v1/contacts/${peerId}`, req),
+  removeContact: (peerId: string) => s<{ ok: boolean }>('DELETE', `/api/v1/contacts/${peerId}`),
 
   // 会话
   listConversations: () => s<ListConversationsResponse>('GET', '/api/v1/conversations'),
@@ -154,6 +172,10 @@ export const api = {
   },
   listMembers: (convId: string) =>
     s<ListMembersResponse>('GET', `/api/v1/conversations/${convId}/members`),
+  addMembers: (convId: string, req: AddMembersRequest) =>
+    s<AddMembersResponse>('POST', `/api/v1/conversations/${convId}/members`, req),
+  removeMember: (convId: string, principalId: string) =>
+    s<RemoveMemberResponse>('DELETE', `/api/v1/conversations/${convId}/members/${principalId}`),
   updateSettings: (convId: string, req: { aiMode?: string; tempHours?: number }) =>
     s<{ ok: boolean }>('PATCH', `/api/v1/conversations/${convId}/settings`, req),
   takeover: (convId: string) =>
@@ -162,6 +184,7 @@ export const api = {
     s<{ ok: boolean }>('POST', `/api/v1/cards/${msgId}/action`, req),
   feedback: (msgId: string, req: { type: FeedbackType; correctedText?: string; reason?: string }) =>
     s<{ ok: boolean }>('POST', `/api/v1/messages/${msgId}/feedback`, req),
+  listDevices: () => s<ListDevicesResponse>('GET', '/api/v1/devices'),
   registerDevice: (req: {
     deviceId: string;
     platform: 'web' | 'desktop' | 'ios' | 'android';
@@ -231,9 +254,13 @@ export const adminApi = {
 
   // 日程 / 待办（分身工具数据）
   listCalendar: () => a<GetCalendarResponse>('GET', '/admin/v1/calendar'),
+  createCalendarItem: (req: CreateCalendarItemRequest) =>
+    a<CreateCalendarItemResponse>('POST', '/admin/v1/calendar', req),
   deleteCalendarItem: (index: number) =>
     a<{ ok: boolean }>('DELETE', `/admin/v1/calendar/${index}`),
   listTodo: () => a<GetTodoResponse>('GET', '/admin/v1/todo'),
+  createTodoItem: (req: CreateTodoItemRequest) =>
+    a<CreateTodoItemResponse>('POST', '/admin/v1/todo', req),
   updateTodoItem: (index: number, req: UpdateTodoItemRequest) =>
     a<{ ok: boolean }>('PATCH', `/admin/v1/todo/${index}`, req),
   deleteTodoItem: (index: number) => a<{ ok: boolean }>('DELETE', `/admin/v1/todo/${index}`),
@@ -262,10 +289,12 @@ export type {
   CardAction,
   CardActionRequest,
   CardPayload,
+  ContactView,
   Content,
   Conversation,
   ConversationView,
   DailyReport,
+  DeviceView,
   Explanation,
   FeedbackType,
   MemberView,

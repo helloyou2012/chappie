@@ -32,6 +32,7 @@ struct ConvRow {
     last_recalled: Option<bool>,
     last_at: Option<chrono::DateTime<chrono::Utc>>,
     last_sender_id: Option<String>,
+    last_sender_name: Option<String>,
 }
 
 pub async fn list_conversations(db: &Db, user_id: &str) -> AppResult<Vec<ConversationView>> {
@@ -47,13 +48,18 @@ pub async fn list_conversations(db: &Db, user_id: &str) -> AppResult<Vec<Convers
                        AND p.type = CASE WHEN c.system_tag = 'avatar_self' THEN 'avatar' ELSE 'human' END
                      LIMIT 1) AS peer_name,
                   lm.content AS last_content, lm.recalled AS last_recalled,
-                  lm.created_at AS last_at, lm.sender_id AS last_sender_id
+                  lm.created_at AS last_at, lm.sender_id AS last_sender_id,
+                  sp.name AS last_sender_name
            FROM member m
            JOIN conversation c ON c.id = m.conv_id
            LEFT JOIN LATERAL
              (SELECT * FROM message WHERE conv_id = c.id ORDER BY seq DESC LIMIT 1) lm ON TRUE
+           LEFT JOIN principal sp ON sp.id = lm.sender_id
            WHERE m.principal_id = $1
-           ORDER BY COALESCE(lm.created_at, c.created_at) DESC"#,
+           -- 「我的分身」系统会话固定置顶，其余按最近消息排序
+           -- 注意：system_tag 对普通会话为 NULL，需显式 IS NOT NULL 避免 NULLS FIRST
+           ORDER BY (c.system_tag IS NOT NULL AND c.system_tag = 'avatar_self') DESC,
+                    COALESCE(lm.created_at, c.created_at) DESC"#,
     )
     .bind(user_id)
     .fetch_all(&db.pg)
@@ -96,6 +102,7 @@ pub async fn list_conversations(db: &Db, user_id: &str) -> AppResult<Vec<Convers
                 last_msg_preview,
                 last_msg_at: r.last_at.map(time::iso),
                 last_msg_sender_id: r.last_sender_id,
+                last_msg_sender_name: r.last_sender_name,
             }
         })
         .collect();
@@ -248,6 +255,284 @@ async fn insert_members_with_avatars(
         .execute(&mut **tx)
         .await?;
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 联系人（取代演示用的全站目录：用户只看得到自己添加的联系人）
+// ---------------------------------------------------------------------------
+
+#[derive(sqlx::FromRow)]
+struct ContactRow {
+    id: String,
+    email: String,
+    name: String,
+    avatar_url: Option<String>,
+    user_created_at: chrono::DateTime<chrono::Utc>,
+    alias: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub struct ContactView {
+    pub user: crate::model::User,
+    pub alias: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn list_contacts(db: &Db, user_id: &str) -> AppResult<Vec<ContactView>> {
+    let rows = sqlx::query_as::<_, ContactRow>(
+        r#"SELECT u.id, u.email, u.name, u.avatar_url, u.created_at AS user_created_at,
+                  c.alias, c.created_at
+           FROM contact c JOIN "user" u ON u.id = c.peer_id
+           WHERE c.user_id = $1
+           ORDER BY c.created_at ASC"#,
+    )
+    .bind(user_id)
+    .fetch_all(&db.pg)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| ContactView {
+            user: crate::model::User {
+                id: r.id,
+                email: r.email,
+                name: r.name,
+                avatar_url: r.avatar_url,
+                created_at: r.user_created_at,
+            },
+            alias: r.alias,
+            created_at: r.created_at,
+        })
+        .collect())
+}
+
+/// 按邮箱添加联系人（幂等）：对方需已注册
+pub async fn add_contact(db: &Db, user_id: &str, peer_email: &str) -> AppResult<ContactView> {
+    let peer: Option<crate::model::User> = sqlx::query_as(
+        r#"SELECT * FROM "user" WHERE lower(email) = lower($1)"#,
+    )
+    .bind(peer_email)
+    .fetch_optional(&db.pg)
+    .await?;
+    let peer = peer.ok_or_else(|| AppError::not_found("该邮箱尚未注册，无法添加为联系人"))?;
+    if peer.id == user_id {
+        return Err(AppError::bad("不能添加自己为联系人"));
+    }
+    sqlx::query(
+        "INSERT INTO contact (user_id, peer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(&peer.id)
+    .execute(&db.pg)
+    .await?;
+    let created: Option<(Option<String>, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT alias, created_at FROM contact WHERE user_id = $1 AND peer_id = $2",
+    )
+    .bind(user_id)
+    .bind(&peer.id)
+    .fetch_optional(&db.pg)
+    .await?
+    .map(|(a, c)| (a, c));
+    let (alias, created_at) = created.ok_or_else(|| AppError::internal_msg("联系人写入后读取失败"))?;
+    tracing::info!(user_id, peer_id = %peer.id, "contact added");
+    Ok(ContactView { user: peer, alias, created_at })
+}
+
+/// 设置/清除联系人备注名（空串或 None = 清除）
+pub async fn set_contact_alias(
+    db: &Db,
+    user_id: &str,
+    peer_id: &str,
+    alias: Option<&str>,
+) -> AppResult<ContactView> {
+    let normalized = alias.map(str::trim).filter(|a| !a.is_empty());
+    if let Some(a) = normalized {
+        if a.chars().count() > 40 {
+            return Err(AppError::bad("备注名不能超过 40 个字符"));
+        }
+    }
+    let res = sqlx::query("UPDATE contact SET alias = $3 WHERE user_id = $1 AND peer_id = $2")
+        .bind(user_id)
+        .bind(peer_id)
+        .bind(normalized)
+        .execute(&db.pg)
+        .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::not_found("联系人不存在"));
+    }
+    list_contacts(db, user_id)
+        .await?
+        .into_iter()
+        .find(|c| c.user.id == peer_id)
+        .ok_or_else(|| AppError::internal_msg("联系人更新后读取失败"))
+}
+
+pub async fn remove_contact(db: &Db, user_id: &str, peer_id: &str) -> AppResult<()> {
+    let res = sqlx::query("DELETE FROM contact WHERE user_id = $1 AND peer_id = $2")
+        .bind(user_id)
+        .bind(peer_id)
+        .execute(&db.pg)
+        .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::not_found("联系人不存在"));
+    }
+    tracing::info!(user_id, peer_id, "contact removed");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 群成员管理：加人 / 移除 / 退群（仅普通群聊；direct 与 avatar_self 不支持）
+// ---------------------------------------------------------------------------
+
+#[derive(sqlx::FromRow)]
+struct ConvMeta {
+    conv_type: String,
+    system_tag: Option<String>,
+}
+
+async fn get_conv_meta(pg: &sqlx::PgPool, conv_id: &str) -> AppResult<ConvMeta> {
+    sqlx::query_as::<_, ConvMeta>(
+        "SELECT type AS conv_type, system_tag FROM conversation WHERE id = $1",
+    )
+    .bind(conv_id)
+    .fetch_optional(pg)
+    .await?
+    .ok_or_else(|| AppError::not_found("会话不存在"))
+}
+
+async fn member_role(pg: &sqlx::PgPool, conv_id: &str, principal_id: &str) -> AppResult<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT role FROM member WHERE conv_id = $1 AND principal_id = $2",
+    )
+    .bind(conv_id)
+    .bind(principal_id)
+    .fetch_optional(pg)
+    .await?;
+    Ok(row.map(|(r,)| r))
+}
+
+fn ensure_group_mutable(meta: &ConvMeta) -> AppResult<()> {
+    if meta.conv_type != "group" {
+        return Err(AppError::bad("仅群聊支持成员管理（单聊请直接发起或删除会话）"));
+    }
+    if meta.system_tag.is_some() {
+        return Err(AppError::forbidden("系统会话不支持成员管理"));
+    }
+    Ok(())
+}
+
+/// 群主添加成员（human + 各自的分身一起入会）
+pub async fn add_members(
+    db: &Db,
+    events: &EventTx,
+    user_id: &str,
+    conv_id: &str,
+    member_user_ids: &[String],
+) -> AppResult<Vec<String>> {
+    let meta = get_conv_meta(&db.pg, conv_id).await?;
+    ensure_group_mutable(&meta)?;
+    let role = member_role(&db.pg, conv_id, user_id).await?;
+    if role.as_deref() != Some("owner") {
+        return Err(AppError::forbidden("只有群主可以添加成员"));
+    }
+
+    // 去重 + 校验存在
+    let mut users: Vec<String> = Vec::new();
+    for uid in member_user_ids {
+        if !users.contains(uid) && uid != user_id {
+            users.push(uid.clone());
+        }
+    }
+    if users.is_empty() {
+        return Err(AppError::bad("没有可添加的成员（自己已在群内）"));
+    }
+    let existing: Vec<(String,)> = sqlx::query_as(
+        "SELECT id FROM \"user\" WHERE id = ANY($1)",
+    )
+    .bind(&users)
+    .fetch_all(&db.pg)
+    .await?;
+    if existing.len() != users.len() {
+        return Err(AppError::not_found("部分成员用户不存在"));
+    }
+
+    // 已在群内的过滤掉（insert_members_with_avatars 对 human 用裸 INSERT）
+    let already: Vec<(String,)> = sqlx::query_as(
+        "SELECT principal_id FROM member WHERE conv_id = $1 AND principal_id = ANY($2)",
+    )
+    .bind(conv_id)
+    .bind(&users)
+    .fetch_all(&db.pg)
+    .await?;
+    let already_ids: Vec<String> = already.into_iter().map(|(p,)| p).collect();
+    let to_add: Vec<String> = users.into_iter().filter(|u| !already_ids.contains(u)).collect();
+    if to_add.is_empty() {
+        return Err(AppError::bad("所选成员都已在群内"));
+    }
+
+    let mut tx = db.pg.begin().await?;
+    insert_members_with_avatars(&mut tx, conv_id, &to_add, None).await?;
+    tx.commit().await?;
+
+    notify_conversations_changed(db, events, conv_id).await;
+    tracing::info!(conv_id, user_id, added = to_add.len(), "group members added");
+    Ok(to_add)
+}
+
+/// 移除成员：本人=退群；移除他人需群主。连带移除该成员的分身。
+pub async fn remove_member(
+    db: &Db,
+    events: &EventTx,
+    user_id: &str,
+    conv_id: &str,
+    target_principal_id: &str,
+) -> AppResult<()> {
+    let meta = get_conv_meta(&db.pg, conv_id).await?;
+    ensure_group_mutable(&meta)?;
+
+    let target_role = member_role(&db.pg, conv_id, target_principal_id).await?;
+    let Some(target_role) = target_role else {
+        return Err(AppError::not_found("该成员不在此会话中"));
+    };
+    if target_role == "owner" {
+        return Err(AppError::bad("群主不能退出或被移除（解散/转让群主为后续能力）"));
+    }
+    // 目标必须是 human（分身随主人一起进出，不单独操作）
+    let target_type: Option<(String,)> = sqlx::query_as(
+        "SELECT type FROM principal WHERE id = $1",
+    )
+    .bind(target_principal_id)
+    .fetch_optional(&db.pg)
+    .await?;
+    if target_type.as_ref().map(|(t,)| t.as_str()) != Some("human") {
+        return Err(AppError::bad("不能单独移除分身（分身随主人一起退出）"));
+    }
+    if target_principal_id != user_id {
+        let my_role = member_role(&db.pg, conv_id, user_id).await?.unwrap_or_default();
+        if my_role != "owner" {
+            return Err(AppError::forbidden("只有群主可以移除其他成员"));
+        }
+    }
+
+    let mut tx = db.pg.begin().await?;
+    // human + 其名下所有分身
+    let removed = sqlx::query(
+        r#"DELETE FROM member
+           WHERE conv_id = $1
+             AND (principal_id = $2
+                  OR principal_id IN (SELECT id FROM principal WHERE owner_id = $2 AND type = 'avatar'))"#,
+    )
+    .bind(conv_id)
+    .bind(target_principal_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    if removed.rows_affected() == 0 {
+        return Err(AppError::internal_msg("成员移除失败"));
+    }
+
+    notify_conversations_changed(db, events, conv_id).await;
+    tracing::info!(conv_id, by = user_id, target = target_principal_id, "group member removed");
     Ok(())
 }
 

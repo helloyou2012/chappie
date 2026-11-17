@@ -171,6 +171,15 @@ pub enum CardPayload {
         day: String,
         summary: String,
     },
+    /// 日程提醒卡片：分身按日历时间主动提醒（调度触发，非消息触发）
+    #[serde(rename = "calendar_reminder")]
+    CalendarReminder {
+        entry_id: String,
+        title: String,
+        start_at: String,
+        #[serde(default)]
+        summary: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,6 +207,7 @@ impl CardPayload {
             }
             CardPayload::Handover { .. } => "[转交给你]".into(),
             CardPayload::Report { day, .. } => format!("[分身日报] {day}"),
+            CardPayload::CalendarReminder { title, .. } => format!("[日程提醒] {title}"),
         }
     }
 }
@@ -368,6 +378,9 @@ pub struct ConversationView {
     pub last_msg_preview: Option<String>,
     pub last_msg_at: Option<String>,
     pub last_msg_sender_id: Option<String>,
+    /// 最后一条消息的发送者名称（群聊列表预览展示「发送者: 内容」）
+    #[serde(default)]
+    pub last_msg_sender_name: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,10 @@
 >
 > 云端负责「思考与执行」,客户端负责「输入、投影、审批、接管、设备能力」。云端是唯一事实源,客户端是它的投影与入口。
 
+**目录**：职责划分 · 四条契约 · 一次完整旅程 · 四层不变量 · 弱网/离线/多端 ·
+端侧能力 · 推送与通知 · 安全与审计 · 实现索引。
+实现完成度、限制与路线图统一见 [status.md](status.md)。
+
 ---
 
 ## 一、职责划分
@@ -288,6 +292,12 @@ biometrics     可以使用生物识别
 | 设备能力查询(内部接口)                  | `core/crates/internal-api/src/lib.rs`、`ai/src/common/internal.ts`                                  |
 | 服务端 epoch                            | `core/crates/chat/src/state.rs`、`core/crates/gateway/src/ws.rs`、`packages/shared/src/ws.ts`       |
 | 移动端前台恢复                          | `apps/mobile/app/_layout.tsx`、`apps/mobile/src/realtime.ts`                                        |
+| 移动端推送令牌注册                      | `apps/mobile/src/push.ts`、`core/crates/gateway/src/rest.rs`（`/api/v1/devices`）                   |
+| 已登录设备查询（多端在线条）            | `GET /api/v1/devices`、`core/crates/chat/src/auth.rs`、Web/Mobile 会话页                            |
+| 会话列表派生信息                        | 服务端返回 `lastMsgSenderName`（群聊预览）；`avatar_self` 会话固定置顶                              |
+| 服务端离线推送（唯一入口）              | `ai/src/common/push.ts`（挂在 `internal.pushCard` 之后）、`ai/src/common/config.ts`                 |
+| 构建期服务地址                          | `apps/mobile/src/config.ts`、`apps/web/src/main.tsx`、`packages/shared/src/store/auth.ts`           |
+| 主题偏好持久化                          | `apps/mobile/src/store/theme.ts`、`apps/mobile/src/hooks/use-theme.ts`                              |
 | 桌面端平台识别                          | `apps/web/src/components/layout/app-shell.tsx`（`__TAURI_INTERNALS__`）                             |
 | 消息幂等键透出                          | `packages/contract/src/chat.ts`、`core/crates/chat/src/model.rs`、`core/crates/chat/src/message.rs` |
 | 单写者消息 + seq + outbox               | `core/crates/chat/src/message.rs`                                                                   |
@@ -297,47 +307,10 @@ biometrics     可以使用生物识别
 
 ---
 
-## 十、已补齐的缺口
+## 十、实现状态与限制
 
-| 缺口                       | 处理                                                                                  |
-| -------------------------- | ------------------------------------------------------------------------------------- |
-| 消息不携带 `clientMsgId`   | `Message` 增加 `clientMsgId`;客户端优先按它精确移除 pending;AI 读回触发消息也带该字段 |
-| 无统一离线命令队列         | 新增持久化 `CommandOutbox`;在线立即 flush,鉴权/联网/回前台自动重放;按用户隔离         |
-| 无端侧能力清单             | 新增 `DeviceCapabilities` 契约;WS 鉴权与 REST 注册上报;`device` 表保存;内部接口可查   |
-| WS 无服务端 epoch          | `auth_ok` 返回 `serverEpoch`;客户端在变化时重置投影并拉快照                           |
-| 移动端前后台切换无恢复逻辑 | `AppState` 监听;回前台重连或重放队列                                                  |
-| 乐观消息主要靠内容匹配     | 优先 `clientMsgId` 精确对账,内容匹配仅作旧服务端兜底                                  |
-| 桌面端被误识别为 web       | AppShell 按 Tauri 运行时标记传 `platform=desktop`;设备注册与能力上报正确              |
+端云相关能力的完成度、已知限制与后续计划统一维护在 [status.md](status.md)：
 
----
-
-## 十一、仍需外部条件或后续排期
-
-| 缺口               | 原因                                       | 建议                                                 |
-| ------------------ | ------------------------------------------ | ---------------------------------------------------- |
-| 推送实际投递       | 需要 APNs/FCM/厂商通道凭据与 SDK           | 保持 `pushToken` 注册;接入 provider 后只替换投递实现 |
-| 端到端加密         | 与云端 AI 读取冲突                         | 需决定端侧推理或可信执行环境;当前服务端可读          |
-| 按设备已读位点     | 当前按成员维度记录                         | 多设备精细未读可增加 `device_read` 表                |
-| 端侧动作桥接执行器 | 能力清单已上报,具体相机/文件调用尚未接工具 | 定义 `device_action` 工具与端侧 RPC,复用审批/审计    |
-| 文件/图片上传      | 内容类型已注册,上传服务未实现              | 增加对象存储、配额、魔数校验、缩略图                 |
-| 推送与通知聚合     | 通知仍是卡片消息                           | 增加注意力收件箱,按「是否已修复」离场                |
-
----
-
-## 十二、端云一体检查清单
-
-- [x] 断网重连后,消息按 seq 补洞,不丢不乱序。
-- [x] 客户端乐观消息用 `clientMsgId` 与服务端精确对账。
-- [x] 离线命令持久化,重连/联网/回前台自动重放,服务端幂等。
-- [x] 客户端上报设备能力,云端可查询。
-- [x] 服务端 epoch 变化时客户端重建投影。
-- [x] 多端共享同一 seq 序列与事件折叠逻辑。
-- [x] Agent 在云端继续执行,客户端可观察、审批、取消、接管。
-- [x] 审批跨端一致,参数不可偷换,非审批人不能批准。
-- [x] 端侧能力调用受权限、审批、审计约束。
-- [x] 桌面端以 `desktop` 平台注册,与 Web / 移动端共享同一会话。
-- [x] 云端 AI 故障时,聊天收发不受影响。
-- [x] 错误与日志统一脱敏。
-- [ ] 推送实际投递(待 provider 配置)。
-- [ ] 端到端加密(待产品决策)。
-- [ ] 文件/图片上传(待对象存储)。
+- 能力矩阵：见 [status.md §1.4 端云与多端](status.md#14-端云与多端)
+- 已知限制：见 [status.md §3.2 端侧与通知](status.md#32-端侧与通知)
+- 检查清单：见 [status.md §5 端云一体检查清单](status.md#5-端云一体检查清单)

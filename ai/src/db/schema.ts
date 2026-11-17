@@ -261,6 +261,27 @@ export const toolData = pgTable(
   (t) => [primaryKey({ columns: [t.avatarId, t.kind] })],
 );
 
+/** 日程提醒发生台账：唯一键 (avatarId, entryId, startAt) 保证同一 occurrence 只提醒一次 */
+export const calendarReminder = pgTable(
+  'calendar_reminder',
+  {
+    id: text('id').primaryKey(),
+    avatarId: text('avatar_id').notNull(),
+    ownerId: text('owner_id').notNull(),
+    entryId: text('entry_id').notNull(),
+    title: text('title').notNull(),
+    startAt: ts('start_at').notNull(),
+    remindAt: ts('remind_at').notNull(),
+    /** fired = 已提醒 / missed = 超过时效线丢弃 */
+    status: text('status').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('calendar_reminder_occurrence_uq').on(t.avatarId, t.entryId, t.startAt),
+    index('calendar_reminder_status_idx').on(t.status, t.remindAt),
+  ],
+);
+
 export const schemaMigrationsAi = pgTable('schema_migrations_ai', {
   name: text('name').primaryKey(),
   appliedAt: ts('applied_at').notNull().defaultNow(),

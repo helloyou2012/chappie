@@ -1,6 +1,6 @@
-import { api, type User, useChatStore } from '@chappie/shared';
-import { UsersIcon } from '@heroicons/react/24/outline';
-import { RiCheckLine, RiLoader4Line } from '@remixicon/react';
+import { api, type ContactView, useChatStore } from '@chappie/shared';
+import { AtSymbolIcon, UsersIcon } from '@heroicons/react/24/outline';
+import { RiCheckLine, RiLoader4Line, RiUserAddLine } from '@remixicon/react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserAvatar } from '@/components/ui/avatar';
@@ -22,11 +22,14 @@ import { cn } from '@/lib/utils';
 export function NewConversationDialog({ trigger }: { trigger: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<'direct' | 'group'>('direct');
-  const [users, setUsers] = useState<User[]>([]);
+  const [contacts, setContacts] = useState<ContactView[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
+  // 按邮箱添加联系人
+  const [email, setEmail] = useState('');
+  const [adding, setAdding] = useState(false);
   const navigate = useNavigate();
   const loadConversations = useChatStore((s) => s.loadConversations);
 
@@ -34,8 +37,8 @@ export function NewConversationDialog({ trigger }: { trigger: React.ReactNode })
     if (!open) return;
     setLoading(true);
     api
-      .directory()
-      .then((r) => setUsers(r.users))
+      .listContacts()
+      .then((r) => setContacts(r.contacts))
       .catch((e) => toast.error('加载联系人失败', e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, [open]);
@@ -44,6 +47,7 @@ export function NewConversationDialog({ trigger }: { trigger: React.ReactNode })
     if (!open) {
       setSelected([]);
       setTitle('');
+      setEmail('');
       setTab('direct');
     }
   }, [open]);
@@ -53,6 +57,24 @@ export function NewConversationDialog({ trigger }: { trigger: React.ReactNode })
       setSelected([id]);
     } else {
       setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+    }
+  };
+
+  const addContact = async () => {
+    const value = email.trim();
+    if (!value) return;
+    setAdding(true);
+    try {
+      const res = await api.addContact({ email: value });
+      setContacts((prev) =>
+        prev.some((c) => c.user.id === res.contact.user.id) ? prev : [...prev, res.contact],
+      );
+      setEmail('');
+      toast.success('已添加联系人', res.contact.user.name);
+    } catch (e) {
+      toast.error('添加失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -103,13 +125,21 @@ export function NewConversationDialog({ trigger }: { trigger: React.ReactNode })
           </TabsList>
 
           <TabsContent value="direct">
-            <UserList
-              users={users}
-              loading={loading}
-              selected={selected}
-              onToggle={toggle}
-              single
-            />
+            <div className="space-y-3">
+              <AddContactRow
+                email={email}
+                setEmail={setEmail}
+                adding={adding}
+                onAdd={() => void addContact()}
+              />
+              <ContactList
+                contacts={contacts}
+                loading={loading}
+                selected={selected}
+                onToggle={toggle}
+                single
+              />
+            </div>
           </TabsContent>
           <TabsContent value="group">
             <div className="space-y-3">
@@ -118,10 +148,32 @@ export function NewConversationDialog({ trigger }: { trigger: React.ReactNode })
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
               />
-              <UserList users={users} loading={loading} selected={selected} onToggle={toggle} />
+              <AddContactRow
+                email={email}
+                setEmail={setEmail}
+                adding={adding}
+                onAdd={() => void addContact()}
+              />
+              <ContactList
+                contacts={contacts}
+                loading={loading}
+                selected={selected}
+                onToggle={toggle}
+              />
             </div>
           </TabsContent>
         </Tabs>
+
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            navigate('/contacts');
+          }}
+          className="mt-3 text-[11px] text-ink-tertiary transition-colors hover:text-ink"
+        >
+          管理联系人（备注名 / 分身档位 / 移除）
+        </button>
 
         <DialogFooter>
           <Button onClick={() => void create()} disabled={busy || selected.length === 0}>
@@ -137,14 +189,56 @@ export function NewConversationDialog({ trigger }: { trigger: React.ReactNode })
   );
 }
 
-function UserList({
-  users,
+function AddContactRow({
+  email,
+  setEmail,
+  adding,
+  onAdd,
+}: {
+  email: string;
+  setEmail: (v: string) => void;
+  adding: boolean;
+  onAdd: () => void;
+}) {
+  return (
+    <form
+      className="flex gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onAdd();
+      }}
+    >
+      <div className="relative flex-1">
+        <AtSymbolIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          className="pl-8"
+          placeholder="按邮箱添加联系人（对方需已注册）"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </div>
+      {/* 与 Input 默认高度（h-8）保持一致，同一行不允许混用 sm/default */}
+      <Button type="submit" variant="outline" disabled={adding || !email.trim()}>
+        {adding ? (
+          <RiLoader4Line className="size-4 animate-spin" />
+        ) : (
+          <RiUserAddLine className="size-4" />
+        )}
+        添加
+      </Button>
+    </form>
+  );
+}
+
+function ContactList({
+  contacts,
   loading,
   selected,
   onToggle,
   single,
 }: {
-  users: User[];
+  contacts: ContactView[];
   loading: boolean;
   selected: string[];
   onToggle: (id: string) => void;
@@ -157,32 +251,32 @@ function UserList({
       </div>
     );
   }
-  if (users.length === 0) {
+  if (contacts.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 py-8 text-center text-xs text-muted-foreground">
         <UsersIcon className="size-6" />
-        <p>暂时没有其他用户。可在另一个窗口注册账号后再试。</p>
+        <p>还没有联系人。用上方邮箱框添加，对方注册后即可发起会话。</p>
       </div>
     );
   }
   return (
     <div className="scrollbar-thin max-h-64 space-y-1 overflow-y-auto">
-      {users.map((u) => {
-        const checked = selected.includes(u.id);
+      {contacts.map((c) => {
+        const checked = selected.includes(c.user.id);
         return (
           <button
             type="button"
-            key={u.id}
-            onClick={() => onToggle(u.id)}
+            key={c.user.id}
+            onClick={() => onToggle(c.user.id)}
             className={cn(
               'flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors',
               checked ? 'bg-accent' : 'hover:bg-muted/70',
             )}
           >
-            <UserAvatar name={u.name} className="size-8" />
+            <UserAvatar name={c.user.name} className="size-8" />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium">{u.name}</div>
-              <div className="truncate text-xs text-muted-foreground">{u.email}</div>
+              <div className="truncate text-sm font-medium">{c.user.name}</div>
+              <div className="truncate text-xs text-muted-foreground">{c.user.email}</div>
             </div>
             {checked ? (
               <span className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">

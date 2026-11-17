@@ -1,7 +1,8 @@
 import { useAuthStore } from '@chappie/shared';
 import { Redirect } from 'expo-router';
-import { ActivityIndicator, View } from 'react-native';
+import { View } from 'react-native';
 import { useTheme } from '@/hooks/use-theme';
+import { Spinner } from '@/ui';
 
 export default function Index() {
   const status = useAuthStore((s) => s.status);
@@ -12,7 +13,7 @@ export default function Index() {
       <View
         style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: t.bg }}
       >
-        <ActivityIndicator color={t.primary} />
+        <Spinner inline />
       </View>
     );
   }

@@ -8,6 +8,7 @@ import { initTheme } from '@/lib/theme';
 import { ApprovalsPage } from '@/pages/approvals-page';
 import { AvatarConsolePage } from '@/pages/avatar-console-page';
 import { ChatPage } from '@/pages/chat-page';
+import { ContactsPage } from '@/pages/contacts-page';
 import { LoginPage } from '@/pages/login-page';
 import { ReportsPage } from '@/pages/reports-page';
 import { SchedulePage } from '@/pages/schedule-page';
@@ -40,6 +41,7 @@ export default function App() {
           <Route index element={<Navigate to="/chat" replace />} />
           <Route path="/chat/:convId?" element={<ChatPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
+          <Route path="/contacts" element={<ContactsPage />} />
           <Route path="/schedule" element={<SchedulePage />} />
           <Route path="/avatar" element={<AvatarConsolePage />} />
           <Route path="/reports" element={<ReportsPage />} />

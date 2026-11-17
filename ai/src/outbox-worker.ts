@@ -330,15 +330,31 @@ async function handleCardAction(data: {
       break;
     case 'task':
       if (data.action === 'cancel') {
-        await db
+        // 只允许任务所属分身的主人取消；其他会话成员不能操作别人的任务
+        const avatarRows = await db
+          .select({ id: avatarTable.id })
+          .from(avatarTable)
+          .where(eq(avatarTable.ownerId, data.actorId))
+          .limit(1);
+        const avatarId = avatarRows[0]?.id;
+        if (!avatarId) return;
+        const cancelled = await db
           .update(agentTask)
           .set({ status: 'cancelled', error: '主人取消任务', updatedAt: sql`now()` })
           .where(
             and(
               eq(agentTask.id, card.taskId),
+              eq(agentTask.avatarId, avatarId),
               sql`${agentTask.status} NOT IN ('completed', 'cancelled', 'failed')`,
             ),
-          );
+          )
+          .returning({ id: agentTask.id });
+        if (cancelled.length === 0) {
+          log.warn('card action rejected: task not owned by actor', {
+            taskId: card.taskId,
+            actorId: data.actorId,
+          });
+        }
       }
       break;
     default:
@@ -359,6 +375,20 @@ async function handleDraftAction(
     .limit(1);
   const avatar = avatarRows[0];
   if (!avatar) return;
+
+  // 纵深防御：卡片必须属于操作者自己的分身（草稿卡片只应投递给主人）
+  const taskRows = await db
+    .select({ avatarId: agentTask.avatarId })
+    .from(agentTask)
+    .where(eq(agentTask.id, card.taskId))
+    .limit(1);
+  if (taskRows[0]?.avatarId !== avatar.id) {
+    log.warn('card action rejected: draft task not owned by actor', {
+      taskId: card.taskId,
+      actorId,
+    });
+    return;
+  }
 
   if (action === 'discard') {
     await db

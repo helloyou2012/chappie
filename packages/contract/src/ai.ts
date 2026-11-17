@@ -275,6 +275,8 @@ export type DailyReport = z.infer<typeof DailyReport>;
 // ---------------------------------------------------------------------------
 
 export const CalendarItem = z.object({
+  /** 稳定条目 id（旧数据可能缺失）：调度提醒台账按 (avatarId, entryId, startAt) 去重 */
+  id: z.string().optional(),
   title: z.string(),
   /** 事件日期 YYYY-MM-DD；旧数据可能是自由文本时间、无法解析时为 null */
   date: z.string().nullable().default(null),

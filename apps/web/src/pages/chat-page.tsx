@@ -3,7 +3,7 @@ import { api, formatTime, type Message, useAuthStore, useChatStore } from '@chap
 import { ChatBubbleLeftRightIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import { RiInformationLine, RiLoader4Line } from '@remixicon/react';
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ChatInput } from '@/components/chat/chat-input';
 import { MemberPanel } from '@/components/chat/member-panel';
 import { MessageBubble } from '@/components/chat/message-bubble';
@@ -25,6 +25,7 @@ function useNow(intervalMs = 1000): number {
 
 export function ChatPage() {
   const { convId } = useParams<{ convId?: string }>();
+  const navigate = useNavigate();
   const conversations = useChatStore((s) => s.conversations);
   const messagesByConv = useChatStore((s) => s.messagesByConv);
   const pendingByConv = useChatStore((s) => s.pendingByConv);
@@ -87,7 +88,8 @@ export function ChatPage() {
   const lastMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
   const lastMsgId = lastMsg?.msgId ?? null;
   const lastMsgSenderId = lastMsg?.senderId;
-  const lastPendingId = pending.length > 0 ? pending[pending.length - 1]?.clientMsgId ?? null : null;
+  const lastPendingId =
+    pending.length > 0 ? (pending[pending.length - 1]?.clientMsgId ?? null) : null;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -270,6 +272,13 @@ export function ChatPage() {
         aiMode={view.myAiMode}
         onTakeover={() => void takeover()}
         busy={takeoverBusy}
+        convId={convId}
+        isGroup={isGroup && !isSelfConv}
+        myRole={view.myRole}
+        onLeft={() => {
+          void useChatStore.getState().loadConversations();
+          navigate('/chat');
+        }}
       />
     </div>
   );

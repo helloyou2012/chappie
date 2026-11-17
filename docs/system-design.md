@@ -2,7 +2,29 @@
 
 面向长期演进的架构设计:人与 AI 分身同处一个聊天应用,支持手动档/自动档,并为多分身协作、工具生态、企业化预留扩展点。
 
-> 实现现状、落地取舍与端云/UI 细节分别见 [README](../README.md)、[design-essence.md](design-essence.md)、[client-cloud.md](client-cloud.md)、[ui-guidelines.md](ui-guidelines.md)。
+> **文档定位**：本文描述**目标态**架构。当前完成度、限制与路线图见 [status.md](status.md)；
+> 设计纪律见 [design-essence.md](design-essence.md)；端云细节见 [client-cloud.md](client-cloud.md)；
+> UI 规范见 [ui-guidelines.md](ui-guidelines.md)；代码结构见 [implementation.md](implementation.md)。
+
+**目录**
+
+- 第一部分 · 产品与系统设计：`1` 目标与原则 · `2` 核心概念 · `3` 总体架构 · `4` 档位与策略 ·
+  `5` 消息与协议 · `6` 数据模型 · `7` Agent 运行时 · `8` 能力体系 · `9` 记忆与个性化 ·
+  `10` 安全隐私 · `11` 多分身协作 · `12` 客户端体验 · `13` 可扩展性 · `14` 非功能性 ·
+  `15` 质量评估 · `16` 技术选型 · `17` 分期路线 · `18` 风险与开放问题 · `19` 下一步建议
+- 第二部分 · 技术落地：`20` 技术路线 · `21` 架构总览 · `22` 职责划分 · `23` 边界约定 ·
+  `24` 依赖演进 · `25` Rust 核心 · `26` PostgreSQL（含权限与隔离）· `27` Bun AI 平台 ·
+  `28` 内部接口与事件契约 · `29` 关键流程 · `30` 部署与运维 · `31` 安全清单 ·
+  `32` 可观测与评测 · `33` 扩容 · `34` 仓库协作 · `35` 里程碑 · `36` 术语 · `37` Redis
+
+**当前实现与本设计的差异（2026-11）**
+
+- 客户端：Web / Desktop / Mobile 三端；小程序未实现。
+- 事件与队列：PG outbox + 进程内广播 + Redis Pub/Sub；未引入 Kafka / 工作流引擎。
+- 推送：核心只做在线 WS fanout；离线推送由 ai-platform 经 **Expo Push**（APNs/FCM 代发）在 `pushCard` 之后触发。
+- 关系链：`contact` 表 + 联系人 API（含备注名、联系人级分身档位）已落地，Web/移动均有联系人页；群成员增删/退群已实现；多租户/组织通讯录未实现（单租户部署）。
+- 定时：`scheduler_job`（日报）+ `calendar_reminder` 发生台账（日程提醒，唯一键去重 + 时效线）。
+- 策略/审批/记忆/能力：已按本设计落地；决策流水线见 `ai/src/pipeline.ts`。
 
 ## 1. 目标与设计原则
 
@@ -621,6 +643,19 @@ feedback(msg_id, actor, type, diff, reason, created_at)
 - 行级安全:所有表带 `tenant_id`,启用 RLS,为多租户预留。
 - 敏感列(令牌、凭证)使用应用层加密(AES-GCM),主密钥由部署环境注入,支持轮换。
 - 审计表只追加,并通过哈希链防篡改。
+
+**用户级授权边界（当前实现）**
+
+- **身份来自令牌，不来自请求体**：控制台 API 统一 `Bearer token → userId → 自己的 avatar(owner_id = userId)`，
+  所有接口不接受客户端传入的 `avatarId`，因此无法指向他人分身。
+- **资源二次过滤**：策略读 `owner_id = userId`、改/删 `and(id, owner_id)`；记忆/任务/日程/待办/用量/日报
+  均按自己的 `avatar_id` 过滤；审批只列 `approver = userId`。
+- **策略归属**：策略求值按 `policy.owner_id = 分身主人` 取用；`contact` 作用域仅约束
+  「自己的分身对某个联系人的表现」，不会修改对方分身。
+- **卡片操作**：审批只认 `approver`；草稿/任务操作额外校验 `agent_task.avatar_id = 操作者自己的分身`，
+  未命中拒绝并写告警（防止未来卡片出现在群聊时被其他成员操作）。
+- **内部接口**：仅监听 `127.0.0.1`，且要求 `X-Internal-Token`，不对外暴露。
+- **UI 语义**：成员栏中他人的分身档位为只读展示；联系人页的档位设置文案明确为「我的分身对 TA 的档位」。
 
 ### 26.5 容量与扩展路径
 

@@ -71,8 +71,11 @@ export function UsageTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {usage.map((u, i) => (
-                    <tr key={i} className="transition-colors hover:bg-surface-raised">
+                  {usage.map((u) => (
+                    <tr
+                      key={`${u.day}-${u.provider}-${u.model}`}
+                      className="transition-colors hover:bg-surface-raised"
+                    >
                       <td className="py-1.5 pr-2 tabular-nums">{u.day}</td>
                       <td className="py-1.5 pr-2">
                         {u.provider}

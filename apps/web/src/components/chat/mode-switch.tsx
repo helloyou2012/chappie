@@ -43,17 +43,13 @@ export function ModeSwitch({
 
   return (
     <div className="flex items-center gap-1">
-      <div
-        className="flex rounded-md bg-surface-veil p-0.5"
-        role="radiogroup"
-        aria-label="分身档位"
-      >
+      <div className="flex rounded-md bg-surface-veil p-0.5">
         {MODES.map((m) => (
           <button
             type="button"
             key={m}
-            role="radio"
-            aria-checked={mode === m}
+            aria-pressed={mode === m}
+            aria-label={`分身档位：${MODE_LABELS[m]}`}
             disabled={busy}
             title={MODE_DESCRIPTIONS[m]}
             onClick={() => void change(m)}

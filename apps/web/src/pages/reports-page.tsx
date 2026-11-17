@@ -147,8 +147,8 @@ export function ReportsPage() {
                   </p>
                 ) : (
                   <ul className="space-y-1.5">
-                    {report.pendingDecisions.map((d, i) => (
-                      <li key={i} className="flex items-start gap-2 text-xs">
+                    {report.pendingDecisions.map((d) => (
+                      <li key={`${d.kind}-${d.title}`} className="flex items-start gap-2 text-xs">
                         <RiErrorWarningLine className="mt-0.5 size-3.5 shrink-0 text-warning" />
                         <span>
                           <span className="font-medium">{d.title}</span>

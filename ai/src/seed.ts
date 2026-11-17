@@ -108,6 +108,15 @@ async function main() {
 
   await Promise.all([waitAvatarReady(alice.token, 'alice'), waitAvatarReady(bob.token, 'bob')]);
 
+  // 互为联系人（幂等）：取代旧的全站目录
+  await post(`${API}/api/v1/contacts`, { email: 'bob@demo.dev' }, alice.token).catch(
+    () => undefined,
+  );
+  await post(`${API}/api/v1/contacts`, { email: 'alice@demo.dev' }, bob.token).catch(
+    () => undefined,
+  );
+  console.log('✅ alice / bob 已互为联系人');
+
   // 已有会话则复用
   const convs = await get<{
     views: {

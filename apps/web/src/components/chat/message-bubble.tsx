@@ -164,9 +164,11 @@ export function MessageBubble({
             </div>
             {message.aiMeta.explanation.memoriesUsed.length > 0 ? (
               <ul className="mt-2 space-y-0.5 text-[11px] text-ink-tertiary">
-                {message.aiMeta.explanation.memoriesUsed.slice(0, 4).map((m, i) => (
-                  <li key={i}>· {m}</li>
-                ))}
+                {Array.from(new Set(message.aiMeta.explanation.memoriesUsed))
+                  .slice(0, 4)
+                  .map((m) => (
+                    <li key={m}>· {m}</li>
+                  ))}
               </ul>
             ) : null}
           </div>

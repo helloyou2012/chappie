@@ -2,6 +2,12 @@
 
 一套面向「AI 分身 IM 工作台」的设计语言：macOS 暖灰玻璃质感 + 精确排版与透明度层级。
 
+> **文档定位**：色彩、排版、间距、组件规格的唯一来源（Web 与移动端共享 token）。
+> 移动端组件实现见 `apps/mobile/src/ui`；功能完成度见 [status.md](status.md)。
+
+**目录**：`0` 设计原则 · `1` 色彩 Token · `2` 字体与排版 · `3` 间距与布局 ·
+`4` 圆角/边框/阴影 · `5` 组件规格 · `6` 动效 · `7` 图标 · `8` 使用约定 · `9` 移动端设计系统
+
 ## 0. 设计原则
 
 1. **内容优先**：界面本身保持安静，层级靠透明度、发丝线与明度差承担，不用大面积彩色与重阴影。
@@ -56,7 +62,7 @@
 
 | 语义    | 变量        | 浅色       | 深色       |
 | ------- | ----------- | ---------- | ---------- |
-| 品牌    | `--accent`  | `#6e56cf`  | `#8b7cf6`  |
+| 品牌    | `--accent`  | `#0285f7`  | `#4da3f8`  |
 | 信息    | `--info`    | `#0a84ff`  | `#64b5ff`  |
 | 成功    | `--success` | `#1f8a65`  | `#3dbd8a`  |
 | 警告    | `--warning` | `#b7791f`  | `#f0bf00`  |
@@ -140,8 +146,13 @@
 --shadow-panel: 0 12px 40px -12px rgb(0 0 0 / .25);
 ```
 
-玻璃（浮层 / 输入区 / 弹窗）：`background: panel 72% + backdrop-blur(20px) saturate(160%)`。
-卡片边缘高光：`card-edge` utility（左上角径向遮罩的 1px 白色高光，深色更明显）。
+玻璃（浮层 / 输入区 / 菜单）：`background: panel 72% + backdrop-blur(20px) saturate(160%)`。
+
+**弹窗（Dialog）例外**：使用不透明底色 `--elevated`（浅色 = 纯白 `#ffffff`，深色 = `#1c1c1c`）
+
+- 1px `line` 边框 + `shadow-panel`，不使用玻璃。弹窗面积大、内容多，半透明底会与背后聊天内容混色，
+  降低可读性；玻璃只留给小面积浮层（菜单、Toast、输入面板）。
+  卡片边缘高光：`card-edge` utility（左上角径向遮罩的 1px 白色高光，深色更明显）。
 
 ## 5. 组件规格
 
@@ -152,7 +163,7 @@
 | Card                      | 普通卡片圆角 12；应用主卡片（聊天单卡）圆角 16 + `shadow-card`；1px `line` 边框；普通卡片靠边框与底色分层，不使用阴影                                                                                                                                                                 |
 | Input / Select / Textarea | 圆角 8–12，1px `line`，`elevated` 底；Input/Select 高度与 Button 对齐（default 32 / sm 28），同一行必须一致；Textarea 可多行；focus 边框 accent 55%，无粗 ring                                                                                                                        |
 | Badge                     | 胶囊，高 18，11px/510，可带 5px 圆点；**无边框**——用 tint 底色（语义色 12%）与文字色区分；`outline` 变体为纯文字标签                                                                                                                                                                  |
-| Dialog                    | 圆角 12，玻璃面板 + 1px 边框 + 遮罩 `black/40` + blur(4px)；**不使用投影**（仅 `shadow-pop` 轻量浮层阴影可选）                                                                                                                                                                        |
+| Dialog                    | 圆角 12，**不透明白底（`elevated`）+ 1px 边框 + `shadow-pop`** + 遮罩 `black/40` + blur(4px)；不使用玻璃底，保证大块内容的可读性                                                                                                                                                      |
 | Dropdown                  | 圆角 10，玻璃 + `shadow-pop`（唯一允许的浮层阴影），项高 30，hover `surface-hover`                                                                                                                                                                                                    |
 | Tabs                      | 高 28，圆角 8，选中 `surface-selected` + 主文本（Base UI 用 `aria-selected`，不要写 `data-[selected]`）                                                                                                                                                                               |
 | Switch                    | 30×18 胶囊，开启 accent，14px 旋钮，无阴影                                                                                                                                                                                                                                            |
@@ -188,3 +199,44 @@
   `muted` `accent` `destructive` `border` `input` `ring` `ai` 已映射到上述 token。
 - 状态表达优先顺序：文字层级 → 白罩层级 → 语义色 tint → 语义色实心（最少用）。
 - 每个新建组件先对照本规范选择 token，再写样式；新增 token 必须同时补充浅色与深色两套值并更新本文档。
+
+## 9. 移动端设计系统（`apps/mobile/src/ui`）
+
+移动端与 Web 共用同一套视觉令牌（`apps/mobile/src/theme.ts` 与本文 1.x 同源），
+但交互形态按触屏重排：悬浮操作 → 长按菜单，常驻侧栏 → 底部抽屉，快捷键提示 → 触控按钮。
+
+**硬性约定**
+
+1. 页面与业务组件**只从 `@/ui` 取组件**，不直接 `import { Text, TextInput, ActivityIndicator, Switch, Modal } from 'react-native'`。
+2. 文本一律用 `<Text variant tone>`：`variant` ∈ `h1 h2 title subtitle body bodySm caption micro`；
+   `tone` ∈ `default muted tertiary primary onPrimary danger success warning ai agent`。
+   页面里不写 `fontSize / color`（个别富文本内联行高除外）。
+3. 表面用 `<Card>` / `<Divider>` / `<PageHeader>` / `<Screen>`；不手写 `backgroundColor + borderRadius + borderWidth` 组合。
+4. 操作用 `<Button variant size tone loading>` / `<IconButton icon label>`；`label` 必填（无障碍）。
+5. 表单用 `<Field label hint>` + `<Input multiline>`；选择用 `<SegmentedControl>` / `<ChipRow>` / `<Toggle>`。
+6. 浮层用 `<BottomSheet>`（侧重操作/表单）与 `<Dialog>`（确认/纠错）；菜单行用 `<MenuRow>`。
+7. 列表行用 `<ListRow leading title subtitle trailing onPress>`；空态用 `<EmptyState>`；加载用 `<Spinner>`；
+   头像用 `<Avatar name variant>`（首字母色板与 Web 共用 `avatarColor`）。
+8. `View` 仅用于布局（flex 容器、间距、进度条等非组件化结构）；新增可复用的视觉形态必须先沉淀到 `ui/`。
+
+**组件清单**：`Text` `Screen` `PageHeader` `Card` `Divider` `Button` `IconButton` `Field` `Input`
+`Badge` `SegmentedControl` `Chip` `ChipRow` `Toggle` `BottomSheet` `Dialog` `MenuRow` `ListRow`
+`EmptyState` `Avatar` `Spinner` `space`（间距刻度）。
+
+**移动端尺寸差异**
+
+| 元素   | 移动端规格                                                                 |
+| ------ | -------------------------------------------------------------------------- |
+| Button | 高 44（md）/ 34（sm），圆角 11 / 9；图标按钮 34–44（`IconButton size`）    |
+| Input  | 高 44（md）/ 34（sm），多行默认 minHeight 44；**同行必须与 Button 同档位** |
+| Card   | 圆角 16，1px 边框，默认内边距 14；`tone` 支持 warning / danger 强调        |
+| 浮层   | `BottomSheet` 顶部圆角 22，含底部安全区；`Dialog` 圆角 16，居中            |
+| 页面   | `PageHeader` 自带状态栏安全区；二级页传 `onBack` 显示返回按钮              |
+| 列表行 | `ListRow` 高约 48（py 8），选中/按下分别用 `surface-raised` / `hover`      |
+
+**主题**
+
+- 三档模式：跟随系统 / 浅色 / 深色（`apps/mobile/src/store/theme.ts`，持久化 key `chappie.theme`，与 Web 同 key）。
+- 所有组件通过 `useTheme()` 取色；切换模式即全量重渲染，`StatusBar` 跟随解析后的实际明暗。
+- 页面与组件禁止硬编码颜色（`Badge` 的 tint 由语义色派生，属 token 内运算）。
+- 服务地址等**部署配置不得出现在用户界面**，仅 `__DEV__` 构建保留调试入口。

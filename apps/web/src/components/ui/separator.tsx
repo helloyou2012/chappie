@@ -4,13 +4,12 @@ function Separator({
   className,
   orientation = 'horizontal',
   ...props
-}: React.ComponentProps<'div'> & { orientation?: 'horizontal' | 'vertical' }) {
+}: React.ComponentProps<'hr'> & { orientation?: 'horizontal' | 'vertical' }) {
   return (
-    <div
-      role="separator"
+    <hr
       aria-orientation={orientation}
       className={cn(
-        'shrink-0 bg-line',
+        'm-0 shrink-0 border-0 bg-line',
         orientation === 'horizontal' ? 'h-px w-full' : 'h-full w-px',
         className,
       )}

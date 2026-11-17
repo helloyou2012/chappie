@@ -5,6 +5,7 @@ export * from './datetime';
 export * from './device';
 export * from './format';
 export * from './outbox';
+export * from './pinyin';
 export * from './storage';
 export * from './store/auth';
 export * from './store/chat';
