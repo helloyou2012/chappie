@@ -2,7 +2,7 @@
  * AppText —— 移动端排版原语。
  * 语义化 variant + tone，避免页面直接写 fontSize / color。
  */
-import { Text as RNText, type TextProps, type TextStyle } from 'react-native';
+import { Platform, Text as RNText, type TextProps, type TextStyle } from 'react-native';
 import { useTheme } from '@/hooks/use-theme';
 
 export type TextVariant =
@@ -38,13 +38,26 @@ const VARIANTS: Record<TextVariant, TextStyle> = {
   micro: { fontSize: 10 },
 };
 
+const MONO_FONT = Platform.select({
+  ios: 'Menlo',
+  android: 'monospace',
+  default: 'monospace',
+});
+
 export function Text({
   variant = 'body',
   tone = 'default',
   align,
+  mono = false,
   style,
   ...rest
-}: TextProps & { variant?: TextVariant; tone?: TextTone; align?: TextStyle['textAlign'] }) {
+}: TextProps & {
+  variant?: TextVariant;
+  tone?: TextTone;
+  align?: TextStyle['textAlign'];
+  /** 等宽 + 表格数字：ID、工具名、参数、时间 */
+  mono?: boolean;
+}) {
   const t = useTheme();
   const color: Record<TextTone, string> = {
     default: t.text,
@@ -65,6 +78,7 @@ export function Text({
         VARIANTS[variant],
         { color: color[tone] },
         align ? { textAlign: align } : null,
+        mono ? { fontFamily: MONO_FONT, fontVariant: ['tabular-nums'] } : null,
         style,
       ]}
     />

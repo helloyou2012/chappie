@@ -300,7 +300,7 @@ export function ContactsPage() {
                 }}
                 className="scroll-mt-2"
               >
-                <div className="sticky top-0 z-10 -mx-1 mb-1 bg-canvas/95 px-1 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur">
+                <div className="sticky top-0 z-10 -mx-1 mb-1 bg-view/95 px-1 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur">
                   {section.title}
                 </div>
                 <div className="space-y-2">

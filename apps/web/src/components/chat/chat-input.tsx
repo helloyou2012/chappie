@@ -1,6 +1,6 @@
-import { dayjs, type MemberView, useAuthStore, useChatStore } from '@chappie/shared';
+import { api, dayjs, type MemberView, useAuthStore, useChatStore } from '@chappie/shared';
 import { SparklesIcon } from '@heroicons/react/24/outline';
-import { RiAtLine, RiCloseLine, RiSendPlaneFill } from '@remixicon/react';
+import { RiAtLine, RiCloseLine, RiSendPlaneFill, RiStopCircleLine } from '@remixicon/react';
 import { useRef, useState } from 'react';
 import { UserAvatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,8 @@ import { getRealtimeClient } from '@/lib/realtime';
 interface ChatInputProps {
   convId: string;
   members?: MemberView[];
+  /** 分身正在处理：把发送按钮切换为停止/接管 */
+  avatarTyping?: boolean;
   replyTo?: { msgId: string; preview: string } | null;
   onCancelReply?: () => void;
 }
@@ -19,7 +21,13 @@ interface ChatInputProps {
  * 单个圆角容器内包含文本域 + 底部工具行（左：@ 提及与快捷键提示；右：圆形发送按钮），
  * 内部无分隔线，通过底色与间距组织层级。
  */
-export function ChatInput({ convId, members, replyTo, onCancelReply }: ChatInputProps) {
+export function ChatInput({
+  convId,
+  members,
+  avatarTyping = false,
+  replyTo,
+  onCancelReply,
+}: ChatInputProps) {
   const myId = useAuthStore((s) => s.user?.id ?? '');
   const [text, setText] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
@@ -84,6 +92,13 @@ export function ChatInput({ convId, members, replyTo, onCancelReply }: ChatInput
     });
   };
 
+  const takeover = () => {
+    void api
+      .takeover(convId)
+      .then(() => toast.success('已接管', '分身已暂停，冷却 15 分钟'))
+      .catch((e) => toast.error('接管失败', e instanceof Error ? e.message : String(e)));
+  };
+
   const send = () => {
     const value = text.trim();
     if (!value) return;
@@ -119,7 +134,7 @@ export function ChatInput({ convId, members, replyTo, onCancelReply }: ChatInput
         aria-hidden
         className="composer-fade pointer-events-none absolute inset-x-0 bottom-full h-8"
       />
-      <div className="relative rounded-2xl border border-line/70 bg-panel/95 shadow-pop transition-colors focus-within:border-[color-mix(in_srgb,var(--brand)_45%,transparent)]">
+      <div className="relative rounded-2xl border border-line/70 bg-panel shadow-pop transition-colors focus-within:border-[color-mix(in_srgb,var(--brand)_45%,transparent)]">
         {/* 回复条（面板内顶部） */}
         {replyTo ? (
           <div className="mx-2 mt-2 flex items-center gap-2 rounded-md border-l-2 border-brand bg-surface-veil px-2.5 py-1.5 text-[12px]">
@@ -136,7 +151,7 @@ export function ChatInput({ convId, members, replyTo, onCancelReply }: ChatInput
 
         {/* 提及候选（面板上方浮层） */}
         {mentionQuery !== null && filtered.length > 0 ? (
-          <div className="glass absolute bottom-full left-0 right-0 z-20 mb-2 w-64 overflow-hidden rounded-md border border-line p-1 shadow-pop">
+          <div className="absolute bottom-full left-0 right-0 z-20 mb-2 w-64 overflow-hidden rounded-md border border-line bg-popover p-1 shadow-pop">
             <div className="px-2 py-1 text-[11px] font-medium text-ink-tertiary">
               <RiAtLine className="mr-1 inline size-3" />
               提及成员
@@ -224,16 +239,29 @@ export function ChatInput({ convId, members, replyTo, onCancelReply }: ChatInput
               Enter 发送 · Shift+Enter 换行
             </span>
           </div>
-          <Button
-            size="icon-sm"
-            variant="secondary"
-            className="shrink-0 rounded-full p-0"
-            onClick={send}
-            disabled={!text.trim()}
-            aria-label="发送"
-          >
-            <RiSendPlaneFill className="size-4" />
-          </Button>
+          {avatarTyping ? (
+            <Button
+              size="icon-sm"
+              variant="destructive"
+              className="shrink-0 rounded-full p-0"
+              onClick={takeover}
+              aria-label="停止分身并接管"
+              title="停止分身并接管"
+            >
+              <RiStopCircleLine className="size-4" />
+            </Button>
+          ) : (
+            <Button
+              size="icon-sm"
+              variant="secondary"
+              className="shrink-0 rounded-full p-0"
+              onClick={send}
+              disabled={!text.trim()}
+              aria-label="发送"
+            >
+              <RiSendPlaneFill className="size-4" />
+            </Button>
+          )}
         </div>
       </div>
     </div>

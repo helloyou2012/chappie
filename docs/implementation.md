@@ -93,6 +93,11 @@ push：internal.pushCard 成功后的唯一推送入口（Expo Push）
 - **不确定即转人**：资金/法律场景直接转交；auto 档置信度 < 0.7 自动转草稿。
 - **记忆**：按对话对象隔离，敏感记忆不用于对外对话；「纠正」会写入偏好记忆。
 - **审计**：`audit_log` 追加式 + 哈希链；关键入口统一脱敏错误。
+- **会话延续（P1）**：`ai/src/engagement.ts` 基于最近 10 分钟消息推导「回复链 / 同发送者窗口」，
+  路由新增 `reply` / `continuation` 触发来源；最多 5 次分身回复，其他真人插话或 @ 他人即结束；
+  纯寒暄（“好的”“嗯”等）不延续。
+- **工作态信号**：`agent-runtime` 在任务开始/结束时调用内部接口 `/internal/v1/typing`，
+  客户端据此把发送按钮切换为停止/接管（Web `chat-input`、Mobile `chat/[id]`）。
 - **归属隔离**：控制台按登录用户取自己的 avatar（不接受 avatarId 入参）；资源按 `avatar_id/owner_id`
   过滤；卡片操作校验任务归属（详见 [system-design.md §26.4](system-design.md#264-权限与隔离)）。
 - **日程提醒**：`calendar_reminder` 台账（`avatarId + entryId + startAt` 唯一键），提前 10 分钟推送，
@@ -119,6 +124,7 @@ push：internal.pushCard 成功后的唯一推送入口（Expo Push）
   - 服务地址：生产构建期固定（`VITE_SERVER_URL` / `VITE_ADMIN_URL`），未配置时走同源反代
     （`/api`、`/ws`、`/admin`）；仅 `DEV` 构建显示临时「服务器设置」。
 - **Desktop**：Tauri 2 直接复用 `apps/web`，无重复前端代码。
+- **命令面板**：`apps/web/src/components/layout/command-palette.tsx`，`⌘K` 全局入口。
 - **Mobile**：Expo SDK 58 + expo-router，复用 `packages/shared`。
   - 信息架构：5 tab（消息 / 审批 / 日程 / 分身 / 我的）；联系人、日报为「我的」二级页。
   - 设计系统：`apps/mobile/src/ui`（原语 + 主题），规范见 [ui-guidelines.md §9](ui-guidelines.md#9-移动端设计系统appsmobilesrccui)。

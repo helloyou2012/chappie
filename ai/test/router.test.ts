@@ -64,13 +64,28 @@ describe('findCandidates 普通会话', () => {
     ]);
   });
 
-  test('@ 自己主人的分身不触发（避免自问自答）', () => {
+  test('群聊 @ 自己的分身会唤醒（via=mention）', () => {
     const list = findCandidates(
       msg({ senderId: 'u_alice', mentions: ['a_alice'] }),
       MEMBERS,
       group,
     );
-    expect(list.map((c) => c.avatarId)).not.toContain('a_alice');
+    const own = list.find((c) => c.avatarId === 'a_alice');
+    expect(own).toEqual({
+      avatarId: 'a_alice',
+      ownerId: 'u_alice',
+      mentioned: true,
+      via: 'mention',
+    });
+  });
+
+  test('私聊 @ 自己的分身不唤醒（避免与对方分身双份回复）', () => {
+    const list = findCandidates(
+      msg({ senderId: 'u_alice', mentions: ['a_alice'] }),
+      MEMBERS,
+      direct,
+    );
+    expect(list.map((c) => c.avatarId)).toEqual(['a_bob']);
   });
 
   test('@ 与自动候选合并去重，mentioned 优先为 true', () => {
@@ -94,6 +109,32 @@ describe('findCandidates 普通会话', () => {
     expect(
       findCandidates(msg({ senderId: 'a_alice', senderType: 'avatar' }), MEMBERS, group),
     ).toEqual([]);
+  });
+
+  test('会话延续：回复分身消息 → via=reply', () => {
+    const list = findCandidates(msg({ senderId: 'u_alice', replyTo: 'm_av' }), MEMBERS, group, {
+      replyToAvatarId: 'a_bob',
+      continuationAvatarIds: [],
+    });
+    expect(list).toContainEqual({
+      avatarId: 'a_bob',
+      ownerId: 'u_bob',
+      mentioned: false,
+      via: 'reply',
+    });
+  });
+
+  test('会话延续：窗口内后续消息 → via=continuation', () => {
+    const list = findCandidates(msg({ senderId: 'u_alice' }), MEMBERS, group, {
+      replyToAvatarId: null,
+      continuationAvatarIds: ['a_alice'],
+    });
+    expect(list).toContainEqual({
+      avatarId: 'a_alice',
+      ownerId: 'u_alice',
+      mentioned: false,
+      via: 'continuation',
+    });
   });
 
   test('未知发送者与无本人分身的成员被安全忽略', () => {

@@ -11,12 +11,14 @@ import {
   RiAddLine,
   RiComputerLine,
   RiNotificationOffLine,
+  RiSearchLine,
   RiSmartphoneLine,
   RiWifiLine,
   RiWifiOffLine,
 } from '@remixicon/react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { openCommandPalette } from '@/components/layout/command-palette';
 import { NewConversationDialog } from '@/components/layout/new-conversation-dialog';
 import { ResizeHandle } from '@/components/layout/resize-handle';
 import { UserAvatar } from '@/components/ui/avatar';
@@ -106,7 +108,7 @@ function ConvItem({ view, myId }: { view: ConversationView; myId: string }) {
               />
             ) : null}
           </div>
-          <span className="shrink-0 text-[11px] text-ink-quaternary">
+          <span className="shrink-0 text-[11px] tabular-nums text-ink-quaternary">
             {formatTime(view.lastMsgAt)}
           </span>
         </div>
@@ -174,7 +176,7 @@ export function Sidebar() {
   return (
     <aside
       style={{ width }}
-      className="relative flex shrink-0 flex-col border-r border-line bg-panel/60"
+      className="relative flex shrink-0 flex-col border-r border-line bg-panel"
     >
       <div
         data-tauri-drag-region
@@ -186,13 +188,24 @@ export function Sidebar() {
         >
           消息
         </h1>
-        <NewConversationDialog
-          trigger={
-            <Button size="icon-sm" variant="ghost" aria-label="新建会话">
-              <RiAddLine />
-            </Button>
-          }
-        />
+        <div className="flex items-center gap-0.5">
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="搜索（⌘K）"
+            title="搜索（⌘K）"
+            onClick={openCommandPalette}
+          >
+            <RiSearchLine />
+          </Button>
+          <NewConversationDialog
+            trigger={
+              <Button size="icon-sm" variant="ghost" aria-label="新建会话">
+                <RiAddLine />
+              </Button>
+            }
+          />
+        </div>
       </div>
 
       {otherDevice ? (

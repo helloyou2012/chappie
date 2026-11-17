@@ -280,30 +280,31 @@ biometrics     可以使用生物识别
 
 ## 九、当前实现对照
 
-| 机制                                    | 实现位置                                                                                            |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| WS 首帧鉴权、心跳、有界发送队列         | `core/crates/gateway/src/ws.rs`                                                                     |
-| 客户端重连、seq 补洞、离线队列重放      | `packages/shared/src/ws.ts`                                                                         |
-| 乐观消息、去重、断洞补拉、pending 对账  | `packages/shared/src/store/chat.ts`                                                                 |
-| 离线命令队列(按用户隔离、持久化)        | `packages/shared/src/outbox.ts`                                                                     |
-| 设备 id、浏览器能力探测、移动端默认能力 | `packages/shared/src/device.ts`                                                                     |
-| 设备能力契约                            | `packages/contract/src/device.ts`                                                                   |
-| WS/REST 设备注册与能力上报              | `core/crates/gateway/src/ws.rs`、`core/crates/gateway/src/rest.rs`、`core/crates/chat/src/auth.rs`  |
-| 设备能力查询(内部接口)                  | `core/crates/internal-api/src/lib.rs`、`ai/src/common/internal.ts`                                  |
-| 服务端 epoch                            | `core/crates/chat/src/state.rs`、`core/crates/gateway/src/ws.rs`、`packages/shared/src/ws.ts`       |
-| 移动端前台恢复                          | `apps/mobile/app/_layout.tsx`、`apps/mobile/src/realtime.ts`                                        |
-| 移动端推送令牌注册                      | `apps/mobile/src/push.ts`、`core/crates/gateway/src/rest.rs`（`/api/v1/devices`）                   |
-| 已登录设备查询（多端在线条）            | `GET /api/v1/devices`、`core/crates/chat/src/auth.rs`、Web/Mobile 会话页                            |
-| 会话列表派生信息                        | 服务端返回 `lastMsgSenderName`（群聊预览）；`avatar_self` 会话固定置顶                              |
-| 服务端离线推送（唯一入口）              | `ai/src/common/push.ts`（挂在 `internal.pushCard` 之后）、`ai/src/common/config.ts`                 |
-| 构建期服务地址                          | `apps/mobile/src/config.ts`、`apps/web/src/main.tsx`、`packages/shared/src/store/auth.ts`           |
-| 主题偏好持久化                          | `apps/mobile/src/store/theme.ts`、`apps/mobile/src/hooks/use-theme.ts`                              |
-| 桌面端平台识别                          | `apps/web/src/components/layout/app-shell.tsx`（`__TAURI_INTERNALS__`）                             |
-| 消息幂等键透出                          | `packages/contract/src/chat.ts`、`core/crates/chat/src/model.rs`、`core/crates/chat/src/message.rs` |
-| 单写者消息 + seq + outbox               | `core/crates/chat/src/message.rs`                                                                   |
-| AI 旁路消费 + 租约 + 恢复               | `ai/src/outbox-worker.ts`、`ai/src/common/task-lease.ts`、`ai/src/recovery.ts`                      |
-| 审批指纹、操作者、撤权                  | `ai/src/approval.ts`、`ai/src/agent-runtime.ts`、`ai/src/turn-guard.ts`                             |
-| 契约唯一真相 + fixtures                 | `packages/contract`                                                                                 |
+| 机制                                    | 实现位置                                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| WS 首帧鉴权、心跳、有界发送队列         | `core/crates/gateway/src/ws.rs`                                                                         |
+| 客户端重连、seq 补洞、离线队列重放      | `packages/shared/src/ws.ts`                                                                             |
+| 乐观消息、去重、断洞补拉、pending 对账  | `packages/shared/src/store/chat.ts`                                                                     |
+| 离线命令队列(按用户隔离、持久化)        | `packages/shared/src/outbox.ts`                                                                         |
+| 设备 id、浏览器能力探测、移动端默认能力 | `packages/shared/src/device.ts`                                                                         |
+| 设备能力契约                            | `packages/contract/src/device.ts`                                                                       |
+| WS/REST 设备注册与能力上报              | `core/crates/gateway/src/ws.rs`、`core/crates/gateway/src/rest.rs`、`core/crates/chat/src/auth.rs`      |
+| 设备能力查询(内部接口)                  | `core/crates/internal-api/src/lib.rs`、`ai/src/common/internal.ts`                                      |
+| 服务端 epoch                            | `core/crates/chat/src/state.rs`、`core/crates/gateway/src/ws.rs`、`packages/shared/src/ws.ts`           |
+| 移动端前台恢复                          | `apps/mobile/app/_layout.tsx`、`apps/mobile/src/realtime.ts`                                            |
+| 移动端推送令牌注册                      | `apps/mobile/src/push.ts`、`core/crates/gateway/src/rest.rs`（`/api/v1/devices`）                       |
+| 已登录设备查询（多端在线条）            | `GET /api/v1/devices`、`core/crates/chat/src/auth.rs`、Web/Mobile 会话页                                |
+| 会话列表派生信息                        | 服务端返回 `lastMsgSenderName`（群聊预览）；`avatar_self` 会话固定置顶                                  |
+| 服务端离线推送（唯一入口）              | `ai/src/common/push.ts`（挂在 `internal.pushCard` 之后）、`ai/src/common/config.ts`                     |
+| 分身工作态（typing 广播）               | `ai/src/agent-runtime.ts`、`core/crates/internal-api/src/lib.rs`（`/internal/v1/typing`）、客户端输入区 |
+| 构建期服务地址                          | `apps/mobile/src/config.ts`、`apps/web/src/main.tsx`、`packages/shared/src/store/auth.ts`               |
+| 主题偏好持久化                          | `apps/mobile/src/store/theme.ts`、`apps/mobile/src/hooks/use-theme.ts`                                  |
+| 桌面端平台识别                          | `apps/web/src/components/layout/app-shell.tsx`（`__TAURI_INTERNALS__`）                                 |
+| 消息幂等键透出                          | `packages/contract/src/chat.ts`、`core/crates/chat/src/model.rs`、`core/crates/chat/src/message.rs`     |
+| 单写者消息 + seq + outbox               | `core/crates/chat/src/message.rs`                                                                       |
+| AI 旁路消费 + 租约 + 恢复               | `ai/src/outbox-worker.ts`、`ai/src/common/task-lease.ts`、`ai/src/recovery.ts`                          |
+| 审批指纹、操作者、撤权                  | `ai/src/approval.ts`、`ai/src/agent-runtime.ts`、`ai/src/turn-guard.ts`                                 |
+| 契约唯一真相 + fixtures                 | `packages/contract`                                                                                     |
 
 ---
 

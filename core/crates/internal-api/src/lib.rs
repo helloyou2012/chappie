@@ -9,8 +9,8 @@ use axum::middleware::{self, Next};
 use axum::routing::post;
 use axum::{Json, Router};
 use im_core_chat::message::SendParams;
-use im_core_chat::{conversation, message, presence, AppState};
-use im_core_common::{ids, AppError, AppResult};
+use im_core_chat::{conversation, message, presence, AppState, DomainEvent};
+use im_core_common::{ids, time, AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -22,6 +22,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/internal/v1/get-context", post(get_context))
         .route("/internal/v1/get-presence", post(get_presence))
         .route("/internal/v1/get-devices", post(get_devices))
+        .route("/internal/v1/typing", post(typing))
         .route("/internal/v1/push-card", post(push_card))
         .route("/internal/v1/update-card", post(update_card))
         .route("/internal/v1/freeze-avatar", post(freeze_avatar))
@@ -245,6 +246,43 @@ async fn get_devices(
 ) -> AppResult<Json<serde_json::Value>> {
     let devices = im_core_chat::auth::list_devices(&state.db, &req.user_id).await?;
     Ok(Json(json!({ "devices": devices })))
+}
+
+/// AI 分身在工作期间向会话广播「正在输入」状态（客户端据此把发送按钮切换为停止/接管）。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypingReq {
+    conv_id: String,
+    principal_id: String,
+    #[serde(default)]
+    ttl_ms: Option<i64>,
+}
+
+async fn typing(
+    State(state): State<AppState>,
+    Json(req): Json<TypingReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    let member: Option<(String,)> = sqlx::query_as(
+        "SELECT principal_id FROM member WHERE conv_id = $1 AND principal_id = $2",
+    )
+    .bind(&req.conv_id)
+    .bind(&req.principal_id)
+    .fetch_optional(&state.db.pg)
+    .await?;
+    if member.is_none() {
+        return Err(AppError::not_found("主体不是该会话成员"));
+    }
+    let ttl = req.ttl_ms.unwrap_or(20_000).clamp(0, 60_000);
+    let until_ts = time::now().timestamp_millis() + ttl;
+    let mut recipients = message::conversation_recipients(&state.db.pg, &req.conv_id).await?;
+    recipients.retain(|r| r != &req.principal_id);
+    let _ = state.events.send(DomainEvent::Typing {
+        conv_id: req.conv_id,
+        principal_id: req.principal_id,
+        until_ts,
+        recipients,
+    });
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// 向用户推送卡片（草稿/确认/任务/转交/日报）—— 设计方案 §25.5 PushCard。

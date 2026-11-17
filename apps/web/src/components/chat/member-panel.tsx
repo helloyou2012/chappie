@@ -86,7 +86,7 @@ export function MemberPanel({
   return (
     <aside
       style={{ width }}
-      className="relative flex shrink-0 flex-col border-l border-line bg-panel/40"
+      className="relative flex shrink-0 flex-col border-l border-line bg-panel"
     >
       <div
         data-tauri-drag-region

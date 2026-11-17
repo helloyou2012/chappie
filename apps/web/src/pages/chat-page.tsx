@@ -127,9 +127,15 @@ export function ChatPage() {
 
   const isSelfConv = view.conversation.systemTag === 'avatar_self';
   const isGroup = view.conversation.type === 'group';
-  const typingMembers = Object.entries(typingByConv[convId] ?? {})
-    .filter(([pid, until]) => pid !== myId && until > now)
-    .map(([pid]) => members.find((m) => m.principalId === pid)?.name ?? '成员');
+  const activeTypers = Object.entries(typingByConv[convId] ?? {}).filter(
+    ([pid, until]) => pid !== myId && until > now,
+  );
+  const typingMembers = activeTypers.map(
+    ([pid]) => members.find((m) => m.principalId === pid)?.name ?? '成员',
+  );
+  const avatarTyping = activeTypers.some(
+    ([pid]) => members.find((m) => m.principalId === pid)?.principalType === 'avatar',
+  );
 
   const loadMore = async () => {
     setLoadingMore(true);
@@ -254,7 +260,7 @@ export function ChatPage() {
                 <span className="typing-dot size-1 rounded-full bg-current" />
                 <span className="typing-dot size-1 rounded-full bg-current" />
               </span>
-              {typingMembers.join('、')} 正在输入…
+              {avatarTyping ? '分身正在处理…' : `${typingMembers.join('、')} 正在输入…`}
             </div>
           ) : null}
         </div>
@@ -262,6 +268,7 @@ export function ChatPage() {
         <ChatInput
           convId={convId}
           members={members}
+          avatarTyping={avatarTyping}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
         />

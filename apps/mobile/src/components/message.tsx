@@ -70,77 +70,27 @@ export function MessageBubble({
   };
 
   return (
-    <View
-      style={{
-        paddingHorizontal: 14,
-        paddingVertical: 5,
-        alignItems: mine ? 'flex-end' : 'flex-start',
-      }}
-    >
-      <View style={{ maxWidth: '82%' }}>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 4,
-            marginBottom: 3,
-          }}
-        >
-          {!mine && sender ? (
-            <Avatar name={sender.name} variant={isAvatar ? 'avatar' : 'human'} size={16} />
-          ) : null}
-          <Text variant="micro" tone="muted">
-            {mine ? '我' : (sender?.name ?? '成员')}
-            {isAvatar ? ' · AI 代发' : ''}
-            {isAvatar && message.onBehalfOf === myId ? ' · 代表你' : ''} ·{' '}
-            {formatTime(message.createdAt)}
-          </Text>
-        </View>
-        <Pressable
+    <>
+      <MessageRow mine={mine}>
+        <MessageIdentity
+          mine={mine}
+          senderName={sender?.name}
+          senderType={isAvatar ? 'avatar' : 'human'}
+          senderAvatarName={sender?.name}
+          onBehalfOfMe={isAvatar && message.onBehalfOf === myId}
+          createdAt={message.createdAt}
+        />
+        <MessageSurface
+          mine={mine}
+          isAvatar={isAvatar}
+          recalled={message.recalled}
+          text={text}
           onPress={
             isAvatar && message.aiMeta?.explanation ? () => setShowExplain((v) => !v) : undefined
           }
-          onLongPress={() => {
-            if (!message.recalled) setSheetOpen(true);
-          }}
-          delayLongPress={260}
-          accessibilityRole="text"
+          onLongPress={message.recalled ? undefined : () => setSheetOpen(true)}
           accessibilityLabel={`${mine ? '我' : (sender?.name ?? '成员')}：${text}`}
-        >
-          <View
-            style={{
-              borderRadius: 16,
-              paddingHorizontal: 13,
-              paddingVertical: 9,
-              backgroundColor: message.recalled
-                ? 'transparent'
-                : mine
-                  ? t.bubbleUser
-                  : isAvatar
-                    ? t.aiBubble
-                    : t.bubble,
-              borderWidth: message.recalled ? 1 : 0,
-              borderColor: t.border,
-              borderStyle: message.recalled ? 'dashed' : 'solid',
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 15,
-                lineHeight: 21,
-                color: message.recalled
-                  ? t.textMuted
-                  : mine
-                    ? t.bubbleUserText
-                    : isAvatar
-                      ? t.aiText
-                      : t.text,
-              }}
-            >
-              {text}
-            </Text>
-          </View>
-        </Pressable>
+        />
         {notice ? (
           <Text variant="micro" tone="success" style={{ marginTop: 2 }}>
             {notice}
@@ -148,9 +98,19 @@ export function MessageBubble({
         ) : null}
         {isAvatar && showExplain && message.aiMeta?.explanation ? (
           <Card padding={9} style={{ marginTop: 5 }}>
-            <Text variant="micro" tone="primary" style={{ fontWeight: '600', marginBottom: 3 }}>
-              ✨ 为什么这么回
-            </Text>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                marginBottom: 3,
+              }}
+            >
+              <Icon name="magic-line" size={12} color={t.primary} />
+              <Text variant="micro" tone="primary" style={{ fontWeight: '600' }}>
+                为什么这么回
+              </Text>
+            </View>
             <Text variant="micro" tone="muted" style={{ lineHeight: 16 }}>
               {message.aiMeta.explanation.reason}
             </Text>
@@ -162,7 +122,7 @@ export function MessageBubble({
             </Text>
           </Card>
         ) : null}
-      </View>
+      </MessageRow>
 
       {/* 长按操作面板 */}
       <BottomSheet visible={sheetOpen} onClose={() => setSheetOpen(false)}>
@@ -258,7 +218,113 @@ export function MessageBubble({
           />
         </View>
       </Dialog>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 消息解剖：行（对齐）→ 身份（谁/代发）→ 气泡表面（内容）→ 附属动作
+// 参考 beUI：气泡只负责阅读形状，不承担身份与滚动语义。
+// ---------------------------------------------------------------------------
+
+function MessageRow({ mine, children }: { mine: boolean; children: React.ReactNode }) {
+  return (
+    <View
+      style={{
+        paddingHorizontal: 14,
+        paddingVertical: 5,
+        alignItems: mine ? 'flex-end' : 'flex-start',
+      }}
+    >
+      <View style={{ maxWidth: '82%' }}>{children}</View>
     </View>
+  );
+}
+
+function MessageIdentity({
+  mine,
+  senderName,
+  senderType,
+  senderAvatarName,
+  onBehalfOfMe,
+  createdAt,
+}: {
+  mine: boolean;
+  senderName?: string;
+  senderType: 'human' | 'avatar';
+  senderAvatarName?: string;
+  onBehalfOfMe: boolean;
+  createdAt: string;
+}) {
+  const isAvatar = senderType === 'avatar';
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+      {!mine && senderAvatarName ? (
+        <Avatar name={senderAvatarName} variant={isAvatar ? 'avatar' : 'human'} size={16} />
+      ) : null}
+      <Text variant="micro" tone="muted" mono>
+        {mine ? '我' : (senderName ?? '成员')}
+        {isAvatar ? ' · AI 代发' : ''}
+        {onBehalfOfMe ? ' · 代表你' : ''} · {formatTime(createdAt)}
+      </Text>
+    </View>
+  );
+}
+
+function MessageSurface({
+  mine,
+  isAvatar,
+  recalled,
+  text,
+  onPress,
+  onLongPress,
+  accessibilityLabel,
+}: {
+  mine: boolean;
+  isAvatar: boolean;
+  recalled: boolean;
+  text: string;
+  onPress?: () => void;
+  onLongPress?: () => void;
+  accessibilityLabel: string;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={260}
+      accessibilityRole="text"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <View
+        style={{
+          borderRadius: 16,
+          paddingHorizontal: 13,
+          paddingVertical: 9,
+          backgroundColor: recalled
+            ? 'transparent'
+            : mine
+              ? t.bubbleUser
+              : isAvatar
+                ? t.aiBubble
+                : t.bubble,
+          borderWidth: recalled ? 1 : 0,
+          borderColor: t.border,
+          borderStyle: recalled ? 'dashed' : 'solid',
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 15,
+            lineHeight: 21,
+            color: recalled ? t.textMuted : mine ? t.bubbleUserText : isAvatar ? t.aiText : t.text,
+          }}
+        >
+          {text}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -386,8 +452,11 @@ function CardView({
         <Text variant="micro" tone="muted" style={{ lineHeight: 16 }}>
           {card.summary}
         </Text>
+        <Text variant="micro" tone="tertiary" style={{ marginTop: 4 }}>
+          审批仅对本次生效；长期授权请在「分身控制台 → 策略 / 能力」中调整。
+        </Text>
         <View style={{ backgroundColor: t.bubble, borderRadius: 8, padding: 8, marginTop: 6 }}>
-          <Text variant="micro" tone="muted" numberOfLines={6}>
+          <Text variant="micro" tone="muted" mono numberOfLines={6}>
             {JSON.stringify(card.args, null, 2)}
           </Text>
         </View>
@@ -416,7 +485,7 @@ function CardView({
           </View>
         ) : (
           actions(
-            act('批准', 'approve', true),
+            act('批准（仅本次）', 'approve', true),
             <Button
               key="modify"
               size="sm"

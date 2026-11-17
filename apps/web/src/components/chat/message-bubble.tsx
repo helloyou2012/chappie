@@ -147,7 +147,7 @@ export function MessageBubble({
         </div>
 
         {isAvatar && showExplain && message.aiMeta?.explanation ? (
-          <div className="w-full rounded-md border border-line bg-panel/80 p-2.5 text-[12px] backdrop-blur">
+          <div className="w-full rounded-md border border-line bg-panel p-2.5 text-[12px] backdrop-blur">
             <div className="mb-1 flex items-center gap-1 font-medium text-brand">
               <RiMagicLine className="size-3" />
               为什么这么回

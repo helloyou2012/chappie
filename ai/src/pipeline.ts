@@ -7,7 +7,7 @@
  */
 
 import type { MemberSnapshot, Message } from '@chappie/contract';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm';
 import { runAgent } from './agent-runtime';
 import { type Classification, classify } from './classifier';
 import { config } from './common/config';
@@ -15,7 +15,14 @@ import { db } from './common/db';
 import { log, newId, newTraceId } from './common/log';
 import { aiKeys, redisSemaphoreAcquire, redisSemaphoreRelease, redisSetNx } from './common/redis';
 import { LEASE_TTL_S, LeaseLostError, RUNTIME_ID, withLease } from './common/task-lease';
-import { agentTask, conversation, user } from './db/schema';
+import { agentTask, conversation, message as messageTable, user } from './db/schema';
+import {
+  CONTINUATION_WINDOW_MS,
+  deriveEngagement,
+  type EngagementContext,
+  type EngagementMessage,
+  type ReplyTarget,
+} from './engagement';
 import { evaluatePolicy } from './policy';
 import { findCandidates } from './router';
 import { shouldStaySilent } from './silence';
@@ -49,11 +56,17 @@ export async function processMessageCreated(data: {
 
   const text = message.content.type === 'text' ? message.content.text : '';
   const classification = classify(text);
-  const candidates = findCandidates(message, members, {
-    id: conv.id,
-    type: conv.type,
-    systemTag: conv.systemTag,
-  });
+  const engagement = await loadEngagement(message, members, conv);
+  const candidates = findCandidates(
+    message,
+    members,
+    {
+      id: conv.id,
+      type: conv.type,
+      systemTag: conv.systemTag,
+    },
+    engagement,
+  );
   if (candidates.length === 0) return;
 
   for (const candidate of candidates) {
@@ -66,6 +79,87 @@ export async function processMessageCreated(data: {
         error: String(e),
       }),
     );
+  }
+}
+
+/** P1 会话延续：读取最近 10 分钟消息，推导「回复链 / 同一发送者窗口」候选。 */
+async function loadEngagement(
+  message: Message,
+  members: MemberSnapshot[],
+  conv: { type: string; systemTag: string | null },
+): Promise<EngagementContext> {
+  const empty: EngagementContext = { replyToAvatarId: null, continuationAvatarIds: [] };
+  if (message.senderType !== 'human' || conv.systemTag) return empty;
+  const windowStart = new Date(Date.now() - CONTINUATION_WINDOW_MS);
+  try {
+    const rows = await db
+      .select({
+        msgId: messageTable.msgId,
+        senderId: messageTable.senderId,
+        senderType: messageTable.senderType,
+        mentions: messageTable.mentions,
+        replyTo: messageTable.replyTo,
+        createdAt: messageTable.createdAt,
+        content: messageTable.content,
+      })
+      .from(messageTable)
+      .where(
+        and(
+          eq(messageTable.convId, message.convId),
+          gte(messageTable.createdAt, windowStart),
+          ne(messageTable.msgId, message.msgId),
+        ),
+      )
+      .orderBy(desc(messageTable.seq))
+      .limit(40);
+
+    const recent: EngagementMessage[] = rows.reverse().map((r) => ({
+      msgId: r.msgId,
+      senderId: r.senderId,
+      senderType: r.senderType,
+      mentions: r.mentions ?? [],
+      replyTo: r.replyTo,
+      createdAt: r.createdAt,
+      text: typeof r.content?.text === 'string' ? r.content.text : undefined,
+    }));
+
+    const replyIds = new Set<string>();
+    if (message.replyTo) replyIds.add(message.replyTo);
+    for (const r of recent) if (r.replyTo) replyIds.add(r.replyTo);
+
+    let targets: { msgId: string; senderId: string; senderType: string }[] = [];
+    if (replyIds.size > 0) {
+      targets = await db
+        .select({
+          msgId: messageTable.msgId,
+          senderId: messageTable.senderId,
+          senderType: messageTable.senderType,
+        })
+        .from(messageTable)
+        .where(inArray(messageTable.msgId, [...replyIds]));
+    }
+    const replyTargets = new Map<string, ReplyTarget>(
+      targets.map((t) => [t.msgId, { senderId: t.senderId, senderType: t.senderType }]),
+    );
+
+    return deriveEngagement({
+      message: {
+        msgId: message.msgId,
+        senderId: message.senderId,
+        senderType: message.senderType,
+        mentions: message.mentions ?? [],
+        replyTo: message.replyTo ?? null,
+        createdAt: new Date(message.createdAt),
+        text: message.content.type === 'text' ? message.content.text : undefined,
+      },
+      recent,
+      replyTargets,
+      members,
+      convType: conv.type,
+    });
+  } catch (e) {
+    log.warn('engagement derive failed', { convId: message.convId, error: String(e) });
+    return empty;
   }
 }
 
@@ -140,6 +234,8 @@ export async function driveTask(
   if (!conv) return;
 
   const mentioned = trigger.mentions?.includes(task.avatarId) ?? false;
+  const explicitReply = task.triggerKind === 'reply';
+  const continuation = task.triggerKind === 'continuation';
 
   const skip = async (reason: string, extra?: Record<string, unknown>) => {
     await db
@@ -163,7 +259,7 @@ export async function driveTask(
     senderType: trigger.senderType,
     senderUserId: trigger.senderType === 'human' ? trigger.senderId : null,
     mentioned,
-    via: task.triggerKind as 'mention' | 'direct' | 'auto' | 'self_chat',
+    via: task.triggerKind as 'mention' | 'reply' | 'continuation' | 'direct' | 'auto' | 'self_chat',
     triggerMessageId: task.triggerMsgId,
     classification,
   });
@@ -185,7 +281,15 @@ export async function driveTask(
   }
 
   // 意图过滤：自动档只处理需要回应的消息（成本关键 —— 设计方案 §14）
-  if (!classification.needReply && !mentioned && conv.systemTag !== 'avatar_self') {
+  // 显式 @ / 回复 / 会话延续都属于「主人把对话交给分身」，不受意图过滤限制；
+  // 延续仍受时间窗、轮次上限与其他真人插话的约束（见 engagement.ts）。
+  if (
+    !classification.needReply &&
+    !mentioned &&
+    !explicitReply &&
+    !continuation &&
+    conv.systemTag !== 'avatar_self'
+  ) {
     await skip('意图分类判定无需回应');
     return;
   }

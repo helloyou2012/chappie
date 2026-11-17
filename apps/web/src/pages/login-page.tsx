@@ -104,7 +104,7 @@ export function LoginPage() {
           </p>
         </div>
 
-        <div className="glass card-edge rounded-xl border border-line p-6">
+        <div className="rounded-xl border border-line bg-popover p-6 shadow-pop">
           {step === 'email' ? (
             <form onSubmit={onSendCode} className="space-y-4">
               <div className="space-y-1.5">
@@ -189,7 +189,7 @@ export function LoginPage() {
               <RiSettings3Line className="size-3" /> 服务器设置（开发）
             </button>
             {showServer ? (
-              <div className="glass mt-3 space-y-2 rounded-xl border border-line p-3 text-left">
+              <div className="mt-3 space-y-2 rounded-xl border border-line bg-popover p-3 text-left shadow-pop">
                 <div className="space-y-1">
                   <label htmlFor="server-url" className="text-[11px] text-ink-tertiary">
                     网关地址

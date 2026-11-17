@@ -1,6 +1,7 @@
 import { useAuthStore, useChatStore } from '@chappie/shared';
 import { useEffect } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { CommandPalette } from '@/components/layout/command-palette';
 import { IconRail } from '@/components/layout/icon-rail';
 import { Sidebar } from '@/components/layout/sidebar';
 import { toast } from '@/components/ui/toast';
@@ -37,6 +38,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </section>
+      <CommandPalette />
     </div>
   );
 }

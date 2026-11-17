@@ -4,7 +4,7 @@
  */
 export const colors = {
   bg: '#f2f2f0',
-  card: '#fcfcfb',
+  card: '#ffffff',
   text: '#0a0a0a',
   textMuted: 'rgba(10,10,10,0.56)',
   textTertiary: 'rgba(10,10,10,0.38)',
@@ -25,8 +25,8 @@ export const colors = {
 };
 
 export const darkColors: typeof colors = {
-  bg: '#0b0b0b',
-  card: '#141414',
+  bg: '#151515',
+  card: '#1c1c1c',
   text: '#f2f2f2',
   textMuted: 'rgba(255,255,255,0.58)',
   textTertiary: 'rgba(255,255,255,0.38)',

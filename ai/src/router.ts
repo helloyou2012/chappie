@@ -4,13 +4,15 @@
  * 规则：
  *   - 系统会话（avatar_self）：主人的 human 消息 = 直接对分身下达指令（等同 @）；
  *     分身自己发出的卡片/消息不触发。
- *   - 普通会话：被 @ 的 avatar 总是候选；人类消息还会触发「对方/其他成员」的
- *     分身（via direct/auto，最终由策略引擎按档位过滤）；发送者自己的分身除外。
+ *   - 普通会话：被 @ 的 avatar 总是候选（包括主人 @ 自己的分身）；人类消息还会触发
+ *     「对方/其他成员」的分身（via direct/auto，最终由策略引擎按档位过滤）。
+ *     发送者自己的分身只有在被显式 @ 时才响应，不参与自动候选。
  *   - 发送者是 avatar（AI 对 AI）：仅被 @ 的分身响应，其余交给 hop_count 强校验
  *     （设计方案 §29.6 防互聊死循环）。
  */
 
 import type { Message } from '@chappie/contract';
+import type { EngagementContext } from './engagement';
 
 export interface MemberSnapshot {
   principalId: string;
@@ -22,13 +24,14 @@ export interface Candidate {
   avatarId: string;
   ownerId: string;
   mentioned: boolean;
-  via: 'mention' | 'direct' | 'auto' | 'self_chat';
+  via: 'mention' | 'reply' | 'continuation' | 'direct' | 'auto' | 'self_chat';
 }
 
 export function findCandidates(
   message: Message,
   members: MemberSnapshot[],
   conv: { id: string; type: string; systemTag: string | null },
+  engagement?: EngagementContext,
 ): Candidate[] {
   const mentionSet = new Set(message.mentions);
   const avatars = members.filter((m) => m.principalType === 'avatar' && m.ownerId);
@@ -44,12 +47,22 @@ export function findCandidates(
   }
 
   const byId = new Map<string, Candidate>();
+  // 触发来源优先级：显式提及 > 回复分身 > 会话延续 > 私聊/自动
+  const VIA_RANK: Record<Candidate['via'], number> = {
+    mention: 5,
+    reply: 4,
+    continuation: 3,
+    direct: 2,
+    auto: 1,
+    self_chat: 0,
+  };
   const add = (a: { principalId: string; ownerId: string | null }, via: Candidate['via']) => {
     if (!a.ownerId) return;
     if (a.principalId === message.senderId) return;
     if (byId.has(a.principalId)) {
       const existing = byId.get(a.principalId)!;
       if (via === 'mention') existing.mentioned = true;
+      if (VIA_RANK[via] > VIA_RANK[existing.via]) existing.via = via;
       return;
     }
     byId.set(a.principalId, {
@@ -60,13 +73,15 @@ export function findCandidates(
     });
   };
 
-  // 被 @ 的分身（含他人 @ 你的分身 —— 是否允许由策略/能力风险决定）
+  // 被 @ 的分身：显式提及一律作为候选。
+  // 主人 @ 自己的分身仅在群聊中生效（等同「让分身代我回答」）；
+  // 私聊里对方分身已被 direct 规则触发，再唤醒自己的分身会双份回复。
   for (const a of avatars) {
-    if (mentionSet.has(a.principalId)) {
-      // 排除发送者自己的分身被 @（自己 @ 自己分身无意义，但保留给 self_chat 场景）
-      if (message.senderType === 'human' && a.ownerId === message.senderId) continue;
-      add(a, 'mention');
+    if (!mentionSet.has(a.principalId)) continue;
+    if (message.senderType === 'human' && a.ownerId === message.senderId && conv.type !== 'group') {
+      continue;
     }
+    add(a, 'mention');
   }
 
   if (message.senderType === 'human') {
@@ -85,6 +100,18 @@ export function findCandidates(
     if (conv.type === 'direct') {
       const others = avatars.filter((a) => a.ownerId !== ownerOfSender);
       for (const a of others) add(a, 'direct');
+    }
+  }
+
+  // 会话延续（P1）：回复分身消息 / 被 @ 后同一发送者的后续消息
+  if (message.senderType === 'human') {
+    if (engagement?.replyToAvatarId) {
+      const avatar = avatars.find((a) => a.principalId === engagement.replyToAvatarId);
+      if (avatar) add(avatar, 'reply');
+    }
+    for (const id of engagement?.continuationAvatarIds ?? []) {
+      const avatar = avatars.find((a) => a.principalId === id);
+      if (avatar) add(avatar, 'continuation');
     }
   }
 

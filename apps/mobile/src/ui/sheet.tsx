@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { Modal, Pressable, ScrollView, View } from 'react-native';
 import Icon, { type IconName } from 'react-native-remix-icon';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { Text } from './text';
 
@@ -29,6 +30,7 @@ export function BottomSheet({
 }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const reducedMotion = useReducedMotion();
   const body = scroll ? (
     <ScrollView keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
       {children}
@@ -37,7 +39,12 @@ export function BottomSheet({
     children
   );
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType={reducedMotion ? 'none' : 'slide'}
+      onRequestClose={onClose}
+    >
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
         <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="关闭" />
         <View
@@ -93,8 +100,14 @@ export function Dialog({
   children: ReactNode;
 }) {
   const t = useTheme();
+  const reducedMotion = useReducedMotion();
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType={reducedMotion ? 'none' : 'fade'}
+      onRequestClose={onClose}
+    >
       <View
         style={{
           flex: 1,

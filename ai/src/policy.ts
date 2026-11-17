@@ -26,7 +26,7 @@ export interface PolicyInput {
   senderType: string;
   senderUserId: string | null;
   mentioned: boolean;
-  via: 'mention' | 'direct' | 'auto' | 'self_chat';
+  via: 'mention' | 'reply' | 'continuation' | 'direct' | 'auto' | 'self_chat';
   triggerMessageId: string;
   classification: Classification;
 }
@@ -129,7 +129,9 @@ export async function evaluatePolicy(p: PolicyInput): Promise<PolicyEval> {
   const isSelfChat = p.conv.systemTag === 'avatar_self';
 
   if (mode === 'off') return deny('档位：静默', mode);
-  if (mode === 'manual' && !p.mentioned && !isSelfChat) {
+  // 会话延续（reply / continuation）视作主人把对话交给分身；静默档仍然拒绝。
+  const engaged = p.via === 'reply' || p.via === 'continuation';
+  if (mode === 'manual' && !p.mentioned && !isSelfChat && !engaged) {
     return deny('档位：手动（未被 @）', mode);
   }
 
@@ -137,8 +139,10 @@ export async function evaluatePolicy(p: PolicyInput): Promise<PolicyEval> {
   const allowCapabilities = overriding?.rule.allowCapabilities ?? null;
   const rateLimitPerHour = overriding?.rule.rateLimitPerHour ?? 20;
 
-  // 让位：主人正在输入（设计方案 §4.3）—— draft/auto 档时生效
-  if (mode !== 'manual' && !isSelfChat) {
+  // 让位：主人正在输入（设计方案 §4.3）—— draft/auto 档时生效；
+  // 显式 @ 是主人的直接指令，优先于让位。
+  // 显式 @ 与直接回复优先于让位；会话延续仍会让位给正在输入的主人。
+  if (mode !== 'manual' && !isSelfChat && !p.mentioned && p.via !== 'reply') {
     const presence = await internal.getPresence([p.ownerId]).catch(() => []);
     const owner = presence[0];
     if (owner?.online && owner.typingConvId === p.conv.id) {
@@ -201,7 +205,15 @@ export async function evaluatePolicy(p: PolicyInput): Promise<PolicyEval> {
   return {
     allow: true,
     mode: effectiveMode,
-    reason: `档位 ${effectiveMode}${p.mentioned ? '（被 @）' : ''}`,
+    reason: `档位 ${effectiveMode}${
+      p.mentioned
+        ? '（被 @）'
+        : p.via === 'reply'
+          ? '（回复分身）'
+          : p.via === 'continuation'
+            ? '（会话延续）'
+            : ''
+    }`,
     allowCapabilities,
     maxRisk,
     rateLimitPerHour,

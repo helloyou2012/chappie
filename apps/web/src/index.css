@@ -13,8 +13,9 @@
 
   /* ---- 表面 ---- */
   --canvas: #f2f2f0;
-  --view: #f7f7f5;
-  --panel: #fcfcfb;
+  /* 内容区与面板统一白底：会话列表 / 聊天区 / 成员栏 / 业务页同一张白卡 */
+  --view: #ffffff;
+  --panel: #ffffff;
   --elevated: #ffffff;
 
   /* ---- 文本 ---- */
@@ -62,7 +63,9 @@
   --edge-highlight: rgb(255 255 255 / 0.6);
 
   /* ---- 动效 ---- */
-  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  /* 交互动效：进场响应快、收尾安静（与 beUI/Motion 的 ease-out 对齐） */
+  --ease-out-quad: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --default-transition-duration: 160ms;
 
   /* ---- shadcn 语义别名（组件层使用，指向上述 token） ---- */
@@ -92,10 +95,10 @@
 .dark {
   color-scheme: dark;
 
-  --canvas: #0b0b0b;
-  --view: #101112;
-  --panel: #141414;
-  --elevated: #1c1c1c;
+  --canvas: #101010;
+  --view: #151515;
+  --panel: #1c1c1c;
+  --elevated: #232323;
 
   --ink-primary: #f2f2f2;
   --ink-secondary: rgb(255 255 255 / 0.58);

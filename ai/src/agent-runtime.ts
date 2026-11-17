@@ -297,6 +297,10 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     await failTask(input.taskId, '分身不存在');
     return { status: 'failed', toolsUsed, confidence: 0 };
   }
+  // 工作期间广播「正在输入」：客户端据此把发送按钮切换为停止/接管
+  void internal.typing(input.convId, avatar.id, 20_000).catch(() => undefined);
+  const stopTyping = () => void internal.typing(input.convId, avatar.id, 0).catch(() => undefined);
+
   const ownerRows = await db
     .select({ id: userTable.id, name: userTable.name })
     .from(userTable)
@@ -480,6 +484,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     } catch (e) {
       log.error('model call failed', { taskId: input.taskId, error: String(e) });
       await failTask(input.taskId, `模型调用失败: ${String(e)}`);
+      stopTyping();
       return { status: 'failed', toolsUsed, confidence: 0 };
     }
     costUsd += result.costUsd;
@@ -759,6 +764,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
       costUsd,
       tokensUsed,
     });
+    stopTyping();
     return { status: 'handed_over', toolsUsed, confidence };
   }
   const safeText = guarded.text;
@@ -826,6 +832,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     };
   }
 
+  stopTyping();
   await saveMemorySafely(input, context.messages, peerId);
   log.info('agent task done', {
     taskId: input.taskId,

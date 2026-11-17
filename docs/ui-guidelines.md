@@ -30,10 +30,10 @@
 
 | 语义        | 变量               | 浅色                  | 深色                     |
 | ----------- | ------------------ | --------------------- | ------------------------ |
-| 应用画布    | `--canvas`         | `#f2f2f0`（暖灰）     | `#0b0b0b`                |
-| 内容视区    | `--view`           | `#f7f7f5`             | `#101112`                |
-| 面板 / 卡片 | `--panel`          | `#fcfcfb`             | `#141414`                |
-| 浮层 / 输入 | `--elevated`       | `#ffffff`             | `#1c1c1c`                |
+| 应用画布    | `--canvas`         | `#f2f2f0`（暖灰）     | `#101010`                |
+| 内容视区    | `--view`           | `#ffffff`（白）       | `#151515`                |
+| 面板 / 卡片 | `--panel`          | `#ffffff`（白）       | `#1c1c1c`                |
+| 浮层 / 输入 | `--elevated`       | `#ffffff`             | `#232323`                |
 | 主文本      | `--ink-primary`    | `#0a0a0a`             | `#f2f2f2`                |
 | 次文本      | `--ink-secondary`  | `rgb(10 10 10 / .56)` | `rgb(255 255 255 / .58)` |
 | 三级文本    | `--ink-tertiary`   | `rgb(10 10 10 / .38)` | `rgb(255 255 255 / .36)` |
@@ -146,7 +146,11 @@
 --shadow-panel: 0 12px 40px -12px rgb(0 0 0 / .25);
 ```
 
-玻璃（浮层 / 输入区 / 菜单）：`background: panel 72% + backdrop-blur(20px) saturate(160%)`。
+**浅色表面约定**：应用画布保持暖灰 `#f2f2f0` 作为外框，内容区（会话列表 / 聊天区 / 成员栏 /
+业务页）与卡片统一纯白 `#ffffff`；层级靠 1px 发丝线、白罩（`surface-*`）与阴影区分，
+不再依赖接近白的灰阶差。暗色模式沿用 `#101112` / `#141414`。
+
+玻璃（仅剩余 Toast 等瞬态浮层）：`background: panel 72% + backdrop-blur(20px) saturate(160%)`。
 
 **弹窗（Dialog）例外**：使用不透明底色 `--elevated`（浅色 = 纯白 `#ffffff`，深色 = `#1c1c1c`）
 
@@ -156,28 +160,33 @@
 
 ## 5. 组件规格
 
-| 组件                      | 规范                                                                                                                                                                                                                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Button                    | **仅两档尺寸：32（default，主操作）/ 28（sm，次级）**；图标按钮 32×32（icon）/ 28×28（icon-sm）；同级按钮尺寸必须一致；圆角 8；**尽量少用 border**——靠背景层级区分，实心按钮不加描边；**hover 不位移、不缩放**；**不使用 ring**                                                       |
-| IconButton                | 32×32（icon）/ 28×28（icon-sm），圆角 8 或圆形，默认无边框，`ink-tertiary`，hover 白罩 + 提亮                                                                                                                                                                                         |
-| Card                      | 普通卡片圆角 12；应用主卡片（聊天单卡）圆角 16 + `shadow-card`；1px `line` 边框；普通卡片靠边框与底色分层，不使用阴影                                                                                                                                                                 |
-| Input / Select / Textarea | 圆角 8–12，1px `line`，`elevated` 底；Input/Select 高度与 Button 对齐（default 32 / sm 28），同一行必须一致；Textarea 可多行；focus 边框 accent 55%，无粗 ring                                                                                                                        |
-| Badge                     | 胶囊，高 18，11px/510，可带 5px 圆点；**无边框**——用 tint 底色（语义色 12%）与文字色区分；`outline` 变体为纯文字标签                                                                                                                                                                  |
-| Dialog                    | 圆角 12，**不透明白底（`elevated`）+ 1px 边框 + `shadow-pop`** + 遮罩 `black/40` + blur(4px)；不使用玻璃底，保证大块内容的可读性                                                                                                                                                      |
-| Dropdown                  | 圆角 10，玻璃 + `shadow-pop`（唯一允许的浮层阴影），项高 30，hover `surface-hover`                                                                                                                                                                                                    |
-| Tabs                      | 高 28，圆角 8，选中 `surface-selected` + 主文本（Base UI 用 `aria-selected`，不要写 `data-[selected]`）                                                                                                                                                                               |
-| Switch                    | 30×18 胶囊，开启 accent，14px 旋钮，无阴影                                                                                                                                                                                                                                            |
-| 左侧图标栏导航            | 宽 56、圆角 12、图标 20px + 11px 标签；选中 `bg-panel` + `shadow-card`，未选中 `ink-tertiary`                                                                                                                                                                                         |
-| 会话列表项                | 头像 36px；项圆角 12、内边距 12；选中 `surface-raised` + `shadow-card`；未读徽标 accent 胶囊                                                                                                                                                                                          |
-| 栏宽拖拽                  | 命中区 8px，视觉线 1px 上下渐隐；默认会话栏 272 / 成员栏 300，宽度持久化                                                                                                                                                                                                              |
-| 消息气泡                  | 圆角 16，正文 14/1.45，`px-3.5 py-2`；分身气泡 = agent tint + 「AI 代发」角标                                                                                                                                                                                                         |
-| 聊天输入                  | **一体化输入面板**：圆角 12、`elevated` 底、1px `line/70` 边框、无内部分隔线；文本域 14px 透明底 + 底部工具行（左：@ 提及按钮 28×28 + 「Enter 发送 · Shift+Enter 换行」提示；右：圆形发送按钮 28×28，secondary 底色）；`focus-within` 边框变品牌色 45%；回复条 / 已选提及在面板内顶部 |
-| Toast                     | 圆角 10，`shadow-pop`，玻璃，左上缘 1px 语义色线                                                                                                                                                                                                                                      |
-| Avatar                    | 圆形；无图时使用 20 组 duotone 深色纯色（取每组最深色，按首字母稳定分配）、白色首字（英文大写）；分身带 1px 白色描边；Web 与移动端共用同一色板/首字母规则                                                                                                                             |
+| 组件                      | 规范                                                                                                                                                                                                                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Button                    | **仅两档尺寸：32（default，主操作）/ 28（sm，次级）**；图标按钮 32×32（icon）/ 28×28（icon-sm）；同级按钮尺寸必须一致；圆角 8；**尽量少用 border**——靠背景层级区分，实心按钮不加描边；**hover 不位移、不缩放**；**不使用 ring**                                                                             |
+| IconButton                | 32×32（icon）/ 28×28（icon-sm），圆角 8 或圆形，默认无边框，`ink-tertiary`，hover 白罩 + 提亮                                                                                                                                                                                                               |
+| Card                      | 普通卡片圆角 12；应用主卡片（聊天单卡）圆角 16 + `shadow-card`；1px `line` 边框；普通卡片靠边框与底色分层，不使用阴影                                                                                                                                                                                       |
+| Input / Select / Textarea | 圆角 8–12，1px `line`，`elevated` 底；Input/Select 高度与 Button 对齐（default 32 / sm 28），同一行必须一致；Textarea 可多行；focus 边框 accent 55%，无粗 ring                                                                                                                                              |
+| Badge                     | 胶囊，高 18，11px/510，可带 5px 圆点；**无边框**——用 tint 底色（语义色 12%）与文字色区分；`outline` 变体为纯文字标签                                                                                                                                                                                        |
+| Dialog                    | 圆角 12，**不透明白底（`elevated`）+ 1px 边框 + `shadow-pop`** + 遮罩 `black/40` + blur(4px)；不使用玻璃底，保证大块内容的可读性                                                                                                                                                                            |
+| Dropdown                  | 圆角 10，玻璃 + `shadow-pop`（唯一允许的浮层阴影），项高 30，hover `surface-hover`                                                                                                                                                                                                                          |
+| Tabs                      | 高 28，圆角 8，选中 `surface-selected` + 主文本（Base UI 用 `aria-selected`，不要写 `data-[selected]`）                                                                                                                                                                                                     |
+| Switch                    | 30×18 胶囊，开启 accent，14px 旋钮，无阴影                                                                                                                                                                                                                                                                  |
+| 左侧图标栏导航            | 宽 56、圆角 12、图标 20px + 11px 标签；选中 `bg-panel` + `shadow-card`，未选中 `ink-tertiary`                                                                                                                                                                                                               |
+| 会话列表项                | 头像 36px；项圆角 12、内边距 12；选中 `surface-raised` + `shadow-card`；未读徽标 accent 胶囊                                                                                                                                                                                                                |
+| 栏宽拖拽                  | 命中区 8px，视觉线 1px 上下渐隐；默认会话栏 272 / 成员栏 300，宽度持久化                                                                                                                                                                                                                                    |
+| 消息气泡                  | 圆角 16，正文 14/1.45，`px-3.5 py-2`；分身气泡 = agent tint + 「AI 代发」角标                                                                                                                                                                                                                               |
+| 聊天输入                  | **一体化输入面板**：圆角 12、`elevated` 底、1px `line/70` 边框、无内部分隔线；文本域 14px 透明底 + 底部工具行（左：@ 提及按钮 28×28 + 「Enter 发送 · Shift+Enter 换行」提示；右：圆形发送按钮 28×28，secondary 底色）；`focus-within` 边框变品牌色 45%；回复条 / 已选提及在面板内顶部                       |
+| Toast                     | 圆角 10，`shadow-pop`，玻璃，左上缘 1px 语义色线                                                                                                                                                                                                                                                            |
+| Command Palette           | `⌘K / Ctrl+K` 打开；白底浮层 + 1px 边框 + `shadow-panel`；输入框无边框；结果按「会话 / 联系人 / 跳转 / 操作」分组；`↑↓` 选择、`Enter` 打开、`Esc` 关闭；行高 34，选中 `surface-raised`                                                                                                                      |
+| Avatar                    | 圆形；16 色（紫/蓝/青/绿/橄榄/琥珀/棕/橙红/粉/洋红/酒红，提取自 Avatar Color Generator），按**大写首字母**稳定分配（英文 A–Z，中文取拼音首字母）；首字自适应对比（深底白字 / 浅底深墨 `#141414`，≥ 4.5:1）；**不加描边**；AI 分身与真人共用同一底色，通过 AI 角标 / 「AI 代发」标志区分（不使用独立背景色） |
 
 ## 6. 动效
 
-- 默认过渡 `160ms var(--ease-out-quad)`，只过渡 `background / color / border-color / transform / opacity`。
+- 缓动：进场 `cubic-bezier(0.16, 1, 0.3, 1)`（`--ease-out-quad`）、屏幕内移动 `cubic-bezier(0.77, 0, 0.175, 1)`（`--ease-in-out`）。
+- 时长：按压 100–160ms、Tooltip/Popover 125–200ms、菜单 150–250ms、弹窗/抽屉 200–500ms；
+  界面动效默认不超过 300ms，更长的时间只用于解释空间变化。
+- `prefers-reduced-motion` 是设计态：保留透明度与颜色反馈，移除位移、缩放、视差与弹簧过冲；
+  移动端通过 `useReducedMotion()` 把浮层改为无动画。
 - 消息入场 280ms（`translateY(8px) scale(.97)` + 淡入，轻微过冲）。
 - 弹窗 200–280ms（淡入 + 1px 缩放）。
 - typing 三点 1.2s 循环；AI 运行态可用 2s 流光（仅此处允许持续装饰动效）。
@@ -197,6 +206,8 @@
   禁止在业务组件中硬编码十六进制颜色（品牌渐变除外，集中定义在 token 层）。
 - 语义别名：`background` `foreground` `card` `popover` `primary` `secondary`
   `muted` `accent` `destructive` `border` `input` `ring` `ai` 已映射到上述 token。
+- **机器数据用等宽**：ID、trace id、工具名、参数、时间一律 `font-mono` + `tabular-nums`；正文保持无衬线。
+- **审批卡文案**：按钮写「批准（仅本次）」，并注明「长期授权请在分身控制台的策略/能力中调整」，避免把一次性批准误读为永久授权。
 - 状态表达优先顺序：文字层级 → 白罩层级 → 语义色 tint → 语义色实心（最少用）。
 - 每个新建组件先对照本规范选择 token，再写样式；新增 token 必须同时补充浅色与深色两套值并更新本文档。
 
@@ -216,7 +227,7 @@
 5. 表单用 `<Field label hint>` + `<Input multiline>`；选择用 `<SegmentedControl>` / `<ChipRow>` / `<Toggle>`。
 6. 浮层用 `<BottomSheet>`（侧重操作/表单）与 `<Dialog>`（确认/纠错）；菜单行用 `<MenuRow>`。
 7. 列表行用 `<ListRow leading title subtitle trailing onPress>`；空态用 `<EmptyState>`；加载用 `<Spinner>`；
-   头像用 `<Avatar name variant>`（首字母色板与 Web 共用 `avatarColor`）。
+   头像用 `<Avatar name variant>`（统一单色底与 Web 共用 `avatarColor`；AI 变体使用独立 tint）。
 8. `View` 仅用于布局（flex 容器、间距、进度条等非组件化结构）；新增可复用的视觉形态必须先沉淀到 `ui/`。
 
 **组件清单**：`Text` `Screen` `PageHeader` `Card` `Divider` `Button` `IconButton` `Field` `Input`

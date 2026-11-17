@@ -83,6 +83,10 @@ export const internal = {
   getPresence: (userIds: string[]) =>
     call<PresenceInfo[]>('/internal/v1/get-presence', { userIds }),
 
+  /** 广播分身「正在输入」状态；ttlMs=0 表示立即清除（任务结束） */
+  typing: (convId: string, principalId: string, ttlMs = 20_000) =>
+    call<{ ok: boolean }>('/internal/v1/typing', { convId, principalId, ttlMs }),
+
   /** 查询用户设备与端侧能力清单（Agent 决定可用端侧动作） */
   getDevices: (userId: string) =>
     call<{ devices: DeviceInfo[] }>('/internal/v1/get-devices', { userId }),

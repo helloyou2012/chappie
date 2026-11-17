@@ -60,8 +60,11 @@ export default function ChatScreen() {
   const [replyTo, setReplyTo] = useState<{ msgId: string; preview: string } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [olderExhausted, setOlderExhausted] = useState(false);
+  const [showJump, setShowJump] = useState(false);
   const [, setTypingTick] = useState(0);
   const listRef = useRef<FlatList>(null);
+  const atBottomRef = useRef(true);
+  const prevPendingRef = useRef(0);
 
   // typing 事件带截止时间：定时重渲染以便过期的「正在输入」自动消失
   useEffect(() => {
@@ -87,10 +90,18 @@ export default function ChatScreen() {
     }
   }, [convId, messages.length, view?.myLastReadSeq, messages]);
 
+  // live-edge 滚动：只有读者位于底部附近才跟随新内容；自己发消息总是跟随
   useEffect(() => {
-    if (messages.length + pending.length > 0) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+    if (messages.length + pending.length === 0) return;
+    const mineJustSent = pending.length > prevPendingRef.current;
+    prevPendingRef.current = pending.length;
+    if (!atBottomRef.current && !mineJustSent) {
+      setShowJump(true);
+      return;
     }
+    atBottomRef.current = true;
+    setShowJump(false);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
   }, [messages.length, pending.length]);
 
   const send = () => {
@@ -147,9 +158,16 @@ export default function ChatScreen() {
 
   const mentionCandidates = members.filter((m) => m.principalId !== myId);
   const now = Date.now();
-  const typingNames = Object.entries(typingByConv[convId] ?? {})
-    .filter(([pid, until]) => pid !== myId && until > now)
-    .map(([pid]) => members.find((m) => m.principalId === pid)?.name ?? '成员');
+  const activeTypers = Object.entries(typingByConv[convId] ?? {}).filter(
+    ([pid, until]) => pid !== myId && until > now,
+  );
+  const typingNames = activeTypers.map(
+    ([pid]) => members.find((m) => m.principalId === pid)?.name ?? '成员',
+  );
+  // 分身正在处理：把发送按钮切换为停止/接管
+  const avatarTyping = activeTypers.some(
+    ([pid]) => members.find((m) => m.principalId === pid)?.principalType === 'avatar',
+  );
 
   return (
     <KeyboardAvoidingView
@@ -250,9 +268,14 @@ export default function ChatScreen() {
         }}
         contentContainerStyle={{ paddingVertical: 10 }}
         onScroll={({ nativeEvent }) => {
-          if (nativeEvent.contentOffset.y < 40) void loadMore();
+          const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
+          if (contentOffset.y < 40) void loadMore();
+          const distance = contentSize.height - contentOffset.y - layoutMeasurement.height;
+          const nearBottom = distance < 80;
+          atBottomRef.current = nearBottom;
+          if (nearBottom) setShowJump(false);
         }}
-        scrollEventThrottle={120}
+        scrollEventThrottle={80}
         ListHeaderComponent={
           loadingMore ? (
             <View style={{ alignItems: 'center', paddingVertical: 8 }}>
@@ -296,11 +319,28 @@ export default function ChatScreen() {
         </ScrollView>
       ) : null}
 
-      {/* 正在输入 */}
+      {showJump ? (
+        <View style={{ alignItems: 'center', paddingVertical: 4 }}>
+          <Button
+            size="sm"
+            variant="secondary"
+            fullWidth={false}
+            icon="arrow-down-line"
+            label="回到最新"
+            onPress={() => {
+              atBottomRef.current = true;
+              setShowJump(false);
+              listRef.current?.scrollToEnd({ animated: true });
+            }}
+          />
+        </View>
+      ) : null}
+
+      {/* 正在输入 / 分身处理中 */}
       {typingNames.length > 0 ? (
         <View style={{ paddingHorizontal: 16, paddingVertical: 4 }}>
           <Text variant="micro" tone="muted">
-            {typingNames.join('、')} 正在输入…
+            {avatarTyping ? '分身正在处理…' : `${typingNames.join('、')} 正在输入…`}
           </Text>
         </View>
       ) : null}
@@ -361,15 +401,26 @@ export default function ChatScreen() {
             multiline
             style={{ flex: 1, maxHeight: 110, borderRadius: 22, paddingVertical: 9 }}
           />
-          <IconButton
-            icon="send-plane-fill"
-            label="发送"
-            size={44}
-            tone="primary"
-            filled
-            disabled={!text.trim()}
-            onPress={send}
-          />
+          {avatarTyping ? (
+            <IconButton
+              icon="stop-circle-line"
+              label="停止分身并接管"
+              size={44}
+              tone="danger"
+              filled
+              onPress={takeover}
+            />
+          ) : (
+            <IconButton
+              icon="send-plane-fill"
+              label="发送"
+              size={44}
+              tone="primary"
+              filled
+              disabled={!text.trim()}
+              onPress={send}
+            />
+          )}
         </View>
       </View>
 

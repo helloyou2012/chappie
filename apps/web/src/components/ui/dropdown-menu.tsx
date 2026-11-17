@@ -16,7 +16,7 @@ function DropdownMenuContent({
       <BaseMenu.Positioner sideOffset={6} align={align} className="z-50">
         <BaseMenu.Popup
           className={cn(
-            'glass min-w-40 rounded-md border border-line p-1 text-popover-foreground shadow-pop outline-none transition-all duration-150 data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0 data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0',
+            'min-w-40 rounded-md border border-line bg-popover p-1 text-popover-foreground shadow-pop outline-none transition-all duration-150 data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0 data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0',
             className,
           )}
           {...props}

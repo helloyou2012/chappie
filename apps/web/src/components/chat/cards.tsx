@@ -242,6 +242,9 @@ function ApprovalCardView({
       <p className="text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
         {card.summary}
       </p>
+      <p className="mt-1.5 text-[10px] text-ink-quaternary">
+        审批仅对本次生效；长期授权请在「分身控制台 → 策略 / 能力」中调整。
+      </p>
       <div className="mt-2 rounded-md border border-line bg-surface-veil p-2 text-xs">
         <div className="mb-1 font-medium text-muted-foreground">工具：{card.toolName}</div>
         <pre className="scrollbar-thin max-h-28 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px]">
@@ -297,7 +300,7 @@ function ApprovalCardView({
             ) : (
               <RiCheckLine className="size-3" />
             )}
-            批准
+            批准（仅本次）
           </Button>
           <Button
             size="sm"
