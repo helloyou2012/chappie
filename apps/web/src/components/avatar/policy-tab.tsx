@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Dialog,
   DialogContent,
@@ -42,6 +43,8 @@ export function PolicyTab() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<Policy | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   const [scopeType, setScopeType] = useState('global');
   const [scopeId, setScopeId] = useState('');
@@ -106,14 +109,19 @@ export function PolicyTab() {
     }
   };
 
-  const remove = async (p: Policy) => {
-    if (!confirm(`删除策略「${p.name || SCOPE_LABEL[p.scopeType]}」？`)) return;
+  const confirmRemove = async () => {
+    const target = removeTarget;
+    if (!target) return;
+    setRemoving(true);
     try {
-      await adminApi.deletePolicy(p.id);
+      await adminApi.deletePolicy(target.id);
+      setRemoveTarget(null);
       await load();
       toast.success('已删除');
     } catch (e) {
       toast.error('删除失败', String(e));
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -170,7 +178,12 @@ export function PolicyTab() {
                   ) : null}
                 </div>
                 <Switch checked={p.enabled} onCheckedChange={() => void toggle(p)} />
-                <Button variant="ghost" size="icon-sm" onClick={() => void remove(p)} title="删除">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setRemoveTarget(p)}
+                  title="删除"
+                >
                   <RiDeleteBinLine className="size-3.5 text-destructive" />
                 </Button>
               </div>
@@ -192,11 +205,13 @@ export function PolicyTab() {
               <div className="space-y-1">
                 <label className="text-xs font-medium">作用域</label>
                 <Select value={scopeType} onChange={(e) => setScopeType(e.target.value)}>
-                  {Object.entries(SCOPE_LABEL).map(([v, label]) => (
-                    <option key={v} value={v}>
-                      {label}
-                    </option>
-                  ))}
+                  {Object.entries(SCOPE_LABEL)
+                    .filter(([value]) => value !== 'contact_group')
+                    .map(([v, label]) => (
+                      <option key={v} value={v}>
+                        {label}
+                      </option>
+                    ))}
                 </Select>
               </div>
               <div className="space-y-1">
@@ -297,6 +312,21 @@ export function PolicyTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        title="删除策略"
+        description={
+          removeTarget
+            ? `删除策略「${removeTarget.name || SCOPE_LABEL[removeTarget.scopeType]}」？`
+            : undefined
+        }
+        confirmLabel="删除"
+        destructive
+        busy={removing}
+        onConfirm={() => void confirmRemove()}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </Card>
   );
 }

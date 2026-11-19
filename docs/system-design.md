@@ -5,6 +5,10 @@
 > **文档定位**：本文描述**目标态**架构。当前完成度、限制与路线图见 [status.md](status.md)；
 > 设计纪律见 [design-essence.md](design-essence.md)；端云细节见 [client-cloud.md](client-cloud.md)；
 > UI 规范见 [ui-guidelines.md](ui-guidelines.md)；代码结构见 [implementation.md](implementation.md)。
+>
+> **阅读约定**：正文中 gRPC / protobuf、多租户 / RLS / 列加密、mTLS、Kafka / Temporal 等
+> 属于目标态或候选方案；当前实现是 **HTTP JSON 内部接口、JSON 文本 WS 帧、单租户、
+> 静态内部 token、PG outbox + Redis Pub/Sub**。两者不一致时以 `status.md` 与代码为准。
 
 **目录**
 
@@ -24,7 +28,7 @@
 - 推送：核心只做在线 WS fanout；离线推送由 ai-platform 经 **Expo Push**（APNs/FCM 代发）在 `pushCard` 之后触发。
 - 关系链：`contact` 表 + 联系人 API（含备注名、联系人级分身档位）已落地，Web/移动均有联系人页；群成员增删/退群已实现；多租户/组织通讯录未实现（单租户部署）。
 - 定时：`scheduler_job`（日报）+ `calendar_reminder` 发生台账（日程提醒，唯一键去重 + 时效线）。
-- 策略/审批/记忆/能力：已按本设计落地；决策流水线见 `ai/src/pipeline.ts`。
+- 策略/审批/记忆/能力：核心闭环（档位、L2 审批、记忆治理、内置能力授权）已落地；MCP、WASM 插件、OAuth 委托、能力市场、多人审批等未落地，见 status.md。决策流水线见 `ai/src/pipeline.ts`。
 
 ## 1. 目标与设计原则
 
@@ -67,13 +71,13 @@
 接入层:网关、鉴权、长连接、限流、多端同步
         │
 IM 核心域:会话 · 消息 · 成员 · 已读 · 通知 · 文件 · 搜索
-        │  事件总线 (Kafka / Pulsar)
+        │  事件总线 (目标态 Kafka / Pulsar；当前 PG outbox + Redis Pub/Sub)
 ┌───────┴──────────────────────────────────────────┐
 │ AI 平台层                                          │
 │  触发路由 → 策略引擎 → 任务编排 → Agent Runtime     │
 │     │            │          │         │            │
 │  语境服务    风险/审批   工作流引擎   模型网关        │
-│  记忆服务    合规过滤    工具网关(MCP)  评估/护栏     │
+│  记忆服务    合规过滤    工具网关(MCP 目标态) 评估/护栏 │
 └──────────────────────────────────────────────────┘
         │
 开放平台:插件/工具市场 · Webhook · SDK · 第三方 Agent 接入
@@ -101,11 +105,11 @@ IM 核心域:会话 · 消息 · 成员 · 已读 · 通知 · 文件 · 搜索
 
 ### 4.2 策略模型(规则 + 作用域)
 
-策略以声明式规则存储,按作用域合并,优先级从高到低:**会话 > 联系人/分组 > 场景标签 > 时间日程 > 全局默认**。示例:
+策略以声明式规则存储,按作用域合并,优先级从高到低:**会话 > 联系人 > 场景/日程 > 全局默认**。示例:
 
 ```
 policy:
-  scope: {type: contact_group, id: family}
+  scope: {type: contact, id: u_xxx}
   mode: auto
   schedule: workdays 19:00-08:00
   allow_capabilities: [calendar.read, calendar.create, reply.text]
@@ -166,7 +170,8 @@ message:
 
 ### 5.3 事件总线主题
 
-`message.created`、`message.recalled`、`member.changed`、`policy.changed`、`task.created`、`task.step`、`task.completed`、`approval.requested`、`approval.resolved`、`feedback.submitted`、`presence.changed`。所有新功能通过订阅这些事件接入。
+当前 outbox 主题：`user.created`、`message.created`、`message.recalled`、`policy.changed`、`card.action`、`feedback.submitted`、`takeover.requested`、`member.changed`。
+presence、任务进度、审批状态变化目前走进程内事件或直接调用，不进入 outbox；新增主题需同步 `packages/contract/src/events.ts`。
 
 ## 6. 数据模型
 
@@ -175,7 +180,7 @@ message:
 - `principal`(id, type, owner\_id, status)
 - `user`、`avatar`(id, owner\_id, persona, style\_profile\_ref, model\_profile, status, version)
 - `delegation`(avatar\_id, grantor, scopes, expires\_at, revoked\_at)
-- `contact`(user\_id, peer\_id, group\_tags, trust\_level)
+- `contact`(user\_id, peer\_id, alias, created\_at)（分组标签/信任等级为后续能力）
 
 **会话与消息**
 
@@ -205,9 +210,11 @@ message:
 
 **反馈与评估**
 
-- `feedback`(msg\_id, actor, type\[accept/edit/reject/recall\], diff, reason)
+- `feedback`(msg\_id, actor, type\[like/correct/report/accept/reject\], diff, reason)
 
-所有表带 `tenant_id`,首期单租户,后期无需改表即可支持企业多租户。
+> 以上为目标数据模型。当前实际表见 `core/migrations` 与 `ai/migrations`；
+> 多租户 `tenant_id`、RLS、`delegation`、`knowledge_source`、`message_edit`/`message_recall`
+> 尚未落地（见 status.md）。
 
 ## 7. Agent 运行时
 
@@ -223,7 +230,7 @@ message:
 
 `created → planning → [waiting_approval] → running → [waiting_user_input] → completed | failed | cancelled | handed_over`
 
-长任务持久化到工作流引擎(Temporal 类),支持中断恢复、人工介入、超时升级。
+目标态：长任务持久化到工作流引擎(Temporal 类)。当前实现是 `agent_task` + `task_step` + 租约/checkpoint 恢复，未引入工作流引擎。
 
 ### 7.3 执行模式
 
@@ -235,7 +242,7 @@ message:
 
 ### 8.1 统一能力接口
 
-每个能力声明:名称、描述、入参/出参 Schema、风险等级、所需授权、是否幂等、是否可回滚、成本估计。采用 MCP 协议,第三方能力无需改动核心即可注册。
+每个能力声明:名称、描述、入参/出参 Schema、风险等级、所需授权、是否幂等、是否可回滚、成本估计。MCP 协议注册为工具生态目标态；当前是 `ai/src/tool-gateway.ts` 的静态内置工具表。
 
 ### 8.2 风险分级
 
@@ -257,7 +264,7 @@ message:
 
 ### 8.4 授权方式
 
-采用 OAuth 式委托:用户授权分身访问某服务,令牌由凭证保险库保管,分身运行时只拿到短期、范围受限的令牌,不接触明文密钥。
+采用 OAuth 式委托（目标态）:用户授权分身访问某服务,令牌由凭证保险库保管,分身运行时只拿到短期、范围受限的令牌,不接触明文密钥。当前只有内置工具,未接 OAuth/凭证保险库。
 
 ## 9. 记忆与个性化
 
@@ -299,7 +306,7 @@ message:
 **透明与合规**
 
 - 对方始终能看到「AI 分身代发」,并可选择「我只想和本人沟通」(请求转人工)。
-- 数据最小化、加密存储与传输、可选端到端加密(此时 AI 在端侧或可信执行环境内处理,作为远期方向)。
+- 数据最小化、传输 TLS；存储列加密与可选端到端加密为远期方向（当前未实现）。
 - 数据主权:按地区部署、保留期限、导出与删除权。
 - 企业场景:DLP、内容审计、留痕、法务保全、分级权限。
 - 未成年人保护、AI 内容标识等法规要求纳入合规清单。
@@ -323,7 +330,7 @@ message:
   - 记忆管理、风格预览(输入一句话看分身会怎么回)
   - 用量与花费
 - **待办与确认中心**:L2 审批、进行中任务、转交给我的消息,聚合在一个入口,支持锁屏快速审批。
-- **分身日报/周报**:替你回复了谁、做了什么、有哪些待你决定。
+- **分身日报**:替你回复了谁、做了什么、有哪些待你决定（周报为后续能力）。
 - **新手引导**:先从手动档开始,系统基于数据建议是否开启自动档,逐步放权。
 - **无障碍与多端**:多端同步分身状态;离线时客户端仍可显示草稿与审批。
 
@@ -337,7 +344,7 @@ message:
 | 新档位/规则条件 | 策略 DSL + 条件插件,无需发版                          |
 | 新触发源        | 事件适配器:邮件、日历、Webhook、IoT、定时             |
 | 新记忆类型/存储 | 记忆接口抽象,向量库可替换                             |
-| 新渠道          | 通道适配层(微信/邮件/短信/其他 IM)                    |
+| 新渠道          | 通道适配层(IM/邮件/短信等)                            |
 | 多租户/企业版   | tenant\_id、组织策略层叠加个人策略、管理后台          |
 | 多语言/多地区   | 国际化、区域部署、本地合规配置                        |
 | 多模态          | 内容类型含语音、图片、视频;模型网关支持多模态输入输出 |
@@ -399,6 +406,8 @@ message:
 | 观测     | OpenTelemetry + Prometheus + 日志平台                                 |
 | 部署     | Kubernetes、多可用区、按地区隔离                                      |
 
+> 本节是候选评估，最终技术路线以第 20 节为准（Rust 核心 + Bun AI + PostgreSQL/Redis，未引入 Kafka/工作流引擎）。
+
 ## 17. 分期路线图
 
 **阶段一 MVP(验证价值)** 单聊/群聊 + 分身成员化 + 手动档 @ 回复 + 只读工具 + 消息标识 + 基础审计。
@@ -459,10 +468,9 @@ message:
 │  gateway:连接、鉴权、心跳、在线与输入状态          │
 │  chat:会话、成员、seq 分配、消息落库、已读、撤回    │
 │  fanout:在线推送、大群分片扇出                    │
-│  push:APNs / FCM / 厂商通道                     │
-│  internal-api(gRPC):SendMessage 等内部接口       │
+│  internal-api(HTTP JSON):SendMessage 等内部接口  │
 └──┬─────────────────────┬───────────────▲──────┘
-   │ 同事务写 消息+outbox   │ 路由/广播/限流/缓存  │ gRPC 内部调用
+   │ 同事务写 消息+outbox   │ 路由/广播/限流/缓存  │ HTTP JSON 内部调用
 ┌──▼───────────────┐   ┌─▼─────────────┐    │
 │ PostgreSQL        │   │ Redis          │    │
 │ 事实来源:消息、     │   │ 加速层:可丢失、  │    │
@@ -475,7 +483,7 @@ message:
 │  memory · approval · scheduler · model-gateway  │
 │  admin-api(控制台、能力市场、计费)                │
 └─────────────────────────────────────────────────┘
-外部:LLM API、APNs / FCM、用户授权的第三方服务(经 MCP)
+外部:LLM API、Expo Push(APNs / FCM 代发)、用户授权的第三方服务(目标态经 MCP)
 ```
 
 两个二进制(Bun 使用编译为单文件的方式发布)加 PostgreSQL 与 Redis,即可完整运行。
@@ -486,18 +494,18 @@ message:
 | ------------------------------ | ---------------------------------- |
 | 长连接网关、鉴权、心跳         | 触发路由、策略引擎(档位与条件插件) |
 | 会话、成员、seq 分配、消息落库 | Agent 运行时、提示词装配、模型网关 |
-| 已读、在线与输入状态、撤回     | 工具网关(MCP)、WASM 插件           |
+| 已读、在线与输入状态、撤回     | 工具网关(MCP / WASM 为目标态)      |
 | outbox 写入、多节点广播        | 记忆与向量检索、风格画像           |
-| 推送网关                       | L2 审批、分身日报、定时与主动任务  |
+| 在线 WS fanout                 | 离线推送(Expo Push)、L2 审批、日报 |
 | 大群分片扇出                   | 管理后台 API、能力市场、计费与配额 |
 
 ## 23. 边界约定
 
 1. **单写者**:消息表只由 Rust 写入。分身发消息必须调用 Rust 的 `SendMessage` 内部接口,sender 为 avatar 主体、`on_behalf_of` 为主人,seq 与一致性不被破坏。
 2. **事件通道**:Rust 在同一事务内写「消息 + outbox」,Bun Worker 用 `FOR UPDATE SKIP LOCKED` 消费;AI 链路完全异步。
-3. **Schema 所有权**:消息、会话、成员、已读、推送设备表归 Rust;策略、任务、记忆、审计、能力、审批表归 Bun。通过 PG 角色限制:Bun 对消息相关表只读,Rust 对 AI 表只读,互不越界写。
-4. **契约单一来源**:proto 是唯一真相,用 buf 同时生成 Rust(tonic/prost)与 TS(connect-es)代码;CI 做破坏性变更检查,约定「只加不改」。
-5. **追踪贯通**:`trace_id` 随消息、事件、gRPC 元数据透传,两侧均输出 OpenTelemetry。
+3. **Schema 所有权**:消息、会话、成员、已读、推送设备表归 Rust;策略、任务、记忆、审计、能力、审批表归 Bun。目标态用 PG 角色做写入边界;当前是单数据库角色,靠模块约定约束。
+4. **契约单一来源**:TS 端以 `packages/contract` 的 zod schema 为源,Rust 用同包导出的 `fixtures.json` 做往返校验;proto 不是当前契约。
+5. **追踪贯通**:目标态 `trace_id` 随消息、事件、内部调用透传并接 OpenTelemetry;当前 `X-Trace-Id` 只覆盖 HTTP 内部调用,outbox 未持久化 trace_id。
 6. **降级**:Bun 不可用时,Rust 核心照常运行;outbox 积压,恢复后继续消费,并按时效丢弃过期的自动回复任务。
 
 **Redis 使用约定**:Redis 不是事实来源,其中数据丢失后必须能从 PostgreSQL 重建或自然过期,不得存放消息、seq、outbox、审计、审批状态;key 以 `core:` 与 `ai:` 前缀分属两侧并配置各自 ACL;除明确声明的计数结构外,每个 key 必须带 TTL。详见第 37 章。
@@ -530,18 +538,18 @@ message:
 
 ### 25.1 模块与 crate 划分
 
-| crate          | 职责                                            |
-| -------------- | ----------------------------------------------- |
-| `gateway`      | WebSocket 接入、鉴权、心跳、连接管理、限流      |
-| `chat`         | 会话、成员、seq 分配、消息写入、撤回、已读      |
-| `presence`     | 在线、输入中、多端状态                          |
-| `fanout`       | 在线推送、跨节点广播、大群分片扇出              |
-| `push`         | 离线推送(APNs / FCM / 厂商通道)、设备令牌、重试 |
-| `internal-api` | gRPC 内部接口,供 Bun 调用                       |
-| `store`        | 存储接口与 PostgreSQL 实现(sqlx)                |
-| `common`       | 错误模型、鉴权、tracing、配置、proto 生成代码   |
+| crate          | 职责                                       |
+| -------------- | ------------------------------------------ |
+| `gateway`      | WebSocket 接入、鉴权、心跳、连接管理、限流 |
+| `chat`         | 会话、成员、seq 分配、消息写入、撤回、已读 |
+| `presence`     | 在线、输入中、多端状态                     |
+| `fanout`       | 在线推送、跨节点广播、大群分片扇出         |
+| `internal-api` | HTTP JSON 内部接口,供 Bun 调用             |
+| `store`        | 存储接口与 PostgreSQL 实现(sqlx)           |
+| `common`       | 错误模型、鉴权、tracing、配置              |
 
-技术栈:tokio + axum + tonic + tokio-tungstenite + sqlx,统一用 `tracing` 输出结构化日志与 OpenTelemetry。
+技术栈:tokio + axum + tokio-tungstenite + sqlx,统一用 `tracing` 输出结构化日志。
+离线推送不在 Rust 侧,由 ai-platform 调 Expo Push(APNs/FCM 代发)。
 
 ### 25.2 消息写入事务(核心路径)
 
@@ -557,24 +565,24 @@ message:
 
 - 热点会话的行锁是瓶颈,但单会话消息速率有限;超大群另行优化(见 25.4)。
 - 客户端按 seq 补洞:发现断档时调用 `PullMessages(conv_id, from_seq)`。
-- 撤回、编辑作为新的事件记录,不直接覆盖原文,便于审计。
+- 撤回直接置 `message.recalled = true` 并清空 AI 元信息,同时写 `message.recalled` outbox 事件;编辑功能尚未实现。
 
 ### 25.3 连接网关
 
 - 无状态:连接信息只在本节点内存,在线路由与跨节点广播使用 Redis(路由 key 带 TTL 并随心跳续期,广播走 Pub/Sub)。
-- 协议:二进制帧(protobuf),首帧鉴权,心跳 30 秒,服务端空闲超时断开。
-- 多端:同一用户多连接,按设备维度维护已读与同步位点。
+- 协议:JSON 文本帧(zod discriminatedUnion);首帧鉴权超时 10 秒;客户端心跳 25 秒,服务端 60 秒无心跳断开。
+- 多端:同一用户多连接,共享 seq;已读按成员维度记录,按设备的已读位点尚未实现。
 - 背压:每连接发送队列有上限,超限断开并让客户端重连补洞,避免拖垮节点。
 - 限流:按用户、IP、会话三层令牌桶,AI 主体与人类主体分别配置。
 
 ### 25.4 扇出与大群
 
-- **小群(< 500 人)**:写时在进程内遍历在线成员直推,离线成员走推送。
-- **大群**:消息只写一份(读扩散),在线成员按分片(成员 id 哈希)并行推送;离线推送进入批量任务。
+- **小群(< 500 人)**:写时在进程内遍历在线成员直推;普通聊天消息不做离线推送,客户端按 seq 补洞。
+- **大群**:消息只写一份(读扩散),在线成员按分片(成员 id 哈希)并行推送;离线推送仅覆盖卡片(审批/转交/日程/日报)。
 - **超大群(万人级)**:引入专用扇出节点或外部队列,是 NATS/Kafka 的第一个触发场景。
 - 群内 AI 事件(如多分身并发响应)通过 outbox 异步处理,不阻塞扇出。
 
-### 25.5 内部 gRPC 接口
+### 25.5 内部 HTTP JSON 接口
 
 | 接口            | 用途                                              |
 | --------------- | ------------------------------------------------- |
@@ -585,7 +593,8 @@ message:
 | `PushCard`      | 向用户推送确认卡片、草稿卡片(特殊消息类型)        |
 | `FreezeAvatar`  | 紧急冻结分身(账号疑似被盗时)                      |
 
-所有接口使用服务间 mTLS 或签名令牌鉴权,并记录调用方与 `trace_id`。
+当前接口仅监听 127.0.0.1,使用静态共享 `X-Internal-Token` 鉴权并透传 `X-Trace-Id`;
+mTLS / 签名令牌为多主机部署时的目标态。
 
 ### 25.6 可靠性
 
@@ -633,16 +642,18 @@ feedback(msg_id, actor, type, diff, reason, created_at)
 
 - 取任务:`SELECT ... FOR UPDATE SKIP LOCKED LIMIT n`,处理成功标记 `done_at`。
 - 去重:业务层以 `(msg_id, avatar_id)` 唯一键保证幂等,重复消费无副作用。
-- 失败:`attempts` 递增并退避重试,超过上限进入死信表并告警。
+- 失败:`attempts` 递增并退避重试,超过上限标记完成并记 error 日志（死信表为后续能力）。
 - 顺序:同一会话的事件按 seq 顺序处理;多个 Worker 间以会话为粒度加咨询锁。
 - 时效:自动回复类任务带过期时间,积压恢复后过期任务直接丢弃。
 
 ### 26.4 权限与隔离
 
+> 以下为多租户阶段的目标态；当前是单租户、单一数据库角色，未启用 RLS 与列加密。
+
 - PG 角色:`core_rw`(Rust)、`ai_rw`(Bun)、`readonly`(分析);`ai_rw` 对消息表仅 `SELECT`。
 - 行级安全:所有表带 `tenant_id`,启用 RLS,为多租户预留。
 - 敏感列(令牌、凭证)使用应用层加密(AES-GCM),主密钥由部署环境注入,支持轮换。
-- 审计表只追加,并通过哈希链防篡改。
+- 审计表只追加,并通过 canonical JSON 哈希链防篡改；写入前做凭据脱敏与截断。
 
 **用户级授权边界（当前实现）**
 
@@ -667,28 +678,28 @@ feedback(msg_id, actor, type, diff, reason, created_at)
 
 ### 27.1 模块划分
 
-| 模块            | 职责                                                              |
-| --------------- | ----------------------------------------------------------------- |
-| `outbox-worker` | 消费 outbox 事件,分发到各处理器                                   |
-| `router`        | 判断一条消息涉及哪些分身(被 @、主人为自动档、私聊对象)            |
-| `policy`        | 策略合并与求值(会话 > 联系人 > 场景 > 日程 > 全局),条件插件注册表 |
-| `classifier`    | 意图分类与是否需要回应的快速判断(规则 + 小模型)                   |
-| `agent-runtime` | 上下文装配、规划、工具循环、护栏、结果生成                        |
-| `model-gateway` | 多模型适配、路由、重试、降级、缓存、预算与计费                    |
-| `tool-gateway`  | MCP 客户端、能力注册与授权、参数校验、沙箱调用                    |
-| `memory`        | 记忆写入、检索、治理、风格画像                                    |
-| `approval`      | L2 确认卡片、超时与升级                                           |
-| `scheduler`     | 定时与主动任务(日报、提醒、跟进)                                  |
-| `admin-api`     | 控制台接口、策略编辑、能力市场、用量与账单                        |
+| 模块            | 职责                                                            |
+| --------------- | --------------------------------------------------------------- |
+| `outbox-worker` | 消费 outbox 事件,分发到各处理器                                 |
+| `router`        | 判断一条消息涉及哪些分身(被 @、主人为自动档、私聊对象)          |
+| `policy`        | 策略合并与求值(会话 > 联系人 > 场景/日程 > 全局),条件插件注册表 |
+| `classifier`    | 意图分类与是否需要回应的快速判断(规则；小模型预留)              |
+| `agent-runtime` | 上下文装配、规划、工具循环、护栏、结果生成                      |
+| `model-gateway` | 多模型适配、路由、重试、降级、预算与计费(缓存为后续)            |
+| `tool-gateway`  | 能力注册与授权、参数校验、静态内置工具（MCP 客户端为目标态）    |
+| `memory`        | 记忆写入、检索、治理、风格画像                                  |
+| `approval`      | L2 确认卡片、超时与升级                                         |
+| `scheduler`     | 定时与主动任务(日报、提醒、跟进)                                |
+| `admin-api`     | 控制台接口、策略编辑、能力市场、用量与账单                      |
 
-技术栈:Bun + Hono(或 Elysia)、Zod 做运行时校验、`Bun.sql` 访问 PG、connect-es 调用 Rust 内部接口、官方 MCP SDK 对接工具。
+技术栈:Bun + Hono(或 Elysia)、Zod 做运行时校验、`Bun.sql` 访问 PG、`fetch` 调 Rust HTTP JSON 内部接口；MCP SDK 为工具生态目标态。
 
 ### 27.2 并发与进程模型
 
 Bun 是单线程事件循环,需主动规避阻塞:
 
 - **角色拆分**:同一二进制通过 `--role=worker|admin|scheduler` 启动不同角色,按需独立扩容。
-- **CPU 密集任务**(WASM 插件、大文本处理、向量计算)放入 Bun Worker 线程池,主线程只做 I/O。
+- **CPU 密集任务**(大文本处理、向量计算)放入 Bun Worker 线程池,主线程只做 I/O；WASM 插件为目标态。
 - **并发控制**:每个分身同时最多 N 个任务,全局按模型供应商设信号量,防止被限流。
 - **多实例**:Worker 以会话为粒度加咨询锁,保证同一会话的事件有序处理。
 
@@ -717,8 +728,8 @@ Bun 是单线程事件循环,需主动规避阻塞:
 
 - **能力注册**:每个能力声明名称、Schema、风险等级、所需授权、是否幂等、是否可回滚、成本估计。
 - **执行前检查**:分身是否被授予、策略是否允许、风险是否需确认、参数 Zod 校验、频率限制。
-- **授权**:用户通过 OAuth 授权第三方服务,令牌加密存库,执行时仅取短期、最小范围令牌。
-- **插件**:轻量逻辑编译为 WASM,在受限运行时执行(无网络、限制内存与时间);需要联网或文件的工具走独立 MCP 服务;高风险代码执行放入容器级沙箱。
+- **授权(目标态)**:用户通过 OAuth 授权第三方服务,令牌加密存库,执行时仅取短期、最小范围令牌；当前只有内置能力授权。
+- **插件(目标态)**:轻量逻辑编译为 WASM,在受限运行时执行(无网络、限制内存与时间);需要联网或文件的工具走独立 MCP 服务;高风险代码执行放入容器级沙箱。
 - **动态风险**:同一能力按对象、金额、频率、对话对象信任度动态升降级。
 
 ### 27.6 记忆服务
@@ -738,50 +749,34 @@ Bun 是单线程事件循环,需主动规避阻塞:
 ### 27.8 模型网关
 
 - 统一接口封装多家 LLM,按任务类型路由(分类用小模型,规划与生成用大模型)。
-- 重试、超时、熔断、供应商降级;语义缓存与提示词缓存。
-- 按租户、分身、任务记账,支持预算上限与告警。
+- 重试、超时、供应商降级；熔断、语义缓存与提示词缓存为目标态，当前未实现。
+- 按分身、任务记账,支持预算上限与告警（按租户为目标态）。
 - 提示词、模型版本与路由规则作为配置资产,支持灰度与一键回滚。
 
 ## 28. 内部接口与事件契约
 
 ### 28.1 事件(outbox topic)
 
-| 事件                                       | 产生方     | 主要消费方               |
-| ------------------------------------------ | ---------- | ------------------------ |
-| `message.created`                          | Rust       | router、memory、搜索索引 |
-| `message.recalled`                         | Rust       | memory(撤销引用)、审计   |
-| `member.changed`                           | Rust       | router(分身成员关系)     |
-| `presence.changed`                         | Rust       | policy(让位判断)         |
-| `policy.changed`                           | Bun        | 各节点缓存失效           |
-| `task.step` / `task.completed`             | Bun        | 审计、客户端进度卡片     |
-| `approval.requested` / `approval.resolved` | Bun        | push、agent-runtime      |
-| `feedback.submitted`                       | Rust / Bun | memory、评测             |
+| 事件                 | 产生方     | 主要消费方                    |
+| -------------------- | ---------- | ----------------------------- |
+| `user.created`       | Rust       | AI 侧资料同步                 |
+| `message.created`    | Rust       | router、memory、搜索索引      |
+| `message.recalled`   | Rust       | memory(撤销引用)、审计        |
+| `member.changed`     | Rust       | router(分身成员关系)          |
+| `policy.changed`     | Bun        | 各节点缓存失效                |
+| `card.action`        | Rust / Bun | approval、draft/task 卡片动作 |
+| `takeover.requested` | Rust       | 取消进行中任务、冷却          |
+| `feedback.submitted` | Rust / Bun | memory、评测                  |
 
-所有事件带 `event_id`、`schema_version`、`trace_id`、`occurred_at`;消费端必须幂等。
+presence、任务进度、审批状态变化目前是进程内事件或直接调用，不进入 outbox。
+所有 outbox 事件带 `eventId`、`topic`、`key`、`traceId`、`occurredAt`；消费端必须幂等。
 
-### 28.2 proto 示例(节选)
+### 28.2 契约格式
 
-```
-message Principal { string id = 1; PrincipalType type = 2; }
-
-message SendMessageRequest {
-  string client_msg_id = 1;   // 幂等键
-  string conv_id = 2;
-  Principal sender = 3;
-  string on_behalf_of = 4;    // 分身代发时为主人 id
-  Content content = 5;        // type + payload + schema_version
-  repeated string mentions = 6;
-  string reply_to = 7;
-  AiMeta ai_meta = 8;         // task_id、mode、tools_used、risk、confidence、hop_count
-  map<string, string> ext = 15;
-}
-
-message SendMessageResponse { string msg_id = 1; int64 seq = 2; int64 server_time = 3; }
-```
-
-- 字段只加不改,废弃字段保留编号;枚举保留 `UNKNOWN = 0`。
-- 客户端与服务端按 `schema_version` 协商,不认识的内容类型降级为文本。
-- `hop_count` 在 `SendMessage` 处强校验:AI 对 AI 连续超过 N 轮直接拒绝并通知双方主人。
+当前内部接口是 HTTP JSON，契约由 `packages/contract` 的 zod schema 定义，
+Rust 侧通过同包导出的 `fixtures.json` 做往返测试。字段约定「只加不改」，
+客户端与服务端按 `schemaVersion` 协商，不认识的内容类型降级为文本。
+`hop_count` 在发消息入口强校验：AI 对 AI 连续超过 N 轮直接拒绝。
 
 ### 28.3 对外 API
 
@@ -815,17 +810,17 @@ message SendMessageResponse { string msg_id = 1; int64 seq = 2; int64 server_tim
 
 1. 规划出需 L2 的步骤 → 创建 `approval`,任务状态置为 `waiting_approval`,推送确认卡片。
 2. 主人批准、修改后批准或拒绝;超时默认拒绝并告知对方「需主人确认」。
-3. `approval.resolved` 事件唤醒任务继续或终止;所有决策写入审计,包含批准人与设备。
+3. 审批决议唤醒任务继续或终止;所有决策写入审计,包含批准人、时间与参数指纹(设备信息未记录)。
 
 ### 29.5 接管与让位
 
-- 主人输入或手动回复 → `presence.changed` / 消息事件 → policy 将该话题冷却 N 分钟。
+- 主人输入或手动回复 → presence/typing 状态更新 → policy 让位；当前仅「一键接管」写入 15 分钟冷却，普通手动回复冷却未实现。
 - 主人点击「接管」→ 相关进行中任务全部取消(`handed_over`),分身停止并交出上下文摘要。
 - 主人长时间无响应且对方多次追问 → 分身按策略发送「主人暂不在,已记录」类提示一次,不反复打扰。
 
 ### 29.6 AI 对 AI 与防循环
 
-- 消息携带 `hop_count`,每经一次分身代发加一;超过上限由 `SendMessage` 拒绝并通知双方主人。
+- 消息携带 `hop_count`,每经一次分身代发加一;超过上限由发消息入口拒绝并记录告警（通知双方主人为后续能力）。
 - 同会话同意图去重、限速;两个分身来回超过轮数时强制转人工旁观,由主人决定是否继续。
 
 ## 30. 部署与运维
@@ -834,14 +829,14 @@ message SendMessageResponse { string msg_id = 1; int64 seq = 2; int64 server_tim
 
 | 阶段       | 形态                                                                                                        |
 | ---------- | ----------------------------------------------------------------------------------------------------------- |
-| 开发       | docker compose:PostgreSQL + Redis + Rust 核心 + Bun 平台 + mock LLM                                         |
+| 开发       | docker compose 只启动 PostgreSQL + Redis；Rust 核心与 Bun 平台在宿主机运行，模型默认 mock                   |
 | 一期上线   | 2 台主机 + 托管或自管 PG 主从 + Redis 主从(Sentinel 自动切换);Rust 与 Bun 各 2 实例,systemd 或 compose 管理 |
 | 增长期     | 迁入 Kubernetes,按角色拆分 Deployment,PG 引入 PgBouncer 与只读副本                                          |
 | 企业私有化 | 同一镜像包,PG 与对象存储换成客户环境,模型走私有网关                                                         |
 
 ### 30.2 构建与发布
 
-- monorepo:Rust 用 Cargo workspace,Bun 用 workspace,proto 由 buf 统一生成。
+- monorepo:Rust 用 Cargo workspace,Bun 用 workspace;契约用 `packages/contract` 的 zod + fixtures。
 - 镜像:Rust 静态编译,极小镜像;Bun 使用单文件编译产物。
 - 发布:滚动升级,先升级 Rust 或 Bun 的哪一侧由兼容矩阵决定;契约只加不改,保证新旧并存。
 - 配置:环境变量 + 配置文件,策略、提示词、路由规则存库并版本化,支持灰度与回滚。
@@ -860,28 +855,28 @@ message SendMessageResponse { string msg_id = 1; int64 seq = 2; int64 server_tim
 
 ## 31. 安全落地清单
 
-| 风险        | 落地措施                                                                              |
-| ----------- | ------------------------------------------------------------------------------------- |
-| Prompt 注入 | 他人内容进入数据块并标记不可信;工具参数 Zod 校验;L2 强制二次确认;输出护栏检测越权意图 |
-| 越权调用    | 能力白名单 + 分身级授权 + 策略检查;服务间 mTLS;PG 角色最小权限                        |
-| 隐私泄露    | 记忆按对话对象过滤;敏感类别默认不对外;输出前脱敏检查;审计可追溯                       |
-| 身份冒充    | 分身消息强制标识;账号异常自动 `FreezeAvatar`;设备绑定与二次验证                       |
-| 滥用与成本  | 令牌桶限流、每分身预算、异常检测、自动降为手动档                                      |
-| 数据安全    | 传输 TLS、敏感列应用层加密、密钥轮换、备份加密                                        |
-| 合规        | AI 内容标识、对方可选「转人工」、数据导出与删除、按地区驻留                           |
-| 供应链      | 依赖锁定与审计(cargo-audit、bun audit)、镜像签名、插件签名与沙箱                      |
+| 风险        | 落地措施                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------- |
+| Prompt 注入 | 他人内容进入数据块并标记不可信;工具参数 Zod 校验;L2 强制二次确认;输出护栏检测越权意图        |
+| 越权调用    | 能力白名单 + 分身级授权 + 策略检查;内部接口仅回环 + 共享 token(mTLS / PG 角色为多租户目标态) |
+| 隐私泄露    | 记忆按对话对象过滤;敏感类别默认不对外;输出前脱敏检查;审计可追溯                              |
+| 身份冒充    | 分身消息强制标识;账号异常自动 `FreezeAvatar`;设备绑定与二次验证未实现                        |
+| 滥用与成本  | 令牌桶限流、每分身预算、异常检测、自动降为手动档                                             |
+| 数据安全    | 传输 TLS;敏感列加密与密钥轮换未实现                                                          |
+| 合规        | AI 内容标识、对方可选「转人工」、数据导出与删除、按地区驻留                                  |
+| 供应链      | 依赖锁定;cargo-audit / bun audit / 镜像签名尚未接入 CI                                       |
 
 ## 32. 可观测、测试与评测
 
 **可观测**
 
-- `trace_id` 贯穿 消息 → 事件 → 任务 → 工具调用 → 模型调用。
+- 目标态 `trace_id` 贯穿 消息 → 事件 → 任务 → 工具调用 → 模型调用；当前 HTTP 内部调用透传，但 outbox 未持久化 trace_id，链路在跨进程处断开。OpenTelemetry / Prometheus 尚未接入。
 - 关键指标:消息投递延迟与 seq 断档数、outbox 积压与处理延迟、自动回复占比、采纳率、撤回率、转人工率、拦截数、模型延迟与成本。
 - 告警:积压超阈值、失败率、预算超限、模型供应商异常、PG 复制延迟。
 
 **测试**
 
-- 单元与契约测试:proto 兼容、事件 schema、接口幂等。
+- 单元与契约测试:TS/Rust 共用 fixtures 往返、事件 schema、接口幂等。
 - 集成测试:compose 环境下的消息 → 分身回复全链路,含崩溃重试。
 - 压测:会话 seq 热点、连接数、大群扇出、outbox 消费吞吐,优先验证单写者与长连接内存。
 - 混沌:杀 Bun、杀 Rust 节点、断 PG、模型超时,验证降级与恢复。
@@ -914,20 +909,19 @@ message SendMessageResponse { string msg_id = 1; int64 seq = 2; int64 server_tim
 
 ```
 repo/
-  proto/                 契约(唯一真相)
   core/                  Rust workspace
-    crates/gateway chat presence fanout push internal-api store common
+    crates/gateway chat presence fanout internal-api store common
   ai/                    Bun workspace
-    packages/router policy classifier agent-runtime model-gateway
-             tool-gateway memory approval scheduler admin-api common
-  plugins/               WASM 插件与 MCP 工具示例
-  sdk/                   TS 与 Rust SDK、客户端协议库
-  deploy/                compose、Helm、迁移脚本
-  evals/                 评测集、红队用例、影子模式脚本
-  docs/                  设计文档与 ADR
+  apps/                  web / desktop / mobile
+  packages/              contract(zod + fixtures) / shared
+  deploy/                compose、部署脚本
+  docs/                  设计文档
+  scripts/               图标等辅助脚本
 ```
 
-- 重要决策记录为 ADR,契约变更必须经评审与兼容性检查。
+目标态目录（尚未创建）：`plugins/`、`sdk/`、`evals/`、ADR 目录。
+契约变更必须经评审与兼容性检查。
+
 - 提示词、策略模板、能力定义作为配置资产,与代码一样走评审与版本管理。
 
 ## 35. 里程碑、团队与风险
@@ -980,26 +974,27 @@ Redis 是**加速层而非事实来源**:丢失后必须能由 PostgreSQL 重建
 
 ### 37.1 用途与 key 约定
 
-| 用途                   | 结构                 | key 示例                                                     | TTL                              | 归属 | 丢失后果                              |
-| ---------------------- | -------------------- | ------------------------------------------------------------ | -------------------------------- | ---- | ------------------------------------- |
-| 在线路由               | String / Hash        | `core:route:{user_id}` → node、conn、设备                    | 90 秒,心跳续期                   | Rust | 回退为向所有节点广播,客户端重连后重建 |
-| 跨节点广播             | Pub/Sub              | `core:bus:node:{node_id}`                                    | 无(不持久)                       | Rust | 漏推由客户端按 seq 补洞               |
-| 在线与输入状态         | String               | `core:presence:{user_id}`、`core:typing:{conv_id}:{user_id}` | 30 秒 / 5 秒                     | Rust | 短暂显示为离线                        |
-| 近期消息与成员缓存     | List / Hash          | `core:recent:{conv_id}`、`core:members:{conv_id}`            | 10 分钟                          | Rust | 回源读 PG                             |
-| 限流                   | 计数器 / 令牌桶(Lua) | `core:rl:{scope}:{id}`、`ai:rl:{avatar_id}`                  | 窗口长度                         | 双方 | 退化为本地限流                        |
-| 登录令牌、一次性 nonce | String               | `core:auth:{token_id}`                                       | 按令牌有效期                     | Rust | 重新登录                              |
-| 策略与分身配置缓存     | String(JSON + 版本)  | `ai:policy:{avatar_id}`                                      | 5 分钟,`policy.changed` 主动失效 | Bun  | 回源读 PG                             |
-| 事件去重窗口           | String(SET NX EX)    | `ai:dedup:{msg_id}:{avatar_id}`                              | 10 分钟                          | Bun  | 以 PG 唯一键兜底                      |
-| 让位冷却               | String               | `ai:cooldown:{conv_id}:{owner_id}`                           | N 分钟                           | Bun  | 默认保守静默                          |
-| 并发信号量             | ZSet / 计数器        | `ai:sem:model:{provider}`、`ai:sem:avatar:{avatar_id}`       | 任务超时                         | Bun  | 退化为进程内信号量                    |
-| LLM 语义 / 提示词缓存  | String               | `ai:llmcache:{hash}`                                         | 按内容类型                       | Bun  | 只是多花成本                          |
-| 事件分发(可选)         | Streams              | `ai:stream:events`                                           | 按长度裁剪                       | Bun  | 转发器重放 PG outbox                  |
+| 用途             | 结构    | key 示例                                          | TTL             | 归属 | 丢失后果                |
+| ---------------- | ------- | ------------------------------------------------- | --------------- | ---- | ----------------------- |
+| 在线与输入状态   | String  | `core:presence:{uid}`、`core:typing:{conv}:{uid}` | 90 秒 / 5 秒    | Rust | 短暂显示为离线          |
+| 跨节点广播       | Pub/Sub | `core:bus`                                        | 无(不持久)      | Rust | 漏推由客户端按 seq 补洞 |
+| 登录验证码与限流 | String  | `core:code:{email}`、`core:rl:code:{email}`       | 300 秒 / 1 小时 | Rust | 重新发送验证码          |
+| 登录令牌         | String  | `core:auth:{token}`                               | 30 天           | Rust | 重新登录                |
+| 事件去重窗口     | String  | `ai:dedup:{msgId}:{avatarId}`                     | 10 分钟         | Bun  | 以 PG 唯一键兜底        |
+| 让位冷却         | String  | `ai:cooldown:{convId}:{ownerId}`                  | 15 分钟(接管)   | Bun  | 当前按未命中放行        |
+| 限流             | 计数器  | `ai:rl:{avatarId}`                                | 窗口长度        | Bun  | 当前按放行处理          |
+| 并发信号量       | 计数器  | `ai:sem:model:{provider}`、`ai:sem:avatar:{id}`   | 任务超时        | Bun  | 当前按放行处理          |
+| 预算提醒去重     | String  | `ai:budget-notified:{avatarId}:{day}`             | 到当日结束      | Bun  | 可能重复提醒            |
+| 策略缓存失效通知 | String  | `ai:policy:{avatarId}`                            | 仅删除，无读取  | Bun  | 无(直接回源)            |
+
+未使用的预留 key：`ai:llmcache:{hash}`。仓库当前是单 Redis 实例，没有按用途拆库或 ACL；
+Redis 异常时限流/冷却按放行处理（详见 status.md §3.3）。
 
 ### 37.2 使用原则
 
 1. **PG 是事实来源**:消息、seq、outbox、审计、审批状态、记忆一律不放 Redis。
 2. **必带 TTL**:除限流计数器等明确声明的结构外,所有 key 必须设置过期;新增 key 类型需在本表登记。
-3. **前缀与权限隔离**:`core:` 与 `ai:` 分属两侧,使用独立账号与 ACL;命令白名单,禁用 KEYS、FLUSHALL 等危险命令。
+3. **前缀隔离**:`core:` 与 `ai:` 分属两侧;按用途拆库与独立账号/ACL 为目标态（当前单实例）。命令白名单,禁用 KEYS、FLUSHALL 等危险命令。
 4. **锁的边界**:涉及正确性的互斥(会话事件顺序、seq)用 PG 事务与咨询锁;Redis 锁和计数只用于限流、去重、并发限制这类允许失误的场景。
 5. **防大 key 与热 key**:单 key 体积与元素数设上限;近期消息缓存只存最近 N 条;热点会话读走进程内一级缓存。
 6. **Cluster 友好**:同一会话相关 key 使用 hash tag(如 `{conv_id}`),保证落在同一槽。

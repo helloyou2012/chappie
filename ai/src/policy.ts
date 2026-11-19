@@ -65,6 +65,26 @@ function inScheduleWindow(rule: PolicyRule, now = dayjs()): boolean {
   return false;
 }
 
+/** 解析简单升级条件：`confidence<0.7`、`confidence>=0.8` 等。 */
+function matchesEscalate(rule: string, classification: Classification): boolean {
+  const match = /^confidence\s*(<=|>=|<|>)\s*(0?\.\d+|1(?:\.0+)?)$/.exec(rule.trim());
+  if (!match) return false;
+  const threshold = Number(match[2]);
+  const value = classification.confidence;
+  switch (match[1]) {
+    case '<':
+      return value < threshold;
+    case '<=':
+      return value <= threshold;
+    case '>':
+      return value > threshold;
+    case '>=':
+      return value >= threshold;
+    default:
+      return false;
+  }
+}
+
 function deny(reason: string, mode: AvatarMode = 'off'): PolicyEval {
   return {
     allow: false,
@@ -112,6 +132,9 @@ export async function evaluatePolicy(p: PolicyInput): Promise<PolicyEval> {
     .where(and(eq(policyTable.ownerId, p.ownerId), eq(policyTable.enabled, true)))
     .orderBy(desc(policyTable.priority));
 
+  const conversationPolicy = policies.find(
+    (x) => x.scopeType === 'conversation' && x.scopeId === p.conv.id,
+  );
   const contactPolicy = p.senderUserId
     ? policies.find((x) => x.scopeType === 'contact' && x.scopeId === p.senderUserId)
     : undefined;
@@ -119,7 +142,8 @@ export async function evaluatePolicy(p: PolicyInput): Promise<PolicyEval> {
     (x) => x.scopeType === 'schedule' && inScheduleWindow(x.rule),
   );
   const globalPolicy = policies.find((x) => x.scopeType === 'global');
-  const overriding = contactPolicy ?? schedulePolicy ?? globalPolicy;
+  // 优先级：会话 > 联系人 > 场景/日程 > 全局（会话档位 member.ai_mode 仍最高）
+  const overriding = conversationPolicy ?? contactPolicy ?? schedulePolicy ?? globalPolicy;
 
   // 合并档位
   let mode: AvatarMode = sessionMode;
@@ -191,6 +215,23 @@ export async function evaluatePolicy(p: PolicyInput): Promise<PolicyEval> {
       allow: false,
       mode: effectiveMode,
       reason: `命中禁区话题（${hitTopic}），转交主人`,
+      allowCapabilities,
+      maxRisk,
+      rateLimitPerHour,
+      escalate: true,
+      downgraded,
+    };
+  }
+
+  // 升级条件（如 confidence<0.7）：命中即转交主人，而不是自动回复
+  const escalateRule = (overriding?.rule.escalateWhen ?? []).find((rule) =>
+    matchesEscalate(rule, p.classification),
+  );
+  if (escalateRule) {
+    return {
+      allow: false,
+      mode: effectiveMode,
+      reason: `命中升级条件（${escalateRule}），转交主人`,
       allowCapabilities,
       maxRisk,
       rateLimitPerHour,

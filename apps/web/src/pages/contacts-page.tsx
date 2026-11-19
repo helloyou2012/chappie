@@ -24,6 +24,7 @@ import { UserAvatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Dialog,
   DialogContent,
@@ -67,6 +68,7 @@ export function ContactsPage() {
   const [mode, setMode] = useState<(typeof MODES)[number]>('manual');
   const [savingMode, setSavingMode] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<ContactView | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -186,12 +188,14 @@ export function ContactsPage() {
     }
   };
 
-  const remove = async (c: ContactView) => {
-    if (!confirm(`从联系人中移除「${displayName(c)}」？已有会话不受影响。`)) return;
-    setBusyId(c.user.id);
+  const confirmRemove = async () => {
+    const target = removeTarget;
+    if (!target) return;
+    setBusyId(target.user.id);
     try {
-      await api.removeContact(c.user.id);
-      setContacts((prev) => prev.filter((x) => x.user.id !== c.user.id));
+      await api.removeContact(target.user.id);
+      setContacts((prev) => prev.filter((x) => x.user.id !== target.user.id));
+      setRemoveTarget(null);
       toast.success('已移除联系人');
     } catch (e) {
       toast.error('移除失败', e instanceof Error ? e.message : String(e));
@@ -360,7 +364,7 @@ export function ContactsPage() {
                             <Button
                               size="icon-sm"
                               variant="ghost"
-                              onClick={() => void remove(c)}
+                              onClick={() => setRemoveTarget(c)}
                               disabled={busyId === c.user.id}
                               title="移除联系人"
                             >
@@ -468,6 +472,21 @@ export function ContactsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        title="移除联系人"
+        description={
+          removeTarget
+            ? `从联系人中移除「${displayName(removeTarget)}」？已有会话不受影响。`
+            : undefined
+        }
+        confirmLabel="移除"
+        destructive
+        busy={removeTarget !== null && busyId === removeTarget.user.id}
+        onConfirm={() => void confirmRemove()}
+        onCancel={() => setRemoveTarget(null)}
+      />
 
       {/* 群聊列表 */}
       <Dialog open={groupsOpen} onOpenChange={setGroupsOpen}>

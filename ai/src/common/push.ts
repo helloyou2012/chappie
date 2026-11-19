@@ -73,31 +73,35 @@ export async function pushToUser(userId: string, message: PushMessage): Promise<
   return tokens.length;
 }
 
-/** 导出供测试：卡片 → 推送文案映射（draft/task 不推送） */
+/**
+ * 导出供测试：卡片 → 推送文案映射（draft/task 不推送）。
+ * 推送只带 kind / 标题 / 业务 id，不拼接卡片摘要或工具参数，
+ * 避免邮件正文、转账对象等敏感内容出现在锁屏通知里。
+ */
 export function previewOfCard(card: CardPayload): PushMessage | null {
   switch (card.kind) {
     case 'approval':
       return {
         title: card.title || '分身请求你的确认',
-        body: card.summary?.slice(0, 120) || '分身准备执行一个高风险操作，需要你批准。',
+        body: '分身准备执行一个高风险操作，请打开应用确认。',
         data: { kind: card.kind, approvalId: card.approvalId },
       };
     case 'handover':
       return {
         title: '分身转交给你处理',
-        body: card.summary.slice(0, 120),
+        body: '有一项任务需要你亲自处理，请打开应用查看。',
         data: { kind: card.kind, taskId: card.taskId },
       };
     case 'calendar_reminder':
       return {
         title: `日程提醒：${card.title}`,
-        body: card.summary || card.startAt,
+        body: '日程即将开始。',
         data: { kind: card.kind, entryId: card.entryId },
       };
     case 'report':
       return {
         title: '分身日报已生成',
-        body: card.summary.slice(0, 120),
+        body: '打开应用查看今天的日报。',
         data: { kind: card.kind, reportId: card.reportId, day: card.day },
       };
     default:
@@ -112,6 +116,19 @@ export function previewOfCard(card: CardPayload): PushMessage | null {
 export async function notifyForCard(recipientUserId: string, card: CardPayload): Promise<void> {
   const message = previewOfCard(card);
   if (!message) return;
+  // 在线用户能通过 WS 实时收到卡片，不再重复推送；查询失败按离线兜底。
+  try {
+    const presences = await internal.getPresence([recipientUserId]);
+    if (presences.some((p) => p.userId === recipientUserId && p.online)) {
+      log.info('push: skipped online user', { userId: recipientUserId, kind: card.kind });
+      return;
+    }
+  } catch (e) {
+    log.warn('push: presence check failed, fallback to send', {
+      userId: recipientUserId,
+      error: String(e),
+    });
+  }
   await pushToUser(recipientUserId, message).catch((e) => {
     log.warn('push: notifyForCard failed', { userId: recipientUserId, error: String(e) });
   });

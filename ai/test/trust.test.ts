@@ -87,7 +87,7 @@ describe('redactSecrets 错误/日志脱敏', () => {
     expect(out).toContain('[redacted]');
   });
 
-  test('AWS / Slack / Google / 私钥', () => {
+  test('云服务 key / Bot token / 私钥', () => {
     const out = redactSecrets(
       'AKIAABCDEFGHIJKLMNOP xoxb-1234567890-abcdef AIzaSyABCDEFGHIJKLMNOPQRSTUVWX -----BEGIN RSA PRIVATE KEY-----\nsecret\n-----END RSA PRIVATE KEY-----',
     );

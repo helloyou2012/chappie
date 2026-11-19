@@ -129,7 +129,7 @@ push：internal.pushCard 成功后的唯一推送入口（Expo Push）
   - 信息架构：5 tab（消息 / 审批 / 日程 / 分身 / 我的）；联系人、日报为「我的」二级页。
   - 设计系统：`apps/mobile/src/ui`（原语 + 主题），规范见 [ui-guidelines.md §9](ui-guidelines.md#9-移动端设计系统appsmobilesrccui)。
   - 服务地址：`EXPO_PUBLIC_SERVER_URL` / `EXPO_PUBLIC_ADMIN_URL` 构建期注入；`__DEV__` 才显示切换入口。
-  - 开发调试：iOS 模拟器默认 `http://127.0.0.1:7100`；Android 模拟器在开发构建改为 `http://10.0.2.2:7100`。
+  - 开发调试：iOS 模拟器默认 `http://127.0.0.1:7100`；Android 模拟器需在开发构建的「服务器设置」中手动填写 `http://10.0.2.2:7100`（代码不会自动切换）。
 
 ## 7. 工程约定
 

@@ -390,7 +390,7 @@ export async function driveTask(
         error: redactSecrets(String(e)).slice(0, 500),
         updatedAt: sql`now()`,
       })
-      .where(eq(agentTask.id, task.taskId))
+      .where(and(eq(agentTask.id, task.taskId), eq(agentTask.lockedBy, RUNTIME_ID)))
       .catch(() => undefined);
   } finally {
     await redisSemaphoreRelease(semKey);

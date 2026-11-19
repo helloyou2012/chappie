@@ -56,7 +56,7 @@ function ConvItem({ view, myId }: { view: ConversationView; myId: string }) {
   const isGroup = view.conversation.type === 'group';
   const preview = view.lastMsgPreview ?? '暂无消息';
   const fromMe = view.lastMsgSenderId === myId;
-  // 群聊预览带发送者（「陈美丽: 内容」），与微信/飞书一致
+  // 群聊预览带发送者（「昵称: 内容」）
   const previewPrefix =
     isGroup && !fromMe && view.lastMsgSenderName
       ? `${view.lastMsgSenderName}：`
@@ -148,7 +148,7 @@ export function Sidebar() {
 
   const myId = user?.id ?? '';
 
-  // 多端在线条（参考微信「Mac已登录」）：展示最近活跃的其他端
+  // 多端在线条：展示最近活跃的其他端
   const [otherDevice, setOtherDevice] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;

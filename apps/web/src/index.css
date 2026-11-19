@@ -211,7 +211,10 @@
   --radius-3xl: 24px;
 
   /* 阴影工具类 */
+  --shadow-inset-hairline: inset 0 0 0 1px var(--line);
+  --shadow-card: 0 0 0 1px rgb(0 0 0 / 0.03);
   --shadow-pop: var(--sh-pop);
+  --shadow-panel: 0 12px 40px -12px rgb(0 0 0 / 0.25);
 
   /* 动效 */
   --animate-bubble-in: bubble-in 0.28s var(--ease-out-quad) both;

@@ -95,8 +95,8 @@ jobs:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
-          test -n "$DEPLOY_HOST" || { echo "::error::DEPLOY_HOST 为空：请确认 environment 名称与 workflow 一致（production），且变量配置在该环境下"; exit 1; }
-          test -n "$DEPLOY_SSH_KEY" || { echo "::error::DEPLOY_SSH_KEY 为空：请在 production 环境添加 secret"; exit 1; }
+          test -n "$DEPLOY_HOST" || { echo "::error::DEPLOY_HOST 为空：请确认 environment 名称与 workflow 一致（deploy），且变量配置在该环境下"; exit 1; }
+          test -n "$DEPLOY_SSH_KEY" || { echo "::error::DEPLOY_SSH_KEY 为空：请在 deploy 环境添加 secret"; exit 1; }
 
       - name: Prepare SSH
         env:

@@ -250,9 +250,10 @@ export function createAdminApp() {
       name?: string;
       rule?: PolicyRule;
     };
-    const allowed = ['global', 'contact', 'contact_group', 'conversation', 'schedule'];
+    // contact_group 需要联系人分组标签，尚未实现；conversation 已纳入策略评估。
+    const allowed = ['global', 'contact', 'conversation', 'schedule'];
     if (!body.scopeType || !allowed.includes(body.scopeType)) {
-      return c.json(err('bad_request', 'scopeType 不合法'), 400);
+      return c.json(err('bad_request', 'scopeType 不合法（contact_group 暂未实现）'), 400);
     }
     if (!body.rule?.mode) return c.json(err('bad_request', '缺少 rule.mode'), 400);
     const id = newId('p');

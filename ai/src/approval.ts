@@ -10,6 +10,7 @@
 
 import type { ApprovalCard } from '@chappie/contract';
 import { and, eq, lt, sql } from 'drizzle-orm';
+import { appendAudit } from './common/audit';
 import { fingerprint } from './common/canonical';
 import { dayjs } from './common/datetime';
 import { db } from './common/db';
@@ -117,9 +118,10 @@ export async function createApproval(params: {
     tool: params.tool.id,
     args: params.args,
   });
+  // 摘要进入卡片与推送通道，不能拼接原始参数（可能含金额、收件人等敏感信息）；
+  // 参数本身仍在卡片 args 中按权限展示。
   const summary =
     `分身准备执行「${params.tool.name}」（${params.tool.risk}）。` +
-    `参数：${JSON.stringify(params.args).slice(0, 180)}。` +
     (params.tool.risk === 'L2' ? '该操作属于高风险，需要你确认后才会执行。' : '');
 
   await db.insert(approval).values({
@@ -231,6 +233,14 @@ export async function sweepExpiredApprovals(): Promise<number> {
       .update(agentTask)
       .set({ status: 'cancelled', error: '审批超时，已默认拒绝', updatedAt: sql`now()` })
       .where(and(eq(agentTask.id, r.taskId), eq(agentTask.status, 'waiting_approval')));
+    await appendAudit(
+      r.taskId,
+      'system',
+      'approval.expired',
+      { approvalId: r.id },
+      { ok: false },
+      null,
+    );
     await internal
       .pushCard(r.approver, {
         kind: 'handover',

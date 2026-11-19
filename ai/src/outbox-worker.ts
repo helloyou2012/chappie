@@ -9,6 +9,7 @@ import type { CardPayload, MemberSnapshot, Message } from '@chappie/contract';
 import { and, asc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { resumeFromApproval } from './agent-runtime';
+import { appendAudit } from './common/audit';
 import { client, db } from './common/db';
 import { internal } from './common/internal';
 import { parseJsonSafe } from './common/json';
@@ -16,6 +17,7 @@ import { log, newId } from './common/log';
 import { aiKeys, redisDel, redisSetEx } from './common/redis';
 import {
   agentTask,
+  approval,
   avatar as avatarTable,
   capability,
   capabilityGrant,
@@ -33,6 +35,30 @@ const WORKER_ID = `worker_${uuidv4().slice(0, 8)}`;
 const BATCH = 20;
 const LOCK_TIMEOUT_SECONDS = 30;
 const MAX_ATTEMPTS = 10;
+
+/** 任务取消/接管时同步作废未决审批，避免卡片仍停留在「待确认」。 */
+async function cancelPendingApprovals(
+  taskIds: string[],
+  actor: string,
+  reason: string,
+): Promise<void> {
+  if (taskIds.length === 0) return;
+  const rows = await db
+    .update(approval)
+    .set({ status: 'rejected', resolvedAt: sql`now()` })
+    .where(and(inArray(approval.taskId, taskIds), eq(approval.status, 'pending')))
+    .returning({ id: approval.id, taskId: approval.taskId });
+  for (const row of rows) {
+    await appendAudit(
+      row.taskId,
+      actor,
+      'approval.cancelled',
+      { approvalId: row.id, reason },
+      { ok: false },
+      null,
+    );
+  }
+}
 
 interface OutboxRow {
   id: number;
@@ -354,6 +380,8 @@ async function handleCardAction(data: {
             taskId: card.taskId,
             actorId: data.actorId,
           });
+        } else {
+          await cancelPendingApprovals([card.taskId], data.actorId, '任务被主人取消');
         }
       }
       break;
@@ -546,6 +574,12 @@ async function handleTakeover(data: { userId: string; convId: string }): Promise
       ),
     )
     .returning({ id: agentTask.id });
+
+  await cancelPendingApprovals(
+    cancelled.map((row) => row.id),
+    data.userId,
+    '主人接管会话',
+  );
 
   // 话题冷却 15 分钟（设计方案 §4.3）
   await redisSetEx(aiKeys.cooldown(data.convId, data.userId), '1', 15 * 60);

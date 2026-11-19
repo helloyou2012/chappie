@@ -1,15 +1,34 @@
-import { adminApi, type CalendarItem, dayjs, type TodoItem } from '@chappie/shared';
+import { adminApi, dayjs, type TodoItem, useAuthStore } from '@chappie/shared';
 import {
   RiAddLine,
-  RiCalendarLine,
-  RiCalendarTodoLine,
-  RiCheckboxCircleLine,
+  RiArrowLeftSLine,
+  RiArrowRightSLine,
+  RiCheckboxBlankCircleLine,
+  RiCheckboxCircleFill,
+  RiCheckLine,
   RiDeleteBinLine,
+  RiInboxLine,
   RiLoader4Line,
+  RiRefreshLine,
+  RiSearchLine,
+  RiTimeLine,
 } from '@remixicon/react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type CalendarView,
+  type Dayjs,
+  formatMinutes,
+  nextSlotTime,
+  normalizeEvent,
+  type ScheduleEvent,
+  startOfWeek,
+  viewTitle,
+} from '@/components/schedule/calendar-utils';
+import { CreateEventDialog, EventDetailDialog } from '@/components/schedule/event-dialogs';
+import { MiniCalendar } from '@/components/schedule/mini-calendar';
+import { MonthGrid } from '@/components/schedule/month-grid';
+import { TimeGrid } from '@/components/schedule/time-grid';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -19,38 +38,67 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Switch } from '@/components/ui/switch';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 
+type Tab = 'calendar' | 'todo';
+
+const VIEW_OPTIONS: { value: CalendarView; label: string }[] = [
+  { value: 'day', label: '日' },
+  { value: 'week', label: '周' },
+  { value: 'month', label: '月' },
+];
+
+interface TodoEntry {
+  item: TodoItem;
+  index: number;
+}
+
 /**
- * 日程与待办 —— 展示分身通过 calendar.create / todo.add 创建的数据。
- * 数据源是 ai-platform 的 toolData（按 avatarId + kind 存储）。
+ * 日程：左侧迷你月历 + 日历筛选，右侧日 / 周 / 月视图。
+ * 数据与分身工具 calendar.create / todo.add 共用同一份 toolData。
  */
 export function SchedulePage() {
-  const [tab, setTab] = useState<'calendar' | 'todo'>('calendar');
-  const [calendar, setCalendar] = useState<CalendarItem[]>([]);
+  const user = useAuthStore((s) => s.user);
+  const calendarName = user?.name?.trim() || '我的日历';
+
+  const [tab, setTab] = useState<Tab>('calendar');
+  const [view, setView] = useState<CalendarView>('week');
+  const [cursor, setCursor] = useState<Dayjs>(() => dayjs());
+  const [now, setNow] = useState<Dayjs>(() => dayjs());
+  const [miniMonth, setMiniMonth] = useState<Dayjs>(() => dayjs().startOf('month'));
+  const [query, setQuery] = useState('');
+  const [showCalendar, setShowCalendar] = useState(true);
+
+  const [calendar, setCalendar] = useState<ScheduleEvent[]>([]);
   const [todo, setTodo] = useState<TodoItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState<'calendar' | 'todo' | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [calTitle, setCalTitle] = useState('');
-  const [calDate, setCalDate] = useState(() => dayjs().format('YYYY-MM-DD'));
-  const [calTime, setCalTime] = useState('10:00');
-  const [todoText, setTodoText] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createTitle, setCreateTitle] = useState('');
+  const [createDate, setCreateDate] = useState(() => dayjs().format('YYYY-MM-DD'));
+  const [createTime, setCreateTime] = useState(() => nextSlotTime(dayjs()));
+  const [creating, setCreating] = useState(false);
+
+  const [detail, setDetail] = useState<ScheduleEvent | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const [todoOpen, setTodoOpen] = useState(false);
+  const [todoText, setTodoText] = useState('');
+  const [creatingTodo, setCreatingTodo] = useState(false);
+
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [cal, td] = await Promise.all([adminApi.listCalendar(), adminApi.listTodo()]);
-      setCalendar(cal.items);
+      setCalendar(cal.items.map(normalizeEvent));
       setTodo(td.items);
     } catch (e) {
       toast.error('加载失败', e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -58,15 +106,174 @@ export function SchedulePage() {
     void load();
   }, [load]);
 
-  const removeCalendar = async (index: number) => {
-    setBusyKey(`cal-${index}`);
+  // 分钟级刷新当前时间红线
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(dayjs()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  // 主视图翻页后，小日历跟随到对应月份
+  useEffect(() => {
+    setMiniMonth(cursor.startOf('month'));
+  }, [cursor]);
+
+  const scheduled = useMemo(
+    () => calendar.filter((event) => event.date !== null && event.startMin !== null),
+    [calendar],
+  );
+  const unscheduled = useMemo(
+    () => calendar.filter((event) => event.date === null || event.startMin === null),
+    [calendar],
+  );
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleEvents = useMemo(() => {
+    if (!showCalendar) return [];
+    if (!normalizedQuery) return scheduled;
+    return scheduled.filter((event) => event.title.toLowerCase().includes(normalizedQuery));
+  }, [scheduled, showCalendar, normalizedQuery]);
+  const visibleUnscheduled = useMemo(() => {
+    if (!normalizedQuery) return unscheduled;
+    return unscheduled.filter((event) => event.title.toLowerCase().includes(normalizedQuery));
+  }, [unscheduled, normalizedQuery]);
+
+  const eventsByDay = useMemo(() => {
+    const map = new Map<string, ScheduleEvent[]>();
+    for (const event of visibleEvents) {
+      if (!event.date) continue;
+      const list = map.get(event.date);
+      if (list) list.push(event);
+      else map.set(event.date, [event]);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => (a.startMin ?? 0) - (b.startMin ?? 0));
+    }
+    return map;
+  }, [visibleEvents]);
+
+  const eventDates = useMemo(
+    () =>
+      new Set(
+        (showCalendar ? scheduled : [])
+          .map((event) => event.date)
+          .filter((date): date is string => date !== null),
+      ),
+    [scheduled, showCalendar],
+  );
+
+  const viewDays = useMemo<Dayjs[]>(() => {
+    if (view === 'day') return [cursor.startOf('day')];
+    if (view === 'week') {
+      const start = startOfWeek(cursor);
+      return Array.from({ length: 7 }, (_, i) => start.add(i, 'day'));
+    }
+    return [];
+  }, [view, cursor]);
+
+  const title = useMemo(() => viewTitle(view, cursor), [view, cursor]);
+
+  const pendingEntries = useMemo<TodoEntry[]>(
+    () => todo.map((item, index) => ({ item, index })).filter((entry) => !entry.item.done),
+    [todo],
+  );
+  const doneEntries = useMemo<TodoEntry[]>(
+    () => todo.map((item, index) => ({ item, index })).filter((entry) => entry.item.done),
+    [todo],
+  );
+
+  const refresh = async () => {
+    setRefreshing(true);
     try {
-      await adminApi.deleteCalendarItem(index);
-      setCalendar((prev) => prev.filter((_, i) => i !== index));
+      await load(true);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const goToday = () => setCursor(dayjs());
+  const navigate = (direction: -1 | 1) => {
+    setCursor((current) => current.add(direction, view));
+  };
+
+  const openDay = (day: Dayjs) => {
+    setCursor(day);
+    setView('day');
+  };
+
+  const openCreate = (day?: Dayjs, minute?: number) => {
+    const target = day ?? cursor;
+    setCreateTitle('');
+    setCreateDate(target.format('YYYY-MM-DD'));
+    setCreateTime(minute == null ? nextSlotTime(target) : formatMinutes(minute));
+    setCreateOpen(true);
+  };
+
+  const createAt = (day: Dayjs, minute?: number) => {
+    setCursor(day);
+    openCreate(day, minute);
+  };
+
+  const handlePrimary = () => {
+    if (tab === 'todo') {
+      setTodoText('');
+      setTodoOpen(true);
+      return;
+    }
+    openCreate();
+  };
+
+  const createEvent = async () => {
+    const title = createTitle.trim();
+    if (!title) return;
+    setCreating(true);
+    try {
+      await adminApi.createCalendarItem({
+        title,
+        date: createDate || null,
+        time: createTime || '09:00',
+      });
+      setCreateOpen(false);
+      if (createDate) setCursor(dayjs(createDate));
+      toast.success(
+        '日程已创建',
+        createDate ? `${dayjs(createDate).format('M月D日')} ${createTime}` : createTime,
+      );
+      await load(true);
+    } catch (e) {
+      toast.error('创建日程失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const deleteEvent = async () => {
+    if (!detail) return;
+    setDeleting(true);
+    try {
+      await adminApi.deleteCalendarItem(detail.index);
+      setDetail(null);
+      toast.success('日程已删除');
+      await load(true);
     } catch (e) {
       toast.error('删除日程失败', e instanceof Error ? e.message : String(e));
     } finally {
-      setBusyKey(null);
+      setDeleting(false);
+    }
+  };
+
+  const createTodo = async () => {
+    const text = todoText.trim();
+    if (!text) return;
+    setCreatingTodo(true);
+    try {
+      await adminApi.createTodoItem({ text });
+      setTodoOpen(false);
+      toast.success('待办已添加');
+      await load(true);
+    } catch (e) {
+      toast.error('添加待办失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreatingTodo(false);
     }
   };
 
@@ -74,7 +281,7 @@ export function SchedulePage() {
     setBusyKey(`todo-${index}`);
     try {
       await adminApi.updateTodoItem(index, { done });
-      setTodo((prev) => prev.map((t, i) => (i === index ? { ...t, done } : t)));
+      setTodo((prev) => prev.map((item, i) => (i === index ? { ...item, done } : item)));
     } catch (e) {
       toast.error('更新待办失败', e instanceof Error ? e.message : String(e));
     } finally {
@@ -94,217 +301,270 @@ export function SchedulePage() {
     }
   };
 
-  const todoPending = todo.filter((t) => !t.done).length;
-
-  const openCreate = (kind: 'calendar' | 'todo') => {
-    setCreateOpen(kind);
-    if (kind === 'calendar') {
-      setCalTitle('');
-      setCalDate(dayjs().format('YYYY-MM-DD'));
-      setCalTime('10:00');
-    } else {
-      setTodoText('');
-    }
-  };
-
-  const create = async () => {
-    if (!createOpen) return;
-    setCreating(true);
-    try {
-      if (createOpen === 'calendar') {
-        if (!calTitle.trim()) return;
-        await adminApi.createCalendarItem({
-          title: calTitle.trim(),
-          date: calDate || null,
-          time: calTime.trim() || '10:00',
-        });
-        toast.success('日程已创建');
-      } else {
-        if (!todoText.trim()) return;
-        await adminApi.createTodoItem({ text: todoText.trim() });
-        toast.success('待办已添加');
-      }
-      setCreateOpen(null);
-      await load();
-    } catch (e) {
-      toast.error('创建失败', e instanceof Error ? e.message : String(e));
-    } finally {
-      setCreating(false);
-    }
-  };
-
   return (
-    <div className="scrollbar-thin flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl px-6 py-8">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="flex items-center gap-2 text-[20px] font-semibold tracking-[-0.022em]">
-              <RiCalendarTodoLine className="size-5 text-primary" /> 日程与待办
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              分身帮你创建的日程和待办都会汇总在这里，也可以在对话里让它继续添加。
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Tabs value={tab} onValueChange={(v) => setTab(v as 'calendar' | 'todo')}>
-              <TabsList>
-                <TabsTrigger value="calendar">日程</TabsTrigger>
-                <TabsTrigger value="todo">
-                  待办{todoPending > 0 ? ` · ${todoPending}` : ''}
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <Button
-              size="sm"
-              onClick={() => openCreate(tab)}
-              title={tab === 'calendar' ? '新建日程' : '新建待办'}
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-view">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-3 px-4 border-b border-line">
+        <nav className="flex h-full items-center gap-1">
+          {(
+            [
+              { value: 'calendar', label: '日历' },
+              { value: 'todo', label: '待办' },
+            ] as const
+          ).map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTab(value)}
+              className={cn(
+                'relative flex h-full items-center px-3 text-[14px] transition-colors',
+                tab === value ? 'font-medium text-ink' : 'text-ink-secondary hover:text-ink',
+              )}
             >
-              <RiAddLine className="size-3.5" />
-              {tab === 'calendar' ? '新建日程' : '新建待办'}
-            </Button>
-          </div>
+              {label}
+              {tab === value ? (
+                <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-brand" />
+              ) : null}
+            </button>
+          ))}
+        </nav>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="刷新"
+            aria-label="刷新"
+            disabled={refreshing || loading}
+            onClick={() => void refresh()}
+          >
+            <RiRefreshLine className={cn('size-4', refreshing && 'animate-spin')} />
+          </Button>
+          <Button size="sm" onClick={handlePrimary}>
+            <RiAddLine className="size-3.5" />
+            {tab === 'calendar' ? '创建日程' : '新建待办'}
+          </Button>
         </div>
+      </header>
 
-        {loading ? (
-          <div className="space-y-3">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-16 w-full rounded-md" />
-            ))}
-          </div>
-        ) : tab === 'calendar' ? (
-          calendar.length === 0 ? (
-            <EmptyHint text="还没有日程。点右上角「新建日程」，或直接对分身说「明天 10 点产品评审」。" />
-          ) : (
-            <div className="space-y-3">
-              {calendar.map((item, index) => (
-                <Card key={item.id ?? `${item.date ?? ''}-${item.time}-${item.title}`}>
-                  <CardContent className="flex items-center gap-3 py-3.5">
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--brand)_12%,transparent)] text-brand">
-                      <RiCalendarLine className="size-4" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">{item.title}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {item.date ? `${formatEventDate(item.date)} ${item.time}` : item.time}
-                        {item.date && dayjs(item.date).isSame(dayjs(), 'day') ? ' · 今天' : ''}
-                      </p>
-                    </div>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      disabled={busyKey !== null}
-                      onClick={() => void removeCalendar(index)}
-                      aria-label="删除日程"
-                      title="删除日程"
-                    >
-                      {busyKey === `cal-${index}` ? (
-                        <RiLoader4Line className="size-3.5 animate-spin" />
-                      ) : (
-                        <RiDeleteBinLine className="size-3.5" />
-                      )}
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )
-        ) : todo.length === 0 ? (
-          <EmptyHint text="待办清单是空的。点右上角「新建待办」，或对分身说「加个待办：回复 Bob 的邮件」。" />
-        ) : (
-          <div className="space-y-3">
-            {todo.map((item, index) => (
-              <Card key={`${item.text}-${item.done}`}>
-                <CardContent className="flex items-center gap-3 py-3.5">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--success)_12%,transparent)] text-success">
-                    <RiCheckboxCircleLine className="size-4" />
-                  </span>
-                  <Switch
-                    checked={item.done}
-                    disabled={busyKey !== null}
-                    onCheckedChange={(checked) => void toggleTodo(index, checked)}
-                    aria-label={item.done ? '标记为未完成' : '标记为已完成'}
-                  />
-                  <p
-                    className={cn(
-                      'min-w-0 flex-1 text-sm break-words',
-                      item.done && 'text-muted-foreground line-through',
-                    )}
-                  >
-                    {item.text}
-                  </p>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    disabled={busyKey !== null}
-                    onClick={() => void removeTodo(index)}
-                    aria-label="删除待办"
-                    title="删除待办"
-                  >
-                    {busyKey === `todo-${index}` ? (
-                      <RiLoader4Line className="size-3.5 animate-spin" />
-                    ) : (
-                      <RiDeleteBinLine className="size-3.5" />
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+      {tab === 'calendar' ? (
+        <div className="flex min-h-0 flex-1">
+          <aside className="scrollbar-thin hidden w-[248px] shrink-0 flex-col overflow-y-auto border-r border-line px-3 py-3 md:flex">
+            <MiniCalendar
+              cursor={cursor}
+              month={miniMonth}
+              eventDates={eventDates}
+              onMonthChange={setMiniMonth}
+              onSelectDay={openDay}
+            />
 
-        <p className="mt-6 text-[11px] text-muted-foreground">
-          分身与本页共享同一份日程/待办数据；日程到点会由分身主动提醒。
-        </p>
-      </div>
-
-      {/* 新建日程 / 待办 */}
-      <Dialog open={createOpen !== null} onOpenChange={(v) => !v && setCreateOpen(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{createOpen === 'calendar' ? '新建日程' : '新建待办'}</DialogTitle>
-          </DialogHeader>
-          {createOpen === 'calendar' ? (
-            <div className="space-y-3">
+            <div className="relative mt-3">
+              <RiSearchLine className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-ink-quaternary" />
               <Input
-                autoFocus
-                value={calTitle}
-                onChange={(e) => setCalTitle(e.target.value)}
-                placeholder="日程标题，如「产品评审会」"
-                maxLength={100}
+                inputSize="sm"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索日程"
+                className="pl-7"
               />
-              <div className="flex gap-2">
-                <Input
-                  type="date"
-                  value={calDate}
-                  onChange={(e) => setCalDate(e.target.value)}
-                  className="flex-1"
-                />
-                <Input
-                  type="time"
-                  value={calTime}
-                  onChange={(e) => setCalTime(e.target.value)}
-                  className="w-28"
-                />
+            </div>
+
+            <div className="mt-4">
+              <p className="px-2 pb-1 text-[11px] font-medium text-ink-tertiary">我的日历</p>
+              <div className="space-y-0.5">
+                <button
+                  type="button"
+                  aria-pressed={showCalendar}
+                  onClick={() => setShowCalendar((value) => !value)}
+                  className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] text-ink-secondary transition-colors hover:bg-surface-veil"
+                >
+                  <span
+                    className={cn(
+                      'flex size-3.5 shrink-0 items-center justify-center rounded-[3px] border transition-colors',
+                      showCalendar
+                        ? 'border-brand bg-brand text-primary-foreground'
+                        : 'border-line-strong',
+                    )}
+                  >
+                    {showCalendar ? <RiCheckLine className="size-2.5" /> : null}
+                  </span>
+                  <span className="truncate">{calendarName}</span>
+                  <span className="ml-auto shrink-0 text-[11px] tabular-nums text-ink-quaternary">
+                    {scheduled.length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTab('todo')}
+                  className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] text-ink-secondary transition-colors hover:bg-surface-veil"
+                >
+                  <span className="flex size-3.5 shrink-0 items-center justify-center rounded-[3px] bg-success text-primary-foreground">
+                    <RiCheckLine className="size-2.5" />
+                  </span>
+                  <span className="truncate">我的任务</span>
+                  <span className="ml-auto shrink-0 text-[11px] tabular-nums text-ink-quaternary">
+                    {pendingEntries.length}
+                  </span>
+                </button>
               </div>
             </div>
-          ) : (
-            <Input
-              autoFocus
-              value={todoText}
-              onChange={(e) => setTodoText(e.target.value)}
-              placeholder="待办内容，如「回复 Bob 的邮件」"
-              maxLength={200}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void create();
-              }}
-            />
-          )}
+
+            {visibleUnscheduled.length > 0 ? (
+              <div className="mt-4">
+                <p className="px-2 pb-1 text-[11px] font-medium text-ink-tertiary">
+                  未安排 · {visibleUnscheduled.length}
+                </p>
+                <div className="space-y-0.5">
+                  {visibleUnscheduled.map((event) => (
+                    <button
+                      key={event.key}
+                      type="button"
+                      onClick={() => setDetail(event)}
+                      className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[12px] text-ink-secondary transition-colors hover:bg-surface-veil"
+                    >
+                      <RiTimeLine className="size-3.5 shrink-0 text-ink-quaternary" />
+                      <span className="truncate">{event.title}</span>
+                      <span className="ml-auto max-w-16 shrink-0 truncate text-[10px] tabular-nums text-ink-quaternary">
+                        {event.rawTime}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <p className="mt-auto pt-5 text-[11px] leading-relaxed text-ink-quaternary">
+              分身与日历共享同一份数据，日程到点会主动提醒。
+            </p>
+          </aside>
+
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex h-12 shrink-0 items-center justify-between gap-3 px-4">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <Button variant="outline" size="sm" onClick={goToday}>
+                  今天
+                </Button>
+                <div className="flex items-center">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="上一页"
+                    onClick={() => navigate(-1)}
+                  >
+                    <RiArrowLeftSLine className="size-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="下一页"
+                    onClick={() => navigate(1)}
+                  >
+                    <RiArrowRightSLine className="size-4" />
+                  </Button>
+                </div>
+                <h2 className="ml-1 truncate text-[15px] font-semibold tabular-nums tracking-[-0.012em]">
+                  {title}
+                </h2>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-0.5 rounded-md bg-surface-veil p-0.5">
+                {VIEW_OPTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setView(value)}
+                    className={cn(
+                      'h-7 rounded-sm px-3 text-[12px] transition-colors',
+                      view === value
+                        ? 'bg-brand-soft font-medium text-brand'
+                        : 'text-ink-secondary hover:text-ink',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col border-t border-line">
+              {loading ? (
+                <CalendarSkeleton />
+              ) : view === 'month' ? (
+                <MonthGrid
+                  month={cursor}
+                  now={now}
+                  eventsByDay={eventsByDay}
+                  onSelectDay={openDay}
+                  onSelectEvent={setDetail}
+                  onCreateAt={(day) => createAt(day)}
+                />
+              ) : (
+                <TimeGrid
+                  days={viewDays}
+                  eventsByDay={eventsByDay}
+                  now={now}
+                  onSelectEvent={setDetail}
+                  onCreateAt={createAt}
+                />
+              )}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <TodoPane
+          loading={loading}
+          pending={pendingEntries}
+          done={doneEntries}
+          busyKey={busyKey}
+          onToggle={toggleTodo}
+          onRemove={removeTodo}
+        />
+      )}
+
+      <CreateEventDialog
+        open={createOpen}
+        title={createTitle}
+        date={createDate}
+        time={createTime}
+        calendarName={calendarName}
+        saving={creating}
+        onTitleChange={setCreateTitle}
+        onDateChange={setCreateDate}
+        onTimeChange={setCreateTime}
+        onClose={() => setCreateOpen(false)}
+        onSubmit={() => void createEvent()}
+      />
+
+      <EventDetailDialog
+        event={detail}
+        calendarName={calendarName}
+        deleting={deleting}
+        onClose={() => setDetail(null)}
+        onDelete={() => void deleteEvent()}
+      />
+
+      <Dialog open={todoOpen} onOpenChange={(value) => !value && setTodoOpen(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>新建待办</DialogTitle>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={todoText}
+            onChange={(event) => setTodoText(event.target.value)}
+            placeholder="待办内容，如「回复 Bob 的邮件」"
+            maxLength={200}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !creatingTodo) {
+                event.preventDefault();
+                void createTodo();
+              }
+            }}
+          />
           <DialogFooter>
-            <Button onClick={() => void create()} disabled={creating}>
-              {creating ? <RiLoader4Line className="size-4 animate-spin" /> : null}
+            <Button onClick={() => void createTodo()} disabled={creatingTodo || !todoText.trim()}>
+              {creatingTodo ? <RiLoader4Line className="size-4 animate-spin" /> : null}
               创建
             </Button>
-            <Button variant="ghost" onClick={() => setCreateOpen(null)}>
+            <Button variant="ghost" onClick={() => setTodoOpen(false)}>
               取消
             </Button>
           </DialogFooter>
@@ -314,20 +574,159 @@ export function SchedulePage() {
   );
 }
 
-/** 事件日期显示：今天 / 明天 / M月D日；无日期（旧数据未解析）时留空 */
-function formatEventDate(date: string | null | undefined): string {
-  if (!date) return '';
-  const d = dayjs(date);
-  if (!d.isValid()) return '';
-  if (d.isSame(dayjs(), 'day')) return '今天';
-  if (d.isSame(dayjs().add(1, 'day'), 'day')) return '明天';
-  return d.isSame(dayjs(), 'year') ? d.format('M月D日') : d.format('YYYY年M月D日');
+function CalendarSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+      <div className="flex gap-2">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-8 w-16 rounded-md" />
+        ))}
+      </div>
+      <Skeleton className="min-h-0 flex-1 rounded-lg" />
+    </div>
+  );
 }
 
-function EmptyHint({ text }: { text: string }) {
+interface TodoPaneProps {
+  loading: boolean;
+  pending: TodoEntry[];
+  done: TodoEntry[];
+  busyKey: string | null;
+  onToggle: (index: number, done: boolean) => void;
+  onRemove: (index: number) => void;
+}
+
+function TodoPane({ loading, pending, done, busyKey, onToggle, onRemove }: TodoPaneProps) {
+  if (loading) {
+    return (
+      <div className="mx-auto w-full max-w-2xl px-8 py-6">
+        <Skeleton className="mb-4 h-6 w-24 rounded-md" />
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-11 w-full rounded-lg" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (pending.length === 0 && done.length === 0) {
+    return (
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-8 py-6">
+        <div className="mx-auto flex h-full max-w-2xl flex-col gap-5">
+          <TodoHeading pending={0} done={0} />
+          <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-line py-20 text-center">
+            <RiInboxLine className="mb-2 size-6 text-ink-quaternary" />
+            <p className="text-[13px] text-ink-secondary">还没有待办</p>
+            <p className="mt-1 max-w-xs text-[12px] leading-relaxed text-ink-tertiary">
+              点右上角「新建待办」，或对分身说「加个待办：回复 Bob 的邮件」。
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-md border border-dashed py-16 text-center text-sm text-muted-foreground">
-      {text}
+    <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-8 py-6">
+      <div className="mx-auto flex max-w-2xl flex-col gap-5">
+        <TodoHeading pending={pending.length} done={done.length} />
+        {pending.length > 0 ? (
+          <TodoGroup
+            title="未完成"
+            entries={pending}
+            busyKey={busyKey}
+            onToggle={onToggle}
+            onRemove={onRemove}
+          />
+        ) : null}
+        {done.length > 0 ? (
+          <TodoGroup
+            title="已完成"
+            entries={done}
+            busyKey={busyKey}
+            onToggle={onToggle}
+            onRemove={onRemove}
+          />
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+function TodoHeading({ pending, done }: { pending: number; done: number }) {
+  return (
+    <div>
+      <h2 className="text-[18px] font-semibold tracking-[-0.012em]">待办</h2>
+      <p className="mt-0.5 text-[12px] text-ink-tertiary">
+        {pending} 项待完成 · {done} 项已完成
+      </p>
+    </div>
+  );
+}
+
+interface TodoGroupProps {
+  title: string;
+  entries: TodoEntry[];
+  busyKey: string | null;
+  onToggle: (index: number, done: boolean) => void;
+  onRemove: (index: number) => void;
+}
+
+function TodoGroup({ title, entries, busyKey, onToggle, onRemove }: TodoGroupProps) {
+  return (
+    <section>
+      <p className="mb-1.5 px-2 text-[11px] font-medium text-ink-tertiary">
+        {title} · {entries.length}
+      </p>
+      <div className="overflow-hidden rounded-lg border border-line">
+        {entries.map(({ item, index }) => (
+          <div
+            key={`${index}-${item.text}`}
+            className="group flex items-center gap-3 border-b border-line/60 px-3 py-2.5 last:border-b-0"
+          >
+            <button
+              type="button"
+              disabled={busyKey !== null}
+              aria-label={item.done ? '标记为未完成' : '标记为已完成'}
+              aria-pressed={item.done}
+              onClick={() => onToggle(index, !item.done)}
+              className={cn(
+                'shrink-0 transition-colors disabled:opacity-50',
+                item.done ? 'text-success' : 'text-ink-quaternary hover:text-success',
+              )}
+            >
+              {item.done ? (
+                <RiCheckboxCircleFill className="size-5" />
+              ) : (
+                <RiCheckboxBlankCircleLine className="size-5" />
+              )}
+            </button>
+            <span
+              className={cn(
+                'min-w-0 flex-1 text-[13px] break-words',
+                item.done && 'text-ink-tertiary line-through',
+              )}
+            >
+              {item.text}
+            </span>
+            <button
+              type="button"
+              disabled={busyKey !== null}
+              aria-label="删除待办"
+              title="删除待办"
+              onClick={() => onRemove(index)}
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-quaternary opacity-0 transition-colors hover:bg-surface-hover hover:text-danger group-hover:opacity-100 focus-visible:opacity-100 disabled:pointer-events-none"
+            >
+              {busyKey === `todo-${index}` ? (
+                <RiLoader4Line className="size-3.5 animate-spin" />
+              ) : (
+                <RiDeleteBinLine className="size-3.5" />
+              )}
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

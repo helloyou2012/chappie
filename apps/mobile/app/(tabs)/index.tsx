@@ -44,7 +44,7 @@ function ConvRow({
   const isGroup = view.conversation.type === 'group';
   const fromMe = view.lastMsgSenderId === myId;
   const muted = view.myAiMode === 'off';
-  // 群聊预览带发送者（「陈美丽: 内容」），与微信/飞书一致
+  // 群聊预览带发送者（「昵称: 内容」）
   const prefix =
     isGroup && !fromMe && view.lastMsgSenderName
       ? `${view.lastMsgSenderName}：`
@@ -144,7 +144,7 @@ export default function ChatsScreen() {
     void loadConversations().catch(() => undefined);
     // 推送注册（best-effort：权限拒绝/拿不到 token 时静默降级）
     void ensurePushRegistered();
-    // 多端在线条：展示最近活跃的其他端（参考微信「Mac已登录」）
+    // 多端在线条：展示最近活跃的其他端
     void api
       .listDevices()
       .then((res) => {

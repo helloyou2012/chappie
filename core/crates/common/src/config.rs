@@ -39,10 +39,13 @@ fn var_bool(key: &str, default: bool) -> bool {
 impl Config {
     pub fn from_env() -> Self {
         Self {
-            database_url: var("DATABASE_URL", "postgres://chappie:chappie@127.0.0.1:5432/chappie"),
+            database_url: var(
+                "DATABASE_URL",
+                "postgres://chappie:chappie@127.0.0.1:15432/chappie",
+            ),
             redis_url: var("REDIS_URL", "redis://127.0.0.1:6379"),
             internal_token: var("INTERNAL_TOKEN", "dev-internal-token-change-me"),
-            gateway_port: var("GATEWAY_PORT", "7000").parse().unwrap_or(7000),
+            gateway_port: var("GATEWAY_PORT", "7100").parse().unwrap_or(7100),
             internal_port: var("INTERNAL_PORT", "7001").parse().unwrap_or(7001),
             auth_code_dev_echo: var_bool("AUTH_CODE_DEV_ECHO", true),
             auth_code_ttl_seconds: var("AUTH_CODE_TTL_SECONDS", "300").parse().unwrap_or(300),

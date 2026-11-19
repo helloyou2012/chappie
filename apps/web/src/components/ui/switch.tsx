@@ -6,7 +6,7 @@ function Switch({ className, ...props }: React.ComponentProps<typeof BaseSwitch.
   return (
     <BaseSwitch.Root
       className={cn(
-        'peer inline-flex h-[18px] w-[30px] shrink-0 cursor-pointer items-center rounded-full p-0.5 transition-colors focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[checked]:bg-primary data-[unchecked]:bg-surface-selected',
+        'peer inline-flex h-[18px] w-[30px] shrink-0 cursor-pointer items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-50 data-[checked]:bg-primary data-[unchecked]:bg-surface-selected',
         className,
       )}
       {...props}
