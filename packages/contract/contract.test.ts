@@ -9,6 +9,7 @@ import {
   DailyReport,
   DeviceCapabilities,
   DeviceRegistration,
+  FriendRequestView,
   fixtures,
   Member,
   MemoryItem,
@@ -62,6 +63,7 @@ describe('契约 fixtures 全部通过 zod 校验（与 Rust 侧共用同一数�
     expect(Approval.parse(fixtures.approval)).toBeTruthy();
     expect(MemoryItem.parse(fixtures.memory)).toBeTruthy();
     expect(DailyReport.parse(fixtures.dailyReport)).toBeTruthy();
+    expect(FriendRequestView.parse(fixtures.friendRequest)).toBeTruthy();
   });
 
   test('ConversationView 可组合', () => {
@@ -70,7 +72,17 @@ describe('契约 fixtures 全部通过 zod 校验（与 Rust 侧共用同一数�
       myPrincipalId: fixtures.user.id,
       myRole: 'member',
       myAiMode: 'auto',
+      myAiModeSource: 'explicit',
       myAiModeUntil: null,
+      myReception: {
+        state: 'avatar',
+        strategy: 'full',
+        version: 3,
+        until: null,
+        source: 'conversation',
+        counterpartyRequestable: true,
+      },
+      peerReception: null,
       myLastReadSeq: 40,
       unreadCount: 2,
       displayTitle: 'Bob',

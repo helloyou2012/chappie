@@ -45,12 +45,16 @@ export interface BuiltinTool {
 // 演示数据（生产中这些工具对接真实系统，经 MCP / OAuth 授权 —— §8.3/§8.4）
 // ---------------------------------------------------------------------------
 
+type CalendarStatus = 'pending' | 'confirmed' | 'cancelled';
+
 interface CalendarItem {
   /** 稳定条目 id：日程提醒台账按 (avatarId, entryId, startAt) 去重 */
   id: string;
   title: string;
   date: string | null;
   time: string;
+  status: CalendarStatus;
+  attendees: string[];
 }
 interface TodoItem {
   text: string;
@@ -132,14 +136,72 @@ export function normalizeCalendarItem(raw: {
   title: string;
   time: string;
   date?: string | null;
+  status?: CalendarStatus;
+  attendees?: string[];
 }): CalendarItem {
   const id =
     raw.id ??
     `cal_${fingerprint('calendar-entry:v1', { title: raw.title, time: raw.time }).slice(0, 32)}`;
-  if (raw.date) return { id, title: raw.title, date: raw.date, time: raw.time };
+  const status = raw.status ?? 'confirmed';
+  const attendees = Array.isArray(raw.attendees)
+    ? raw.attendees
+        .map((x) => String(x).trim())
+        .filter(Boolean)
+        .slice(0, 20)
+    : [];
+  if (raw.date) return { id, title: raw.title, date: raw.date, time: raw.time, status, attendees };
   const parsed = parseEventTime(raw.time);
-  if (parsed) return { id, title: raw.title, date: parsed.date, time: parsed.time };
-  return { id, title: raw.title, date: null, time: raw.time };
+  if (parsed) {
+    return { id, title: raw.title, date: parsed.date, time: parsed.time, status, attendees };
+  }
+  return { id, title: raw.title, date: null, time: raw.time, status, attendees };
+}
+
+export function pendingCalendarId(taskId: string): string {
+  return `cal_pending_${taskId}`;
+}
+
+/** 审批创建时先把日程写入日历，状态为 pending；批准后由 calendar.create 改 confirmed。 */
+export async function upsertPendingCalendarItem(params: {
+  avatarId: string;
+  taskId: string;
+  title: string;
+  time: string;
+  attendees?: string[];
+}): Promise<void> {
+  const id = pendingCalendarId(params.taskId);
+  const parsed = parseEventTime(params.time);
+  const stored = (await readToolData<CalendarItem[]>(params.avatarId, 'calendar', [])).map(
+    normalizeCalendarItem,
+  );
+  const item: CalendarItem = {
+    id,
+    title: params.title,
+    date: parsed?.date ?? null,
+    time: parsed?.time ?? params.time,
+    status: 'pending',
+    attendees: (params.attendees ?? [])
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .slice(0, 20),
+  };
+  const index = stored.findIndex((x) => x.id === id);
+  if (index >= 0) stored[index] = item;
+  else stored.push(item);
+  await writeToolData(params.avatarId, 'calendar', stored);
+}
+
+export async function cancelPendingCalendarItem(avatarId: string, taskId: string): Promise<void> {
+  const id = pendingCalendarId(taskId);
+  const stored = (await readToolData<CalendarItem[]>(avatarId, 'calendar', [])).map(
+    normalizeCalendarItem,
+  );
+  const index = stored.findIndex((x) => x.id === id);
+  if (index < 0) return;
+  if (stored[index]!.status === 'pending') {
+    stored[index] = { ...stored[index]!, status: 'cancelled' };
+    await writeToolData(avatarId, 'calendar', stored);
+  }
 }
 
 /** 供 admin-api（日程/待办页）复用：读 avatar 级工具数据，无记录时返回 fallback */
@@ -164,9 +226,30 @@ export async function writeToolData(avatarId: string, kind: string, data: unknow
 function todayCalendar(): CalendarItem[] {
   const today = dayjs().format('YYYY-MM-DD');
   return [
-    { id: 'cal_demo_1', title: '产品评审会', date: today, time: '10:00' },
-    { id: 'cal_demo_2', title: '与 Bob 的 1:1', date: today, time: '11:30' },
-    { id: 'cal_demo_3', title: '健身', date: today, time: '19:00' },
+    {
+      id: 'cal_demo_1',
+      title: '产品评审会',
+      date: today,
+      time: '10:00',
+      status: 'confirmed',
+      attendees: [],
+    },
+    {
+      id: 'cal_demo_2',
+      title: '与 Bob 的 1:1',
+      date: today,
+      time: '11:30',
+      status: 'confirmed',
+      attendees: ['Bob'],
+    },
+    {
+      id: 'cal_demo_3',
+      title: '健身',
+      date: today,
+      time: '19:00',
+      status: 'confirmed',
+      attendees: [],
+    },
   ];
 }
 
@@ -214,9 +297,13 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         return diff >= 0 && diff < 7;
       };
       const items = stored
-        .filter(matchDay)
+        .filter((x) => x.status !== 'cancelled' && matchDay(x))
         .slice(0, 8)
-        .map((x) => (x.date ? `${x.date} ${x.time} ${x.title}` : `${x.time} ${x.title}`));
+        .map((x) => {
+          const status = x.status === 'pending' ? '[待批准] ' : '';
+          const people = x.attendees.length > 0 ? `（相关人：${x.attendees.join('、')}）` : '';
+          return `${status}${x.date ? `${x.date} ${x.time}` : x.time} ${x.title}${people}`;
+        });
       const label = day === 'today' ? '今天' : day === 'tomorrow' ? '明天' : '未来一周';
       return {
         summary:
@@ -230,8 +317,8 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     id: 'calendar.create',
     name: '创建日程',
-    description: '创建一条日程提醒（低风险写操作）',
-    risk: 'L1',
+    description: '创建一条日程提醒（需要主人确认后写入）',
+    risk: 'L2',
     idempotent: false,
     jsonSchema: {
       type: 'object',
@@ -242,24 +329,62 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
           type: 'string',
           description: '时间，如 "明天 15:00"、"2026-11-14 09:30"、"tomorrow 10:00"',
         },
+        attendees: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '相关人姓名，如 ["Bob", "小王"]；没有则不传',
+        },
       },
     },
     validate: z.object({
       title: z.string().min(1).max(100),
       time: z.string().default('明天 10:00'),
+      attendees: z.array(z.string().min(1).max(40)).max(20).optional(),
     }),
     async exec(args, ctx) {
       const title = String(args.title);
       const timeInput = String(args.time ?? '明天 10:00');
+      const attendees = Array.isArray(args.attendees)
+        ? (args.attendees as string[])
+            .map((x) => x.trim())
+            .filter(Boolean)
+            .slice(0, 20)
+        : [];
       const parsed = parseEventTime(timeInput);
-      const stored = await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', []);
-      stored.push(
-        parsed
-          ? { id: `cal_${uuidv4()}`, title, date: parsed.date, time: parsed.time }
-          : { id: `cal_${uuidv4()}`, title, date: null, time: timeInput },
+      const stored = (await readToolData<CalendarItem[]>(ctx.avatarId, 'calendar', [])).map(
+        normalizeCalendarItem,
       );
-      await writeToolData(ctx.avatarId, 'calendar', stored);
       const when = parsed ? `${parsed.date} ${parsed.time}` : timeInput;
+
+      // 审批创建时已写入 pending 条目：批准后原地改 confirmed，避免重复。
+      const pendingId = pendingCalendarId(ctx.taskId);
+      const pendingIndex = stored.findIndex((x) => x.id === pendingId);
+      if (pendingIndex >= 0) {
+        stored[pendingIndex] = {
+          id: pendingId,
+          title,
+          date: parsed?.date ?? null,
+          time: parsed?.time ?? timeInput,
+          status: 'confirmed',
+          attendees,
+        };
+        await writeToolData(ctx.avatarId, 'calendar', stored);
+        return {
+          ok: true,
+          message: `已确认日程：${when} ${title}`,
+          summary: `已确认日程「${title}」（${when}）✅`,
+        };
+      }
+
+      stored.push({
+        id: `cal_${uuidv4()}`,
+        title,
+        date: parsed?.date ?? null,
+        time: parsed?.time ?? timeInput,
+        status: 'confirmed',
+        attendees,
+      });
+      await writeToolData(ctx.avatarId, 'calendar', stored);
       return {
         ok: true,
         message: `已创建日程：${when} ${title}`,
@@ -318,12 +443,18 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         match: { type: 'string', description: '要修改的日程标题（完整或包含关键词）' },
         newTitle: { type: 'string', description: '新标题，不修改则不传' },
         newTime: { type: 'string', description: '新时间，如 "明天 15:00"，不修改则不传' },
+        newAttendees: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '新的相关人姓名列表，不修改则不传',
+        },
       },
     },
     validate: z.object({
       match: z.string().min(1).max(100),
       newTitle: z.string().min(1).max(100).optional(),
       newTime: z.string().min(1).max(60).optional(),
+      newAttendees: z.array(z.string().min(1).max(40)).max(20).optional(),
     }),
     async exec(args, ctx) {
       const match = String(args.match).trim();
@@ -343,7 +474,9 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       }
       const index = stored.findIndex((x) => x.title.includes(match));
       const item = stored[index]!;
-      const before = `${item.date ?? ''} ${item.time} ${item.title}`.trim();
+      const people = (x: CalendarItem) =>
+        x.attendees.length > 0 ? `（相关人：${x.attendees.join('、')}）` : '';
+      const before = `${item.date ?? ''} ${item.time} ${item.title}${people(item)}`.trim();
       if (args.newTitle !== undefined) item.title = String(args.newTitle);
       if (args.newTime !== undefined) {
         const parsed = parseEventTime(String(args.newTime));
@@ -353,9 +486,15 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         item.date = parsed.date;
         item.time = parsed.time;
       }
+      if (Array.isArray(args.newAttendees)) {
+        item.attendees = (args.newAttendees as string[])
+          .map((x) => x.trim())
+          .filter(Boolean)
+          .slice(0, 20);
+      }
       stored[index] = item;
       await writeToolData(ctx.avatarId, 'calendar', stored);
-      const after = `${item.date ?? ''} ${item.time} ${item.title}`.trim();
+      const after = `${item.date ?? ''} ${item.time} ${item.title}${people(item)}`.trim();
       return {
         ok: true,
         summary: `已修改日程：${before} → ${after}`,

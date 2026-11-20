@@ -8,11 +8,13 @@ import {
   type ConversationView,
   type MemberView,
   MODE_LABELS,
+  RECEPTION_LABELS,
+  STRATEGY_LABELS,
   useAuthStore,
   useChatStore,
 } from '@chappie/shared';
 import { useEffect, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { Alert, FlatList, View } from 'react-native';
 import { Avatar, Badge, BottomSheet, Button, EmptyState, ListRow, Spinner, Text } from '@/ui';
 
 export function MemberSheet({
@@ -38,6 +40,7 @@ export function MemberSheet({
   const isGroup = view.conversation.type === 'group' && view.conversation.systemTag === null;
 
   const [addMode, setAddMode] = useState(false);
+  const [transferMode, setTransferMode] = useState(false);
   const [contacts, setContacts] = useState<ContactView[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -46,6 +49,7 @@ export function MemberSheet({
   useEffect(() => {
     if (!visible) {
       setAddMode(false);
+      setTransferMode(false);
       setSelected([]);
       setError(null);
     }
@@ -108,6 +112,45 @@ export function MemberSheet({
     }
   };
 
+  const transferOwner = async (targetUserId: string, targetName: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.transferOwner(convId, targetUserId);
+      await loadMembers(convId);
+      await loadConversations();
+      setTransferMode(false);
+      Alert.alert('群主已转让', `${targetName} 现在是群主`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dissolve = () => {
+    Alert.alert('解散群聊', '解散后群聊与全部消息将被永久删除，且无法恢复。', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '解散',
+        style: 'destructive',
+        onPress: () => {
+          setBusy(true);
+          setError(null);
+          void api
+            .dissolveGroup(convId)
+            .then(() => loadConversations())
+            .then(() => {
+              onClose();
+              onLeft();
+            })
+            .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+            .finally(() => setBusy(false));
+        },
+      },
+    ]);
+  };
+
   const existingHumans = new Set(
     members.filter((m) => m.principalType === 'human').map((m) => m.principalId),
   );
@@ -127,7 +170,31 @@ export function MemberSheet({
         </Text>
       ) : null}
 
-      {addMode ? (
+      {transferMode ? (
+        <View>
+          <FlatList
+            data={members.filter((m) => m.principalType === 'human' && m.principalId !== myId)}
+            keyExtractor={(m) => m.principalId}
+            style={{ maxHeight: 320 }}
+            renderItem={({ item }) => (
+              <ListRow
+                leading={<Avatar name={item.name} size={34} />}
+                title={item.name}
+                subtitle="转让群主后你将成为普通成员"
+                trailing={<Badge label="转让" tone="warning" />}
+                onPress={() => void transferOwner(item.principalId, item.name)}
+              />
+            )}
+            ListEmptyComponent={<EmptyState title="没有可转让的真人成员" />}
+          />
+          <Button
+            label="返回"
+            variant="outline"
+            onPress={() => setTransferMode(false)}
+            style={{ marginTop: 12 }}
+          />
+        </View>
+      ) : addMode ? (
         <View>
           <FlatList
             data={candidates}
@@ -194,9 +261,13 @@ export function MemberSheet({
                   subtitle={
                     isAvatar
                       ? `AI 分身 · ${MODE_LABELS[item.aiMode] ?? item.aiMode}`
-                      : item.role === 'owner'
-                        ? '群主'
-                        : '成员'
+                      : item.reception?.state === 'avatar'
+                        ? `AI 接待 · ${STRATEGY_LABELS[item.reception.strategy] ?? item.reception.strategy}`
+                        : item.reception
+                          ? `${RECEPTION_LABELS[item.reception.state] ?? item.reception.state}`
+                          : item.role === 'owner'
+                            ? '群主'
+                            : '成员'
                   }
                   trailing={
                     canRemove ? (
@@ -219,14 +290,31 @@ export function MemberSheet({
             }}
           />
           {addMode ? null : busy && !error ? <Spinner /> : null}
+          {!isGroup && view.peerReception?.state === 'avatar' ? (
+            <Button
+              label="请求对方真人接待"
+              variant="outline"
+              tone="warning"
+              onPress={() => void api.requestHuman(convId, '希望真人回复')}
+              style={{ marginTop: 10 }}
+            />
+          ) : null}
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
             {isGroup && isOwner ? (
-              <Button
-                label="添加成员"
-                variant="outline"
-                onPress={() => void openAdd()}
-                style={{ flex: 1 }}
-              />
+              <>
+                <Button
+                  label="添加成员"
+                  variant="outline"
+                  onPress={() => void openAdd()}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  label="转让群主"
+                  variant="outline"
+                  onPress={() => setTransferMode(true)}
+                  style={{ flex: 1 }}
+                />
+              </>
             ) : null}
             {isGroup && !isOwner ? (
               <Button
@@ -238,6 +326,15 @@ export function MemberSheet({
               />
             ) : null}
           </View>
+          {isGroup && isOwner ? (
+            <Button
+              label="解散群聊"
+              variant="ghost"
+              tone="danger"
+              onPress={dissolve}
+              style={{ marginTop: 8 }}
+            />
+          ) : null}
         </>
       )}
     </BottomSheet>

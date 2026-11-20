@@ -21,6 +21,8 @@ export const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
  * - `startMin` 为当天第几分钟；无法解析时置空
  * - `index` 保留原始下标，删除接口按 index 定位
  */
+export type CalendarStatus = 'pending' | 'confirmed' | 'cancelled';
+
 export interface ScheduleEvent {
   key: string;
   index: number;
@@ -29,6 +31,8 @@ export interface ScheduleEvent {
   rawTime: string;
   startMin: number | null;
   endMin: number | null;
+  status: CalendarStatus;
+  attendees: string[];
 }
 
 export function normalizeEvent(item: CalendarItem, index: number): ScheduleEvent {
@@ -51,6 +55,8 @@ export function normalizeEvent(item: CalendarItem, index: number): ScheduleEvent
     rawTime: item.time,
     startMin,
     endMin,
+    status: item.status ?? 'confirmed',
+    attendees: item.attendees ?? [],
   };
 }
 

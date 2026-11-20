@@ -55,6 +55,8 @@ interface ChatState {
   activeConvId: string | null;
   loadedConvIds: Set<string>;
   loadingConversations: boolean;
+  /** 好友申请变化计数：页面可据此重新拉取申请列表 */
+  friendRequestVersion: number;
 
   loadConversations: () => Promise<void>;
   loadMessages: (convId: string, opts?: { before?: boolean; limit?: number }) => Promise<void>;
@@ -84,6 +86,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeConvId: null,
   loadedConvIds: new Set(),
   loadingConversations: false,
+  friendRequestVersion: 0,
 
   loadConversations: async () => {
     set({ loadingConversations: true });
@@ -274,11 +277,47 @@ export const useChatStore = create<ChatState>((set, get) => ({
           };
         });
         break;
-      case 'conversations_changed':
+      case 'conversations_changed': {
         void get()
           .loadConversations()
           .catch(() => undefined);
+        const active = get().activeConvId;
+        if (active)
+          void get()
+            .loadMembers(active)
+            .catch(() => undefined);
         break;
+      }
+      case 'friend_requests_changed':
+        set((s) => ({ friendRequestVersion: s.friendRequestVersion + 1 }));
+        break;
+      case 'reception_changed': {
+        const myId = useAuthStore.getState().user?.id ?? '';
+        const reception = {
+          state: frame.state as ConversationView['myReception']['state'],
+          strategy: frame.strategy as ConversationView['myReception']['strategy'],
+          version: frame.version,
+          until: frame.until,
+          source: 'conversation' as const,
+          counterpartyRequestable: true,
+        };
+        set((s) => ({
+          conversations: s.conversations.map((c) =>
+            c.conversation.id === frame.convId
+              ? frame.ownerId === myId
+                ? { ...c, myReception: reception }
+                : { ...c, peerReception: reception }
+              : c,
+          ),
+          membersByConv: {
+            ...s.membersByConv,
+            [frame.convId]: (s.membersByConv[frame.convId] ?? []).map((m) =>
+              m.principalId === frame.ownerId ? { ...m, reception } : m,
+            ),
+          },
+        }));
+        break;
+      }
       default:
         break;
     }
@@ -329,6 +368,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ? {
               ...c,
               myAiMode: aiMode,
+              myAiModeSource: 'explicit' as const,
               myAiModeUntil: tempHours
                 ? new Date(Date.now() + tempHours * 3600_000).toISOString()
                 : null,
@@ -336,6 +376,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           : c,
       ),
     }));
+    await get()
+      .loadConversations()
+      .catch(() => undefined);
   },
 
   markReadLocal: (convId, seq) => {
@@ -358,5 +401,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       onlineByPrincipal: {},
       activeConvId: null,
       loadedConvIds: new Set(),
+      friendRequestVersion: 0,
     }),
 }));

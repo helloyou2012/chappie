@@ -20,12 +20,16 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/internal/v1/send-message", post(send_message))
         .route("/internal/v1/recall-message", post(recall_message))
         .route("/internal/v1/get-context", post(get_context))
+        .route("/internal/v1/get-reception", post(get_reception))
+        .route("/internal/v1/set-reception", post(set_reception))
+        .route("/internal/v1/resolve-human-request", post(resolve_human_request))
         .route("/internal/v1/get-presence", post(get_presence))
         .route("/internal/v1/get-devices", post(get_devices))
         .route("/internal/v1/typing", post(typing))
         .route("/internal/v1/push-card", post(push_card))
         .route("/internal/v1/update-card", post(update_card))
         .route("/internal/v1/freeze-avatar", post(freeze_avatar))
+        .route("/internal/v1/update-avatar-name", post(update_avatar_name))
         .route("/internal/v1/create-avatar", post(create_avatar))
         .route("/internal/v1/create-conversation", post(create_conversation))
         .layer(middleware::from_fn_with_state(state, require_internal_token))
@@ -85,6 +89,10 @@ struct SendMessageReq {
     reply_to: Option<String>,
     #[serde(default)]
     ai_meta: Option<im_core_chat::AiMeta>,
+    #[serde(default)]
+    authority_version: i64,
+    #[serde(default)]
+    via: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -98,6 +106,9 @@ struct RecallMessageReq {
 #[serde(rename_all = "camelCase")]
 struct GetContextReq {
     conv_id: String,
+    /// 分身主人；传入时返回该主人的接待态
+    #[serde(default)]
+    owner_id: Option<String>,
     #[serde(default = "default_ctx_limit")]
     limit: i64,
 }
@@ -110,6 +121,36 @@ fn default_ctx_limit() -> i64 {
 struct GetContextResp {
     messages: Vec<im_core_chat::Message>,
     members: Vec<im_core_chat::MemberView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reception: Option<im_core_chat::ReceptionView>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetReceptionReq {
+    owner_id: String,
+    conv_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetReceptionReq {
+    owner_id: String,
+    conv_id: String,
+    state: String,
+    strategy: String,
+    #[serde(default)]
+    until: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolveHumanRequestReq {
+    owner_id: String,
+    request_id: String,
+    approve: bool,
 }
 
 #[derive(Deserialize)]
@@ -145,6 +186,13 @@ struct UpdateCardReq {
 struct FreezeAvatarReq {
     avatar_id: String,
     frozen: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateAvatarNameReq {
+    avatar_id: String,
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -201,6 +249,8 @@ async fn send_message(
             mentions: req.mentions,
             reply_to: req.reply_to,
             ai_meta: req.ai_meta,
+            authority_version: req.authority_version,
+            via: req.via,
         },
     )
     .await?;
@@ -222,7 +272,62 @@ async fn get_context(
 ) -> AppResult<Json<GetContextResp>> {
     let (messages, _) = message::history(&state.db.pg, &req.conv_id, None, req.limit).await?;
     let members = conversation::get_members(&state.db, &req.conv_id).await?;
-    Ok(Json(GetContextResp { messages, members }))
+    let reception = match req.owner_id.as_deref() {
+        Some(owner) => Some(
+            im_core_chat::reception::get_reception(&state.db.pg, &req.conv_id, owner).await?,
+        ),
+        None => None,
+    };
+    Ok(Json(GetContextResp { messages, members, reception }))
+}
+
+async fn get_reception(
+    State(state): State<AppState>,
+    Json(req): Json<GetReceptionReq>,
+) -> AppResult<Json<im_core_chat::ReceptionView>> {
+    Ok(Json(
+        im_core_chat::reception::get_reception(&state.db.pg, &req.conv_id, &req.owner_id).await?,
+    ))
+}
+
+async fn set_reception(
+    State(state): State<AppState>,
+    Json(req): Json<SetReceptionReq>,
+) -> AppResult<Json<im_core_chat::ReceptionView>> {
+    let until = req
+        .until
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&chrono::Utc));
+    let view = im_core_chat::reception::set_conversation_reception(
+        &state.db,
+        &state.events,
+        &req.owner_id,
+        &req.conv_id,
+        &req.state,
+        &req.strategy,
+        until,
+        "system",
+        "system",
+        req.reason.as_deref().unwrap_or("外部设置"),
+    )
+    .await?;
+    Ok(Json(view))
+}
+
+async fn resolve_human_request(
+    State(state): State<AppState>,
+    Json(req): Json<ResolveHumanRequestReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    im_core_chat::reception::resolve_human_request(
+        &state.db,
+        &state.events,
+        &req.owner_id,
+        &req.request_id,
+        req.approve,
+    )
+    .await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn get_presence(
@@ -322,6 +427,8 @@ async fn push_card(
             mentions: vec![],
             reply_to: None,
             ai_meta: None,
+            authority_version: 0,
+            via: Some("internal_card".into()),
         },
     )
     .await?;
@@ -352,6 +459,17 @@ async fn freeze_avatar(
     }
     tracing::warn!(avatar_id = %req.avatar_id, status, "avatar freeze status changed");
     Ok(Json(json!({ "ok": true, "status": status })))
+}
+
+/// 分身改名：同步更新 core 的 principal.name，并通知共同会话中的真人刷新。
+async fn update_avatar_name(
+    State(state): State<AppState>,
+    Json(req): Json<UpdateAvatarNameReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    conversation::update_avatar_name(&state.db, &state.events, &req.avatar_id, &req.name)
+        .await?;
+    tracing::info!(avatar_id = %req.avatar_id, name = %req.name, "avatar principal name updated");
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// Bun 处理 user.created 时调用：创建 avatar 的 principal 行（principal 表单写者归 Rust）

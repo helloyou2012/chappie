@@ -14,6 +14,63 @@ import {
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+interface PlacedEvent {
+  event: ScheduleEvent;
+  column: number;
+  columns: number;
+}
+
+/**
+ * 时间重叠布局：把互相重叠的日程分组，组内按列并排。
+ * 例如 13:50–14:20 与 14:00–14:30 会变成左右两列，而不是文字叠在一起。
+ */
+function layoutDayEvents(events: ScheduleEvent[]): PlacedEvent[] {
+  const sorted = events
+    .filter((event) => event.startMin != null && event.endMin != null)
+    .sort((a, b) => a.startMin! - b.startMin! || (a.endMin ?? 0) - (b.endMin ?? 0));
+
+  const placed: PlacedEvent[] = [];
+  let group: ScheduleEvent[] = [];
+  let groupEnd = -1;
+
+  const flush = () => {
+    if (group.length === 0) return;
+    const columns: ScheduleEvent[][] = [];
+    const columnOf = new Map<string, number>();
+    for (const event of group) {
+      let column = 0;
+      while (
+        columns[column] &&
+        columns[column]![columns[column]!.length - 1]!.endMin! > event.startMin!
+      ) {
+        column += 1;
+      }
+      if (!columns[column]) columns[column] = [];
+      columns[column]!.push(event);
+      columnOf.set(event.key, column);
+    }
+    for (const event of group) {
+      placed.push({
+        event,
+        column: columnOf.get(event.key) ?? 0,
+        columns: columns.length,
+      });
+    }
+    group = [];
+  };
+
+  for (const event of sorted) {
+    if (group.length > 0 && event.startMin! >= groupEnd) {
+      flush();
+      groupEnd = -1;
+    }
+    group.push(event);
+    groupEnd = Math.max(groupEnd, event.endMin!);
+  }
+  flush();
+  return placed;
+}
+
 interface TimeGridProps {
   /** 日视图 1 天 / 周视图 7 天 */
   days: Dayjs[];
@@ -143,13 +200,16 @@ export function TimeGrid({ days, eventsByDay, now, onSelectEvent, onCreateAt }: 
                     />
                   ))}
 
-                  {dayEvents.map((event) => {
-                    if (event.startMin == null || event.endMin == null) return null;
-                    const top = (event.startMin / 60) * HOUR_HEIGHT + 1;
+                  {layoutDayEvents(dayEvents).map(({ event, column, columns }) => {
+                    const top = (event.startMin! / 60) * HOUR_HEIGHT + 1;
                     const height = Math.max(
                       24,
-                      ((event.endMin - event.startMin) / 60) * HOUR_HEIGHT - 2,
+                      ((event.endMin! - event.startMin!) / 60) * HOUR_HEIGHT - 2,
                     );
+                    const width = 100 / columns;
+                    const timeRange = `${formatMinutes(event.startMin!)} - ${formatMinutes(
+                      event.endMin!,
+                    )}`;
                     return (
                       <button
                         key={event.key}
@@ -159,18 +219,30 @@ export function TimeGrid({ days, eventsByDay, now, onSelectEvent, onCreateAt }: 
                           onSelectEvent(event);
                         }}
                         className={cn(
-                          'absolute z-10 overflow-hidden rounded-[5px] border-l-[3px] border-brand bg-brand-soft text-left text-brand transition-colors hover:bg-[color-mix(in_srgb,var(--brand)_20%,transparent)]',
-                          isWeek
-                            ? 'left-0.5 right-0.5 px-1 text-[11px]'
-                            : 'left-2 right-2 px-2 text-[12px]',
+                          'absolute z-10 overflow-hidden rounded-[5px] border-l-[3px] border-brand bg-brand-soft text-left text-brand shadow-[0_0_0_1px_var(--view)] transition-colors hover:z-20 hover:bg-[color-mix(in_srgb,var(--brand)_20%,transparent)]',
+                          isWeek ? 'px-1 text-[11px]' : 'px-2 text-[12px]',
                         )}
-                        style={{ top, height }}
-                        title={`${event.title}，${formatMinutes(event.startMin)} - ${formatMinutes(event.endMin)}`}
+                        style={{
+                          top,
+                          height,
+                          left: `calc(${column * width}% + 1px)`,
+                          width: `calc(${width}% - 2px)`,
+                        }}
+                        title={`${event.title}，${timeRange}`}
                       >
-                        <span className="block truncate leading-[1.55]">
-                          {event.title}，{formatMinutes(event.startMin)} -{' '}
-                          {formatMinutes(event.endMin)}
+                        <span className="block truncate leading-[1.35]">
+                          {event.status === 'pending'
+                            ? '待批准 · '
+                            : event.status === 'cancelled'
+                              ? '已取消 · '
+                              : ''}
+                          {event.title}
                         </span>
+                        {height >= 34 ? (
+                          <span className="block truncate text-[10px] leading-[1.3] opacity-70">
+                            {timeRange}
+                          </span>
+                        ) : null}
                       </button>
                     );
                   })}

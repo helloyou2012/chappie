@@ -13,6 +13,7 @@ import type {
   CardPayload,
   Explanation,
   Message,
+  ReceptionStrategy,
   RiskLevel,
 } from '@chappie/contract';
 import { and, eq, inArray, sql } from 'drizzle-orm';
@@ -30,7 +31,7 @@ import { appendAudit } from './common/audit';
 import { config } from './common/config';
 import { dayjs } from './common/datetime';
 import { db } from './common/db';
-import { internal } from './common/internal';
+import { InternalApiError, internal } from './common/internal';
 import { log, newId } from './common/log';
 import {
   assertLeaseAlive,
@@ -58,7 +59,13 @@ import {
 } from './memory';
 import { type ChatMessage, type CompleteResult, complete, recordUsage } from './model-gateway';
 import { buildPromptMessages, type PromptStats } from './prompt';
-import { BUILTIN_TOOLS, executeTool, getTool, prepareToolCall } from './tool-gateway';
+import {
+  BUILTIN_TOOLS,
+  cancelPendingCalendarItem,
+  executeTool,
+  getTool,
+  prepareToolCall,
+} from './tool-gateway';
 import { dataZone, redactSecrets } from './trust';
 import { assertTurnAllowed, type TurnPhase, TurnRevokedError } from './turn-guard';
 
@@ -72,12 +79,28 @@ export interface ResumeCheckpoint {
   toolsUsed: string[];
   /** 策略快照（恢复时无需重查任务上下文即可重建 AgentInput） */
   mode: AvatarMode;
+  strategy?: ReceptionStrategy;
+  authorityVersion?: number;
+  via?: string;
   allowCapabilities: string[] | null;
   maxRisk: RiskLevel;
 }
 
 const MAX_TOOL_ROUNDS = 3;
 const LOW_CONFIDENCE = 0.7;
+
+function modeToStrategy(mode: AvatarMode): ReceptionStrategy {
+  switch (mode) {
+    case 'auto':
+      return 'full';
+    case 'draft':
+      return 'assist';
+    case 'off':
+      return 'off';
+    default:
+      return 'summon';
+  }
+}
 
 export interface AgentInput {
   avatarId: string;
@@ -86,6 +109,12 @@ export interface AgentInput {
   convId: string;
   trigger: Message;
   mode: AvatarMode;
+  /** 接待策略；缺省按 mode 映射，兼容旧恢复检查点 */
+  strategy?: ReceptionStrategy;
+  /** core 接待版本；发送时回传做围栏校验 */
+  authorityVersion?: number;
+  /** 触发来源；用于 core 的召唤/草稿豁免 */
+  via?: string;
   allowCapabilities: string[] | null;
   maxRisk: RiskLevel;
   classification: Classification;
@@ -104,7 +133,7 @@ export interface AgentInput {
 }
 
 export interface AgentOutcome {
-  status: 'replied' | 'drafted' | 'handed_over' | 'waiting_approval' | 'failed';
+  status: 'replied' | 'drafted' | 'handed_over' | 'waiting_approval' | 'failed' | 'silent';
   text?: string;
   messageId?: string;
   cardMsgId?: string;
@@ -333,6 +362,81 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
       ? input.trigger.senderId
       : (context.members.find((m) => m.principalId === input.trigger.senderId)?.ownerId ?? null);
   const peerName = names.get(input.trigger.senderId) ?? '对方';
+  const strategy = input.strategy ?? modeToStrategy(input.mode);
+
+  // 静默值守：只记录，不调用模型、不外发。
+  if (strategy === 'silent' || strategy === 'off') {
+    await addStep(input.taskId, ++stepIdx, 'reception', { strategy }, { ok: true });
+    await finishTask(input.taskId, 'completed', {
+      result: strategy === 'silent' ? '静默值守：已记录，未回复' : '档位关闭：未处理',
+      decision: { action: 'silent', reason: `strategy=${strategy}`, confidence: 1 },
+      costUsd,
+      tokensUsed,
+    });
+    stopTyping();
+    return { status: 'silent', toolsUsed, confidence: 1 };
+  }
+
+  // 礼貌拒接：不调用模型，使用透明模板；保留限流由策略层负责。
+  if (strategy === 'decline') {
+    const text = `你好，我是 ${ownerName} 的 AI 分身。主人暂时不在，已收到你的消息，稍后由本人回复～`;
+    const sent = await deliverText(
+      input,
+      text,
+      {
+        decision: 'decline',
+        reason: '接待策略：礼貌拒接',
+        confidence: 1,
+        toolsUsed: [],
+        memoriesUsed: [],
+      },
+      'L0',
+    ).catch(() => null);
+    await finishTask(input.taskId, 'completed', {
+      result: sent ? text : '拒接模板发送失败',
+      decision: { action: 'decline', reason: '接待策略：礼貌拒接', confidence: 1 },
+      costUsd,
+      tokensUsed,
+    });
+    stopTyping();
+    return {
+      status: sent ? 'replied' : 'failed',
+      text,
+      messageId: sent ?? undefined,
+      toolsUsed,
+      confidence: 1,
+    };
+  }
+
+  // 升级策略：高风险话题直接转人，不生成对外回复。
+  if (
+    strategy === 'escalate' &&
+    (input.classification.topics.length > 0 ||
+      input.classification.sentiment === 'angry' ||
+      input.classification.urgency === 'high')
+  ) {
+    const reason = input.classification.topics[0]
+      ? `命中高风险话题（${input.classification.topics[0]}）`
+      : '情绪/紧急度触发升级';
+    const { msgId } = await internal
+      .pushCard(input.ownerId, {
+        kind: 'handover',
+        taskId: input.taskId,
+        summary: `${peerName} 的消息需要你亲自处理：\n「${
+          input.trigger.content.type === 'text' ? input.trigger.content.text.slice(0, 200) : ''
+        }」\n原因：${reason}`,
+        reason,
+      })
+      .catch(() => ({ msgId: '' }));
+    await finishTask(input.taskId, 'handed_over', {
+      result: `升级转人：${reason}`,
+      decision: { action: 'handover', reason, confidence: 1 },
+      costUsd,
+      tokensUsed,
+    });
+    stopTyping();
+    return { status: 'handed_over', cardMsgId: msgId, toolsUsed, confidence: 1 };
+  }
 
   // 记忆检索（对外对话排除敏感记忆）
   const memories = await retrieveMemories({
@@ -439,6 +543,9 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     stepIdx,
     toolsUsed,
     mode: input.mode,
+    strategy: input.strategy,
+    authorityVersion: input.authorityVersion,
+    via: input.via,
     allowCapabilities: input.allowCapabilities,
     maxRisk: input.maxRisk,
     ...patch,
@@ -456,6 +563,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
         ownerId: input.ownerId,
         convId: input.convId,
         expectedMode: input.mode,
+        expectedAuthorityVersion: input.authorityVersion ?? null,
         phase,
       });
       return null;
@@ -599,6 +707,9 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
             // merge 保留审计字段，同时清掉检查点（审批续走 resume 路径，不再从轮次恢复）
             context: sql`coalesce(${agentTask.context}, '{}'::jsonb) || ${JSON.stringify({
               mode: input.mode,
+              strategy: input.strategy,
+              authorityVersion: input.authorityVersion,
+              via: input.via,
               allowCapabilities: input.allowCapabilities,
               maxRisk: input.maxRisk,
               convId: input.convId,
@@ -827,7 +938,22 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
       explanation,
     };
   } else {
-    const sent = await deliverText(input, safeText, explanation, maxRiskSeen);
+    let sent: string;
+    try {
+      sent = await deliverText(input, safeText, explanation, maxRiskSeen);
+    } catch (e) {
+      if (isAuthorityRevoked(e)) {
+        await finishTask(input.taskId, 'handed_over', {
+          result: '发送前检测到接待权已收回',
+          decision: { action: 'revoked', reason: 'authority revoked', confidence },
+          costUsd,
+          tokensUsed,
+        });
+        stopTyping();
+        return { status: 'handed_over', toolsUsed, confidence };
+      }
+      throw e;
+    }
     await finishTask(input.taskId, 'completed', {
       result: safeText,
       decision: { action: 'reply', reason: explanation.reason, confidence },
@@ -862,6 +988,16 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
 // 交付
 // ---------------------------------------------------------------------------
 
+function isAuthorityRevoked(e: unknown): boolean {
+  if (!(e instanceof InternalApiError)) return false;
+  return (
+    e.body.includes('AUTHORITY_REVOKED') ||
+    e.body.includes('AUTHORITY_STALE') ||
+    e.body.includes('HANDOFF_WINDOW') ||
+    e.body.includes('AUTHORITY_MISSING')
+  );
+}
+
 async function deliverText(
   input: AgentInput,
   text: string,
@@ -886,8 +1022,12 @@ async function deliverText(
         risk,
         confidence: explanation.confidence,
         hopCount,
+        authorityVersion: input.authorityVersion ?? 0,
+        via: input.via ?? null,
         explanation,
       },
+      authorityVersion: input.authorityVersion ?? 0,
+      via: input.via ?? null,
     },
     input.traceId,
   );
@@ -1105,6 +1245,9 @@ export async function resumeFromApproval(
       { ok: true },
       null,
     );
+    if (approval.toolName === 'calendar.create') {
+      await cancelPendingCalendarItem(approval.avatarId, approval.taskId).catch(() => undefined);
+    }
     const updated = await db
       .update(agentTask)
       .set({ status: 'cancelled', error: '主人拒绝了该操作', updatedAt: sql`now()` })
@@ -1346,6 +1489,9 @@ async function rejectApproval(
     { reason },
     null,
   );
+  if (approval.toolName === 'calendar.create') {
+    await cancelPendingCalendarItem(approval.avatarId, approval.taskId).catch(() => undefined);
+  }
   if (rows.length > 0) {
     await internal
       .pushCard(approval.approver, {
@@ -1385,6 +1531,9 @@ export async function runAfterApproval(params: {
   const taskContext = task?.context
     ? (task.context as {
         mode: AvatarMode;
+        strategy?: ReceptionStrategy;
+        authorityVersion?: number;
+        via?: string;
         allowCapabilities: string[] | null;
         maxRisk: RiskLevel;
         convId: string;
@@ -1411,12 +1560,16 @@ export async function runAfterApproval(params: {
     convType,
     trigger,
     mode: taskContext?.mode ?? 'auto',
+    strategy: taskContext?.strategy,
+    authorityVersion: taskContext?.authorityVersion,
+    via: taskContext?.via ?? 'owner_approved',
     allowCapabilities: taskContext?.allowCapabilities ?? null,
     maxRisk: taskContext?.maxRisk ?? 'L1',
     classification: {
       intent: 'task',
       urgency: 'normal',
       sentiment: 'neutral',
+      importance: 'normal',
       needReply: true,
       topics: [],
       confidence: 1,

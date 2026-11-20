@@ -79,11 +79,6 @@ function ConvItem({ view, myId }: { view: ConversationView; myId: string }) {
           variant={isSelf ? 'avatar' : isGroup ? 'group' : 'human'}
           className="size-9"
         />
-        {isSelf ? (
-          <span className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full border-2 border-panel bg-brand text-[8px] font-medium text-primary-foreground">
-            AI
-          </span>
-        ) : null}
         {view.unreadCount > 0 ? (
           <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-panel bg-destructive" />
         ) : null}

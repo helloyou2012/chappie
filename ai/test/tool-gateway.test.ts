@@ -151,6 +151,15 @@ describeDb('prepareToolCall 授权与风险', () => {
     }
   });
 
+  test('创建日程需要主人确认', async () => {
+    const d = await prepareToolCall({
+      ...base,
+      toolId: 'calendar.create',
+      rawArgs: { title: '与 alice 开会', time: '明天 15:00' },
+    });
+    expect(d.status).toBe('need_approval');
+  });
+
   test('修改日程/待办（L1）→ ok；删除日程/待办（L2）→ need_approval', async () => {
     const d1 = await prepareToolCall({
       ...base,

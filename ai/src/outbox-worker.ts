@@ -21,6 +21,7 @@ import {
   avatar as avatarTable,
   capability,
   capabilityGrant,
+  conversation,
   feedback,
   memoryItem,
   message as messageTable,
@@ -30,6 +31,8 @@ import {
   styleProfile,
 } from './db/schema';
 import { processMessageCreated } from './pipeline';
+import { pushHumanRequestCard, pushReceptionDigest } from './reception';
+import { cancelPendingCalendarItem } from './tool-gateway';
 
 const WORKER_ID = `worker_${uuidv4().slice(0, 8)}`;
 const BATCH = 20;
@@ -47,8 +50,16 @@ async function cancelPendingApprovals(
     .update(approval)
     .set({ status: 'rejected', resolvedAt: sql`now()` })
     .where(and(inArray(approval.taskId, taskIds), eq(approval.status, 'pending')))
-    .returning({ id: approval.id, taskId: approval.taskId });
+    .returning({
+      id: approval.id,
+      taskId: approval.taskId,
+      toolName: approval.toolName,
+      avatarId: approval.avatarId,
+    });
   for (const row of rows) {
+    if (row.toolName === 'calendar.create') {
+      await cancelPendingCalendarItem(row.avatarId, row.taskId).catch(() => undefined);
+    }
     await appendAudit(
       row.taskId,
       actor,
@@ -224,6 +235,31 @@ async function dispatch(row: OutboxRow): Promise<void> {
     case 'takeover.requested':
       await handleTakeover(data as { userId: string; convId: string });
       break;
+    case 'reception.changed':
+      await handleReceptionChanged(
+        data as {
+          userId: string;
+          convId: string | null;
+          state: string;
+          strategy: string;
+          version: number;
+          fromState?: string | null;
+          reason?: string | null;
+        },
+      );
+      break;
+    case 'human.requested':
+      await handleHumanRequested(
+        data as {
+          requestId: string;
+          convId: string;
+          ownerId: string;
+          requesterId: string;
+          reason?: string | null;
+          expiresAt?: string | null;
+        },
+      );
+      break;
     default:
       log.warn('unknown outbox topic', { topic });
   }
@@ -246,14 +282,15 @@ async function handleUserCreated(data: {
     .limit(1);
   if (existing.length > 0) return;
 
-  const { avatarId } = await internal.createAvatar(data.userId, `${data.name} 的分身`);
+  const { avatarId } = await internal.createAvatar(data.userId, data.name);
   await db.insert(avatarTable).values({
     id: avatarId,
     ownerId: data.userId,
-    name: `${data.name} 的分身`,
+    name: data.name,
     persona: `你是 ${data.name} 的 AI 分身。语气自然、简洁、友好，回复尽量不超过三句话，适度使用表情符号。`,
     modelProfile: 'default',
     status: 'active',
+    trustLevel: 1,
     dailyBudgetUsd: '1.0',
   });
 
@@ -271,7 +308,7 @@ async function handleUserCreated(data: {
       denyTopics: ['money'],
       maxRisk: 'L1',
       rateLimitPerHour: 20,
-      escalateWhen: ['confidence<0.7'],
+      escalateWhen: [],
     },
     priority: 0,
   });
@@ -456,6 +493,7 @@ async function handleDraftAction(
       risk: 'L0',
       confidence: 1,
       hopCount: 1,
+      via: 'owner_approved',
       explanation: {
         decision: 'reply',
         reason: action === 'edit' ? '主人修改后发送草稿' : '主人直接发送草稿',
@@ -464,6 +502,8 @@ async function handleDraftAction(
         memoriesUsed: [],
       },
     },
+    via: 'owner_approved',
+    authorityVersion: 0,
   });
 
   await db
@@ -598,5 +638,105 @@ async function handleTakeover(data: { userId: string; convId: string }): Promise
     userId: data.userId,
     convId: data.convId,
     cancelled: cancelled.length,
+  });
+}
+
+async function handleReceptionChanged(data: {
+  userId: string;
+  convId: string | null;
+  state: string;
+  strategy: string;
+  version: number;
+  fromState?: string | null;
+  reason?: string | null;
+}): Promise<void> {
+  if (!data.convId) return;
+  // 与自己的分身控制通道没有“交接给主人”的概念，不生成接待摘要。
+  const convRows = await db
+    .select({ systemTag: conversation.systemTag })
+    .from(conversation)
+    .where(eq(conversation.id, data.convId))
+    .limit(1);
+  if (convRows[0]?.systemTag === 'avatar_self') return;
+  if (data.state !== 'human') {
+    // 主人显式把接待权交还分身时，清掉此前真人发言产生的冷却，
+    // 否则会出现“已全权托管但仍要等 15 分钟”的现象。
+    await redisDel(aiKeys.cooldown(data.convId, data.userId));
+    log.info('reception changed to avatar', {
+      userId: data.userId,
+      convId: data.convId,
+      strategy: data.strategy,
+      version: data.version,
+    });
+    return;
+  }
+
+  // 真人接管：取消进行中任务、作废审批、冷却，并生成交接摘要。
+  const cancelled = await db
+    .update(agentTask)
+    .set({
+      status: 'handed_over',
+      decision: { action: 'takeover', reason: '真人接管', confidence: 1 },
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(agentTask.ownerId, data.userId),
+        eq(agentTask.triggerConvId, data.convId),
+        sql`${agentTask.status} IN ('created', 'planning', 'running', 'waiting_approval', 'waiting_user_input')`,
+      ),
+    )
+    .returning({ id: agentTask.id });
+
+  await cancelPendingApprovals(
+    cancelled.map((row) => row.id),
+    data.userId,
+    '真人接管会话',
+  );
+  await redisSetEx(aiKeys.cooldown(data.convId, data.userId), '1', 15 * 60);
+  await appendAudit(
+    cancelled[0]?.id ?? 'reception',
+    data.userId,
+    'reception.takeover',
+    {
+      convId: data.convId,
+      state: data.state,
+      strategy: data.strategy,
+      version: data.version,
+      reason: data.reason,
+    },
+    { cancelled: cancelled.length },
+    null,
+  );
+  if (data.fromState !== 'human') {
+    await pushReceptionDigest(data.userId, data.convId, data.reason ?? '真人接管');
+  }
+  log.info('reception changed to human', {
+    userId: data.userId,
+    convId: data.convId,
+    cancelled: cancelled.length,
+  });
+}
+
+async function handleHumanRequested(data: {
+  requestId: string;
+  convId: string;
+  ownerId: string;
+  requesterId: string;
+  reason?: string | null;
+  expiresAt?: string | null;
+}): Promise<void> {
+  await pushHumanRequestCard({
+    ownerId: data.ownerId,
+    convId: data.convId,
+    requestId: data.requestId,
+    requesterId: data.requesterId,
+    reason: data.reason ?? null,
+    expiresAt: data.expiresAt ?? null,
+  });
+  log.info('human requested', {
+    ownerId: data.ownerId,
+    requestId: data.requestId,
+    convId: data.convId,
   });
 }

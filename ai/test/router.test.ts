@@ -64,28 +64,34 @@ describe('findCandidates 普通会话', () => {
     ]);
   });
 
-  test('群聊 @ 自己的分身会唤醒（via=mention）', () => {
+  test('群聊 @ 自己的分身会唤醒，且其他分身不插话', () => {
     const list = findCandidates(
       msg({ senderId: 'u_alice', mentions: ['a_alice'] }),
       MEMBERS,
       group,
     );
-    const own = list.find((c) => c.avatarId === 'a_alice');
-    expect(own).toEqual({
-      avatarId: 'a_alice',
-      ownerId: 'u_alice',
-      mentioned: true,
-      via: 'mention',
-    });
+    expect(list).toEqual([
+      {
+        avatarId: 'a_alice',
+        ownerId: 'u_alice',
+        mentioned: true,
+        via: 'mention',
+      },
+    ]);
   });
 
-  test('私聊 @ 自己的分身不唤醒（避免与对方分身双份回复）', () => {
+  test('群聊 @ 某人后其他分身不响应', () => {
+    const list = findCandidates(msg({ senderId: 'u_alice', mentions: ['a_bob'] }), MEMBERS, group);
+    expect(list.map((c) => c.avatarId)).toEqual(['a_bob']);
+  });
+
+  test('私聊显式 @ 自己的分身时，对方分身不插话', () => {
     const list = findCandidates(
       msg({ senderId: 'u_alice', mentions: ['a_alice'] }),
       MEMBERS,
       direct,
     );
-    expect(list.map((c) => c.avatarId)).toEqual(['a_bob']);
+    expect(list).toEqual([]);
   });
 
   test('@ 与自动候选合并去重，mentioned 优先为 true', () => {

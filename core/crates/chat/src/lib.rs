@@ -4,9 +4,11 @@
 pub mod auth;
 pub mod conversation;
 pub mod events;
+pub mod friend;
 pub mod message;
 pub mod model;
 pub mod presence;
+pub mod reception;
 pub mod state;
 
 pub use events::{event_channel, DomainEvent, EventTx};

@@ -12,6 +12,7 @@ import type { Conversation, Member, Message } from './chat';
 import type { DeviceCapabilities, DeviceRegistration } from './device';
 import type { ClientFrame, ServerFrame } from './frames';
 import type { Avatar, Principal, User } from './identity';
+import type { FriendRequestView } from './rest';
 
 export const fixtureUser: User = {
   id: 'u_00000000-0000-4000-8000-000000000001',
@@ -30,6 +31,7 @@ export const fixtureAvatar: Avatar = {
   status: 'active',
   selfConvId: 'c_00000000-0000-4000-8000-000000000010',
   dailyBudgetUsd: 1,
+  trustLevel: 2,
   version: 1,
 };
 
@@ -55,6 +57,7 @@ export const fixtureMember: Member = {
   principalId: 'u_00000000-0000-4000-8000-000000000001',
   role: 'member',
   aiMode: 'auto',
+  aiModeSource: 'explicit',
   aiModeUntil: '2026-11-11T20:00:00.000Z',
   lastReadSeq: 40,
   joinedAt: '2026-11-01T08:00:00.000Z',
@@ -120,6 +123,8 @@ export const fixtureAvatarMessage: Message = {
     risk: 'L0',
     confidence: 0.92,
     hopCount: 0,
+    authorityVersion: 3,
+    via: 'auto',
     explanation: {
       decision: 'reply',
       reason: '对方询问日程，属于只读问答，命中自动档允许范围',
@@ -323,8 +328,36 @@ export const fixtureServerFrames: ServerFrame[] = [
     lastReadSeq: 41,
   },
   { type: 'conversations_changed' },
+  { type: 'friend_requests_changed' },
+  {
+    type: 'reception_changed',
+    convId: 'c_00000000-0000-4000-8000-000000000001',
+    ownerId: 'u_00000000-0000-4000-8000-000000000001',
+    state: 'human',
+    strategy: 'assist',
+    version: 4,
+    until: null,
+    reason: '主人接管',
+  },
   { type: 'error', code: 'forbidden', message: '无权操作该会话' },
 ];
+
+export const fixtureFriendRequest: FriendRequestView = {
+  id: 'fr_00000000-0000-4000-8000-000000000001',
+  fromUser: fixtureUser,
+  toUser: {
+    id: 'u_00000000-0000-4000-8000-000000000002',
+    email: 'bob@demo.dev',
+    name: 'Bob',
+    avatarUrl: null,
+    createdAt: '2026-11-01T08:00:00.000Z',
+  },
+  direction: 'outgoing',
+  message: '一起协作吧',
+  status: 'pending',
+  createdAt: '2026-11-11T02:00:00.000Z',
+  resolvedAt: null,
+};
 
 export const fixturePolicy: Policy = {
   id: 'p_00000000-0000-4000-8000-000000000001',
@@ -433,6 +466,7 @@ export const fixtures = {
   calendarReminderCardMessage: fixtureCalendarReminderCardMessage,
   clientFrames: fixtureClientFrames,
   serverFrames: fixtureServerFrames,
+  friendRequest: fixtureFriendRequest,
   policy: fixturePolicy,
   agentTask: fixtureAgentTask,
   approval: fixtureApproval,

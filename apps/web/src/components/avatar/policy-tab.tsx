@@ -3,8 +3,11 @@ import {
   MODE_DESCRIPTIONS,
   MODE_LABELS,
   type Policy,
+  type ReceptionStrategy,
   RISK_LABELS,
   type RiskLevel,
+  STRATEGY_DESCRIPTIONS,
+  STRATEGY_LABELS,
 } from '@chappie/shared';
 import { ShieldCheckIcon } from '@heroicons/react/24/outline';
 import { RiAddLine, RiDeleteBinLine, RiLoader4Line } from '@remixicon/react';
@@ -50,6 +53,7 @@ export function PolicyTab() {
   const [scopeId, setScopeId] = useState('');
   const [name, setName] = useState('');
   const [mode, setMode] = useState('auto');
+  const [strategy, setStrategy] = useState<ReceptionStrategy>('full');
   const [maxRisk, setMaxRisk] = useState<RiskLevel>('L1');
   const [rateLimit, setRateLimit] = useState('20');
   const [denyTopics, setDenyTopics] = useState('money');
@@ -79,6 +83,7 @@ export function PolicyTab() {
         name: name.trim() || `${SCOPE_LABEL[scopeType]}策略`,
         rule: {
           mode: mode as Policy['rule']['mode'],
+          strategy,
           schedule: [],
           allowCapabilities: null,
           denyTopics: denyTopics
@@ -87,7 +92,7 @@ export function PolicyTab() {
             .filter(Boolean),
           maxRisk,
           rateLimitPerHour: Number(rateLimit) || 20,
-          escalateWhen: ['confidence<0.7'],
+          escalateWhen: [],
         },
       });
       toast.success('策略已创建');
@@ -205,13 +210,11 @@ export function PolicyTab() {
               <div className="space-y-1">
                 <label className="text-xs font-medium">作用域</label>
                 <Select value={scopeType} onChange={(e) => setScopeType(e.target.value)}>
-                  {Object.entries(SCOPE_LABEL)
-                    .filter(([value]) => value !== 'contact_group')
-                    .map(([v, label]) => (
-                      <option key={v} value={v}>
-                        {label}
-                      </option>
-                    ))}
+                  {Object.entries(SCOPE_LABEL).map(([v, label]) => (
+                    <option key={v} value={v}>
+                      {label}
+                    </option>
+                  ))}
                 </Select>
               </div>
               <div className="space-y-1">
@@ -260,6 +263,19 @@ export function PolicyTab() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">接待策略</label>
+              <Select
+                value={strategy}
+                onChange={(e) => setStrategy(e.target.value as ReceptionStrategy)}
+              >
+                {Object.entries(STRATEGY_LABELS).map(([v, label]) => (
+                  <option key={v} value={v}>
+                    {label} · {STRATEGY_DESCRIPTIONS[v]}
+                  </option>
+                ))}
+              </Select>
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium">自动执行风险上限</label>

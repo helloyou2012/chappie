@@ -183,6 +183,8 @@ async fn handle_client_frame(
                     mentions,
                     reply_to,
                     ai_meta: None,
+                    authority_version: 0,
+                    via: None,
                 },
             )
             .await?;

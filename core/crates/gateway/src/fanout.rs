@@ -98,6 +98,33 @@ fn dispatch(state: &AppState, event: &DomainEvent) {
         DomainEvent::ConversationsChanged { recipients } => {
             push(state, recipients, &ServerFrame::ConversationsChanged);
         }
+        DomainEvent::FriendRequestsChanged { recipients } => {
+            push(state, recipients, &ServerFrame::FriendRequestsChanged);
+        }
+        DomainEvent::ReceptionChanged {
+            conv_id,
+            owner_id,
+            state: reception_state,
+            strategy,
+            version,
+            until,
+            reason,
+            recipients,
+        } => {
+            push(
+                state,
+                recipients,
+                &ServerFrame::ReceptionChanged {
+                    conv_id: conv_id.clone(),
+                    owner_id: owner_id.clone(),
+                    state: reception_state.clone(),
+                    strategy: strategy.clone(),
+                    version: *version,
+                    until: until.clone(),
+                    reason: reason.clone(),
+                },
+            );
+        }
     }
 }
 

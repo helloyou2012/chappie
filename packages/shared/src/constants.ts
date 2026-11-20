@@ -30,6 +30,34 @@ export const MODE_DESCRIPTIONS: Record<string, string> = {
   off: '分身完全不工作',
 };
 
+export const STRATEGY_LABELS: Record<string, string> = {
+  summon: '仅召唤',
+  assist: '草稿',
+  full: '全权代答',
+  screen: '筛选过滤',
+  decline: '礼貌拒接',
+  escalate: '升级转人',
+  silent: '静默值守',
+  off: '不工作',
+};
+
+export const STRATEGY_DESCRIPTIONS: Record<string, string> = {
+  summon: '仅在你 @ 或直接下指令时响应',
+  assist: '生成回复草稿，由你确认后发送',
+  full: '相关消息自主判断并回复',
+  screen: '不自动代答，只把重要消息推送给你',
+  decline: '对骚扰/无关消息礼貌挡回',
+  escalate: '低风险自动回复，高风险立即转你',
+  silent: '只记录并生成摘要，不回复',
+  off: '分身完全不工作',
+};
+
+export const RECEPTION_LABELS: Record<string, string> = {
+  human: '真人接待',
+  avatar: '分身接待',
+  paused: '已暂停',
+};
+
 export const RISK_LABELS: Record<string, string> = {
   L0: '只读',
   L1: '低风险写',

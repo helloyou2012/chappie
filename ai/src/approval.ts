@@ -18,7 +18,11 @@ import { internal } from './common/internal';
 import { parseJsonSafe } from './common/json';
 import { log, newId } from './common/log';
 import { agentTask, approval } from './db/schema';
-import type { BuiltinTool } from './tool-gateway';
+import {
+  type BuiltinTool,
+  cancelPendingCalendarItem,
+  upsertPendingCalendarItem,
+} from './tool-gateway';
 
 export interface ApprovalRecord {
   id: string;
@@ -109,7 +113,8 @@ export async function createApproval(params: {
   const approvalId = newId('ap');
   const ttl = params.ttlSeconds ?? 3600;
   const expiresAt = dayjs().add(ttl, 'second');
-  const title = `请求执行：${params.tool.name}`;
+  const title =
+    params.tool.id === 'calendar.create' ? '确认创建日程' : `请求执行：${params.tool.name}`;
   const argsHash = approvalArgsHash({
     approvalId,
     taskId: params.taskId,
@@ -120,9 +125,37 @@ export async function createApproval(params: {
   });
   // 摘要进入卡片与推送通道，不能拼接原始参数（可能含金额、收件人等敏感信息）；
   // 参数本身仍在卡片 args 中按权限展示。
+  const calendarAttendees = Array.isArray(params.args.attendees)
+    ? (params.args.attendees as string[]).filter(Boolean)
+    : [];
+  const calendarPreview =
+    params.tool.id === 'calendar.create'
+      ? `将创建日程「${String(params.args.title ?? '')}」（${String(params.args.time ?? '')}）${
+          calendarAttendees.length > 0 ? `，相关人：${calendarAttendees.join('、')}` : ''
+        }。`
+      : '';
   const summary =
+    calendarPreview +
     `分身准备执行「${params.tool.name}」（${params.tool.risk}）。` +
-    (params.tool.risk === 'L2' ? '该操作属于高风险，需要你确认后才会执行。' : '');
+    (params.tool.risk === 'L2' ? '确认后才会执行。' : '');
+
+  // 日程创建：先写入日历（pending），批准后由工具改为 confirmed。
+  if (params.tool.id === 'calendar.create') {
+    await upsertPendingCalendarItem({
+      avatarId: params.avatarId,
+      taskId: params.taskId,
+      title: String(params.args.title ?? ''),
+      time: String(params.args.time ?? ''),
+      attendees: Array.isArray(params.args.attendees)
+        ? (params.args.attendees as string[]).map((x) => String(x))
+        : [],
+    }).catch((e) => {
+      log.warn('pending calendar write failed', {
+        taskId: params.taskId,
+        error: String(e),
+      });
+    });
+  }
 
   await db.insert(approval).values({
     id: approvalId,
@@ -227,8 +260,13 @@ export async function sweepExpiredApprovals(): Promise<number> {
       taskId: approval.taskId,
       approver: approval.approver,
       title: approval.title,
+      toolName: approval.toolName,
+      avatarId: approval.avatarId,
     });
   for (const r of rows) {
+    if (r.toolName === 'calendar.create') {
+      await cancelPendingCalendarItem(r.avatarId, r.taskId).catch(() => undefined);
+    }
     await db
       .update(agentTask)
       .set({ status: 'cancelled', error: '审批超时，已默认拒绝', updatedAt: sql`now()` })

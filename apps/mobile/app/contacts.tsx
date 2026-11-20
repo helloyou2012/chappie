@@ -3,10 +3,12 @@ import {
   api,
   type ContactView,
   type ConversationView,
+  type FriendRequestView,
   groupByInitial,
   MODE_DESCRIPTIONS,
   MODE_LABELS,
   type Policy,
+  useChatStore,
 } from '@chappie/shared';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -42,7 +44,10 @@ function contactPolicy(policies: Policy[], peerId: string): Policy | undefined {
 export default function ContactsScreen() {
   const t = useTheme();
   const router = useRouter();
+  const friendRequestVersion = useChatStore((s) => s.friendRequestVersion);
   const [contacts, setContacts] = useState<ContactView[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<FriendRequestView[]>([]);
+  const [outgoingRequests, setOutgoingRequests] = useState<FriendRequestView[]>([]);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -64,12 +69,15 @@ export default function ContactsScreen() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [contactRes, policyRes, convRes] = await Promise.all([
+      const [contactRes, policyRes, convRes, requestRes] = await Promise.all([
         api.listContacts(),
         adminApi.listPolicies(),
         api.listConversations(),
+        api.listFriendRequests(),
       ]);
       setContacts(contactRes.contacts);
+      setIncomingRequests(requestRes.incoming);
+      setOutgoingRequests(requestRes.outgoing);
       setPolicies(policyRes.policies);
       setGroups(
         convRes.views.filter(
@@ -86,6 +94,10 @@ export default function ContactsScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (friendRequestVersion > 0) void load();
+  }, [friendRequestVersion, load]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -105,15 +117,55 @@ export default function ContactsScreen() {
     if (!value) return;
     setAdding(true);
     try {
-      const res = await api.addContact({ email: value });
-      setContacts((prev) =>
-        prev.some((c) => c.user.id === res.contact.user.id) ? prev : [...prev, res.contact],
-      );
+      const res = await api.sendFriendRequest({ email: value });
       setEmail('');
+      if (res.request.status === 'accepted') {
+        await load();
+        Alert.alert('已互为联系人', res.request.toUser.name);
+      } else {
+        setOutgoingRequests((prev) => [res.request, ...prev]);
+        Alert.alert('好友申请已发送', `等待 ${res.request.toUser.name} 确认`);
+      }
     } catch (e) {
-      Alert.alert('添加失败', e instanceof Error ? e.message : String(e));
+      Alert.alert('发送失败', e instanceof Error ? e.message : String(e));
     } finally {
       setAdding(false);
+    }
+  };
+
+  const acceptRequest = async (r: FriendRequestView) => {
+    setBusyId(r.id);
+    try {
+      await api.acceptFriendRequest(r.id);
+      await load();
+    } catch (e) {
+      Alert.alert('接受失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const rejectRequest = async (r: FriendRequestView) => {
+    setBusyId(r.id);
+    try {
+      await api.rejectFriendRequest(r.id);
+      setIncomingRequests((prev) => prev.filter((x) => x.id !== r.id));
+    } catch (e) {
+      Alert.alert('操作失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const cancelRequest = async (r: FriendRequestView) => {
+    setBusyId(r.id);
+    try {
+      await api.cancelFriendRequest(r.id);
+      setOutgoingRequests((prev) => prev.filter((x) => x.id !== r.id));
+    } catch (e) {
+      Alert.alert('撤回失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -162,7 +214,7 @@ export default function ContactsScreen() {
             denyTopics: [],
             maxRisk: 'L1',
             rateLimitPerHour: 20,
-            escalateWhen: ['confidence<0.7'],
+            escalateWhen: [],
           },
         });
       }
@@ -222,7 +274,7 @@ export default function ContactsScreen() {
             size="sm"
             value={email}
             onChangeText={setEmail}
-            placeholder="按邮箱添加联系人"
+            placeholder="输入邮箱发送好友申请"
             autoCapitalize="none"
             keyboardType="email-address"
             style={{ flex: 1 }}
@@ -230,7 +282,7 @@ export default function ContactsScreen() {
           <Button
             size="sm"
             fullWidth={false}
-            label={adding ? '添加中' : '添加'}
+            label={adding ? '发送中' : '发送申请'}
             loading={adding}
             disabled={!email.trim()}
             onPress={() => void add()}
@@ -280,6 +332,66 @@ export default function ContactsScreen() {
             keyExtractor={(c) => c.user.id}
             stickySectionHeadersEnabled
             contentContainerStyle={{ padding: 14, paddingRight: 24, paddingBottom: 32 }}
+            ListHeaderComponent={
+              incomingRequests.length > 0 || outgoingRequests.length > 0 ? (
+                <View style={{ gap: 8, marginBottom: 10 }}>
+                  {incomingRequests.map((r) => (
+                    <Card key={r.id} padding={12}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Avatar name={r.fromUser.name} size={36} />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text variant="body" style={{ fontWeight: '600' }} numberOfLines={1}>
+                            好友申请 · {r.fromUser.name}
+                          </Text>
+                          <Text variant="micro" tone="muted" numberOfLines={1}>
+                            {r.fromUser.email}
+                            {r.message ? ` · ${r.message}` : ''}
+                          </Text>
+                        </View>
+                        <Button
+                          size="sm"
+                          fullWidth={false}
+                          label="接受"
+                          loading={busyId === r.id}
+                          onPress={() => void acceptRequest(r)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          fullWidth={false}
+                          label="拒绝"
+                          disabled={busyId === r.id}
+                          onPress={() => void rejectRequest(r)}
+                        />
+                      </View>
+                    </Card>
+                  ))}
+                  {outgoingRequests.map((r) => (
+                    <Card key={r.id} padding={10}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Avatar name={r.toUser.name} size={30} />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text variant="caption" numberOfLines={1}>
+                            已向 {r.toUser.name} 发送申请
+                          </Text>
+                          <Text variant="micro" tone="muted" numberOfLines={1}>
+                            等待对方确认
+                          </Text>
+                        </View>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          fullWidth={false}
+                          label="撤回"
+                          disabled={busyId === r.id}
+                          onPress={() => void cancelRequest(r)}
+                        />
+                      </View>
+                    </Card>
+                  ))}
+                </View>
+              ) : undefined
+            }
             SectionSeparatorComponent={() => <View style={{ height: 2 }} />}
             renderSectionHeader={({ section }) => (
               <View
@@ -365,7 +477,7 @@ export default function ContactsScreen() {
                 title={contacts.length === 0 ? '还没有联系人' : '没有匹配的联系人'}
                 description={
                   contacts.length === 0
-                    ? '在上方按邮箱添加，对方注册后即可发起会话'
+                    ? '在上方按邮箱发送好友申请，对方接受后即可发起会话'
                     : '换个关键词试试'
                 }
               />

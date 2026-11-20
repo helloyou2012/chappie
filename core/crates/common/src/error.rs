@@ -50,6 +50,9 @@ impl AppError {
     pub fn not_found(msg: impl Into<String>) -> Self {
         AppError::NotFound(msg.into())
     }
+    pub fn conflict(msg: impl Into<String>) -> Self {
+        AppError::Conflict(msg.into())
+    }
     pub fn internal_msg(msg: impl Into<String>) -> Self {
         AppError::Internal(anyhow::anyhow!(msg.into()))
     }

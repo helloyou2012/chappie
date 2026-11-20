@@ -88,9 +88,16 @@ export async function sweepCalendarReminders(): Promise<number> {
           title: String(x.title ?? ''),
           time: String(x.time ?? ''),
           date: typeof x.date === 'string' ? x.date : null,
+          status:
+            x.status === 'pending' || x.status === 'cancelled' || x.status === 'confirmed'
+              ? x.status
+              : undefined,
+          attendees: Array.isArray(x.attendees)
+            ? x.attendees.map((v) => String(v)).filter(Boolean)
+            : [],
         }),
       )
-      .filter((x) => x.date);
+      .filter((x) => x.date && x.status === 'confirmed');
     for (const item of items) {
       const start = dayjs(`${item.date} ${item.time}`);
       if (!start.isValid()) continue;

@@ -5,6 +5,7 @@ import Icon from 'react-native-remix-icon';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/use-theme';
 import {
+  Badge,
   BottomSheet,
   Button,
   Card,
@@ -36,9 +37,11 @@ export default function ScheduleScreen() {
 
   const [createOpen, setCreateOpen] = useState<Tab | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [calTitle, setCalTitle] = useState('');
   const [calDate, setCalDate] = useState(() => dayjs().format('YYYY-MM-DD'));
   const [calTime, setCalTime] = useState('10:00');
+  const [calAttendees, setCalAttendees] = useState('');
   const [todoText, setTodoText] = useState('');
 
   const load = useCallback(async () => {
@@ -76,6 +79,19 @@ export default function ScheduleScreen() {
     }
   };
 
+  const setCalendarStatus = async (
+    index: number,
+    status: 'pending' | 'confirmed' | 'cancelled',
+  ) => {
+    setBusyKey(`cal-${index}`);
+    try {
+      await adminApi.updateCalendarItem(index, { status });
+      await load();
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const toggleTodo = async (index: number, done: boolean) => {
     setBusyKey(`todo-${index}`);
     try {
@@ -98,13 +114,24 @@ export default function ScheduleScreen() {
 
   const openCreate = (kind: Tab) => {
     setCreateOpen(kind);
+    setEditingIndex(null);
     if (kind === 'calendar') {
       setCalTitle('');
       setCalDate(dayjs().format('YYYY-MM-DD'));
       setCalTime('10:00');
+      setCalAttendees('');
     } else {
       setTodoText('');
     }
+  };
+
+  const openEdit = (item: CalendarItem, index: number) => {
+    setEditingIndex(index);
+    setCreateOpen('calendar');
+    setCalTitle(item.title);
+    setCalDate(item.date ?? '');
+    setCalTime(item.time);
+    setCalAttendees((item.attendees ?? []).join('，'));
   };
 
   const create = async () => {
@@ -113,11 +140,20 @@ export default function ScheduleScreen() {
     try {
       if (createOpen === 'calendar') {
         if (!calTitle.trim()) return;
-        await adminApi.createCalendarItem({
+        const fields = {
           title: calTitle.trim(),
           date: calDate.trim() || null,
           time: calTime.trim() || '10:00',
-        });
+          attendees: calAttendees
+            .split(/[,，、]/)
+            .map((x) => x.trim())
+            .filter(Boolean),
+        };
+        if (editingIndex !== null) {
+          await adminApi.updateCalendarItem(editingIndex, fields);
+        } else {
+          await adminApi.createCalendarItem(fields);
+        }
       } else {
         if (!todoText.trim()) return;
         await adminApi.createTodoItem({ text: todoText.trim() });
@@ -201,11 +237,66 @@ export default function ScheduleScreen() {
                     <Text variant="body" style={{ fontWeight: '500' }} numberOfLines={1}>
                       {cal.title}
                     </Text>
-                    <Text variant="micro" tone="muted" style={{ marginTop: 1 }}>
-                      {cal.date ? `${cal.date.slice(5)} ${cal.time}` : cal.time}
-                      {isToday ? ' · 今天' : ''}
-                    </Text>
+                    <View
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 }}
+                    >
+                      <Text variant="micro" tone="muted">
+                        {cal.date ? `${cal.date.slice(5)} ${cal.time}` : cal.time}
+                        {isToday ? ' · 今天' : ''}
+                      </Text>
+                      <Badge
+                        label={
+                          cal.status === 'pending'
+                            ? '待批准'
+                            : cal.status === 'cancelled'
+                              ? '已取消'
+                              : '已确认'
+                        }
+                        tone={
+                          cal.status === 'pending'
+                            ? 'warning'
+                            : cal.status === 'cancelled'
+                              ? 'muted'
+                              : 'success'
+                        }
+                      />
+                    </View>
+                    {cal.attendees && cal.attendees.length > 0 ? (
+                      <Text variant="micro" tone="muted" numberOfLines={1} style={{ marginTop: 1 }}>
+                        相关人：{cal.attendees.join('、')}
+                      </Text>
+                    ) : null}
                   </View>
+                  <IconButton
+                    icon="edit-line"
+                    label={`编辑日程 ${cal.title}`}
+                    size={34}
+                    disabled={busyKey !== null}
+                    onPress={() => openEdit(cal, index)}
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    fullWidth={false}
+                    label={
+                      cal.status === 'pending'
+                        ? '确认'
+                        : cal.status === 'confirmed'
+                          ? '取消'
+                          : '恢复'
+                    }
+                    disabled={busyKey !== null}
+                    onPress={() =>
+                      void setCalendarStatus(
+                        index,
+                        cal.status === 'pending'
+                          ? 'confirmed'
+                          : cal.status === 'confirmed'
+                            ? 'cancelled'
+                            : 'confirmed',
+                      )
+                    }
+                  />
                   <IconButton
                     icon="delete-bin-line"
                     label={`删除日程 ${cal.title}`}
@@ -288,12 +379,15 @@ export default function ScheduleScreen() {
         onClose={() => setCreateOpen(null)}
         creating={creating}
         onCreate={() => void create()}
+        editing={editingIndex !== null}
         calTitle={calTitle}
         setCalTitle={setCalTitle}
         calDate={calDate}
         setCalDate={setCalDate}
         calTime={calTime}
         setCalTime={setCalTime}
+        calAttendees={calAttendees}
+        setCalAttendees={setCalAttendees}
         todoText={todoText}
         setTodoText={setTodoText}
       />
@@ -407,12 +501,15 @@ function CreateSheet({
   onClose,
   creating,
   onCreate,
+  editing,
   calTitle,
   setCalTitle,
   calDate,
   setCalDate,
   calTime,
   setCalTime,
+  calAttendees,
+  setCalAttendees,
   todoText,
   setTodoText,
 }: {
@@ -420,12 +517,15 @@ function CreateSheet({
   onClose: () => void;
   creating: boolean;
   onCreate: () => void;
+  editing: boolean;
   calTitle: string;
   setCalTitle: (v: string) => void;
   calDate: string;
   setCalDate: (v: string) => void;
   calTime: string;
   setCalTime: (v: string) => void;
+  calAttendees: string;
+  setCalAttendees: (v: string) => void;
   todoText: string;
   setTodoText: (v: string) => void;
 }) {
@@ -433,7 +533,7 @@ function CreateSheet({
     <BottomSheet
       visible={kind !== null}
       onClose={onClose}
-      title={kind === 'calendar' ? '新建日程' : '新建待办'}
+      title={kind === 'calendar' ? (editing ? '编辑日程' : '新建日程') : '新建待办'}
     >
       {kind === 'calendar' ? (
         <>
@@ -463,6 +563,13 @@ function CreateSheet({
               />
             </Field>
           </View>
+          <Field label="相关人">
+            <Input
+              value={calAttendees}
+              onChangeText={setCalAttendees}
+              placeholder="用逗号分隔，如：Bob，小王"
+            />
+          </Field>
         </>
       ) : (
         <Field label="内容">
@@ -475,7 +582,7 @@ function CreateSheet({
         </Field>
       )}
       <Button
-        label={creating ? '创建中…' : '创建'}
+        label={creating ? '保存中…' : editing ? '保存修改' : '创建'}
         loading={creating}
         onPress={onCreate}
         style={{ marginTop: 14 }}

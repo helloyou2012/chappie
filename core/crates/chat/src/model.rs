@@ -180,6 +180,33 @@ pub enum CardPayload {
         #[serde(default)]
         summary: String,
     },
+    /// 接待摘要：分身接待期间发生了什么
+    #[serde(rename = "reception_digest")]
+    ReceptionDigest {
+        #[serde(default)]
+        conv_id: Option<String>,
+        from: String,
+        to: String,
+        #[serde(default)]
+        stats: serde_json::Value,
+        #[serde(default)]
+        threads: serde_json::Value,
+        #[serde(default)]
+        pending: serde_json::Value,
+        #[serde(default)]
+        summary: String,
+    },
+    /// 对端请求真人
+    #[serde(rename = "human_request")]
+    HumanRequest {
+        request_id: String,
+        conv_id: String,
+        requester_name: String,
+        #[serde(default)]
+        reason: String,
+        #[serde(default)]
+        expires_at: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +235,10 @@ impl CardPayload {
             CardPayload::Handover { .. } => "[转交给你]".into(),
             CardPayload::Report { day, .. } => format!("[分身日报] {day}"),
             CardPayload::CalendarReminder { title, .. } => format!("[日程提醒] {title}"),
+            CardPayload::ReceptionDigest { .. } => "[分身接待摘要]".into(),
+            CardPayload::HumanRequest { requester_name, .. } => {
+                format!("[请求真人] {requester_name}")
+            }
         }
     }
 }
@@ -243,6 +274,12 @@ pub struct AiMeta {
     pub confidence: Option<f64>,
     #[serde(default)]
     pub hop_count: u32,
+    /// 发送时捕获的接待版本；core 在写入路径做围栏校验
+    #[serde(default)]
+    pub authority_version: i64,
+    /// 触发来源：mention/self_chat/direct/auto/reply/continuation/owner_approved
+    #[serde(default)]
+    pub via: Option<String>,
     #[serde(default)]
     pub explanation: Option<Explanation>,
 }
@@ -349,6 +386,29 @@ pub struct Conversation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReceptionView {
+    pub state: String,
+    pub strategy: String,
+    #[serde(default)]
+    pub version: i64,
+    #[serde(default)]
+    pub until: Option<String>,
+    #[serde(default = "default_reception_source")]
+    pub source: String,
+    #[serde(default = "default_true")]
+    pub counterparty_requestable: bool,
+}
+
+fn default_reception_source() -> String {
+    "default".into()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MemberView {
     pub principal_id: String,
     pub principal_type: String,
@@ -357,10 +417,19 @@ pub struct MemberView {
     pub name: String,
     pub role: String,
     pub ai_mode: String,
+    #[serde(default = "default_ai_mode_source")]
+    pub ai_mode_source: String,
     #[serde(default)]
     pub ai_mode_until: Option<String>,
+    /// 该主人（human 成员）在此会话的接待态；avatar 成员为 None
+    #[serde(default)]
+    pub reception: Option<ReceptionView>,
     pub last_read_seq: i64,
     pub online: bool,
+}
+
+fn default_ai_mode_source() -> String {
+    "inherit".into()
 }
 
 /// GET /conversations 返回的会话视图
@@ -371,7 +440,12 @@ pub struct ConversationView {
     pub my_principal_id: String,
     pub my_role: String,
     pub my_ai_mode: String,
+    #[serde(default = "default_ai_mode_source")]
+    pub my_ai_mode_source: String,
     pub my_ai_mode_until: Option<String>,
+    pub my_reception: ReceptionView,
+    #[serde(default)]
+    pub peer_reception: Option<ReceptionView>,
     pub my_last_read_seq: i64,
     pub unread_count: i64,
     pub display_title: String,
@@ -490,6 +564,18 @@ pub enum ServerFrame {
         last_read_seq: i64,
     },
     ConversationsChanged,
+    FriendRequestsChanged,
+    ReceptionChanged {
+        conv_id: String,
+        owner_id: String,
+        state: String,
+        strategy: String,
+        version: i64,
+        #[serde(default)]
+        until: Option<String>,
+        #[serde(default)]
+        reason: Option<String>,
+    },
     Error {
         code: String,
         message: String,

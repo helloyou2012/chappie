@@ -65,14 +65,17 @@ export function NewConversationDialog({ trigger }: { trigger: React.ReactNode })
     if (!value) return;
     setAdding(true);
     try {
-      const res = await api.addContact({ email: value });
-      setContacts((prev) =>
-        prev.some((c) => c.user.id === res.contact.user.id) ? prev : [...prev, res.contact],
-      );
+      const res = await api.sendFriendRequest({ email: value });
       setEmail('');
-      toast.success('已添加联系人', res.contact.user.name);
+      if (res.request.status === 'accepted') {
+        const contactsRes = await api.listContacts();
+        setContacts(contactsRes.contacts);
+        toast.success('已互为联系人', res.request.toUser.name);
+      } else {
+        toast.success('好友申请已发送', `等待 ${res.request.toUser.name} 确认`);
+      }
     } catch (e) {
-      toast.error('添加失败', e instanceof Error ? e.message : String(e));
+      toast.error('发送失败', e instanceof Error ? e.message : String(e));
     } finally {
       setAdding(false);
     }
@@ -212,7 +215,7 @@ function AddContactRow({
         <AtSymbolIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           className="pl-8"
-          placeholder="按邮箱添加联系人（对方需已注册）"
+          placeholder="输入邮箱发送好友申请（对方需已注册）"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -225,7 +228,7 @@ function AddContactRow({
         ) : (
           <RiUserAddLine className="size-4" />
         )}
-        添加
+        发送申请
       </Button>
     </form>
   );

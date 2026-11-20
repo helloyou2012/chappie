@@ -123,7 +123,14 @@ export function MonthGrid({
                                 {formatMinutes(event.startMin)}
                               </span>
                             )}
-                            <span className="truncate">{event.title}</span>
+                            <span className="truncate">
+                              {event.status === 'pending'
+                                ? '待批准 · '
+                                : event.status === 'cancelled'
+                                  ? '已取消 · '
+                                  : ''}
+                              {event.title}
+                            </span>
                           </button>
                         ))}
                         {overflow > 0 ? (

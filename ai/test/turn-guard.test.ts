@@ -16,8 +16,12 @@ const base: TurnEvaluationInput = {
   aiModeUntil: null,
   memberFound: true,
   taskStatus: 'planning',
+  receptionState: null,
+  receptionVersion: null,
+  handoffUntil: null,
   ownerId: 'u1',
   expectedMode: 'auto',
+  expectedAuthorityVersion: null,
   phase: 'run',
 };
 

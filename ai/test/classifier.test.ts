@@ -77,7 +77,15 @@ describe('classify 置信度（合理沉默依据）', () => {
 
   test('极短消息 / 纯问号 → 低置信度', () => {
     expect(classify('？').confidence).toBeLessThan(0.6);
-    expect(classify('在吗').confidence).toBeLessThan(0.6);
+    expect(classify('嗯').confidence).toBeLessThan(0.6);
+  });
+
+  test('寒暄是在场信号：需要回应且置信度不低', () => {
+    for (const text of ['你好', 'hi', '在吗', '晚上好']) {
+      const c = classify(text);
+      expect(c.needReply).toBe(true);
+      expect(c.confidence).toBeGreaterThanOrEqual(0.7);
+    }
   });
 
   test('正常问句置信度高于裸问号', () => {

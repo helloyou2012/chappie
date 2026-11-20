@@ -3,7 +3,7 @@
  * 对应设计方案 §25.5 六接口 + 账号生命周期补充接口。
  */
 
-import type { CardPayload, Content, MemberView, Message } from '@chappie/contract';
+import type { CardPayload, Content, MemberView, Message, ReceptionView } from '@chappie/contract';
 import { config } from './config';
 import { notifyForCard } from './push';
 
@@ -48,6 +48,8 @@ export interface SendMessageInternalReq {
   mentions?: string[];
   replyTo?: string | null;
   aiMeta?: Record<string, unknown> | null;
+  authorityVersion?: number;
+  via?: string | null;
 }
 
 export interface PresenceInfo {
@@ -74,10 +76,29 @@ export const internal = {
   recallMessage: (msgId: string, actorId: string) =>
     call<{ ok: boolean }>('/internal/v1/recall-message', { msgId, actorId }),
 
-  getContext: (convId: string, limit = 20) =>
-    call<{ messages: Message[]; members: MemberView[] }>('/internal/v1/get-context', {
-      convId,
-      limit,
+  getContext: (convId: string, limit = 20, ownerId?: string) =>
+    call<{ messages: Message[]; members: MemberView[]; reception?: ReceptionView }>(
+      '/internal/v1/get-context',
+      { convId, limit, ownerId },
+    ),
+
+  getReception: (convId: string, ownerId: string) =>
+    call<ReceptionView>('/internal/v1/get-reception', { convId, ownerId }),
+
+  setReception: (req: {
+    ownerId: string;
+    convId: string;
+    state: string;
+    strategy: string;
+    until?: string | null;
+    reason?: string;
+  }) => call<ReceptionView>('/internal/v1/set-reception', req),
+
+  resolveHumanRequest: (ownerId: string, requestId: string, approve: boolean) =>
+    call<{ ok: boolean }>('/internal/v1/resolve-human-request', {
+      ownerId,
+      requestId,
+      approve,
     }),
 
   getPresence: (userIds: string[]) =>
@@ -111,6 +132,9 @@ export const internal = {
 
   freezeAvatar: (avatarId: string, frozen: boolean) =>
     call<{ ok: boolean; status: string }>('/internal/v1/freeze-avatar', { avatarId, frozen }),
+
+  updateAvatarName: (avatarId: string, name: string) =>
+    call<{ ok: boolean }>('/internal/v1/update-avatar-name', { avatarId, name }),
 
   createAvatar: (ownerId: string, name: string) =>
     call<{ avatarId: string }>('/internal/v1/create-avatar', { ownerId, name }),

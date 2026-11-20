@@ -9,7 +9,7 @@ import {
 } from '@chappie/shared';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Platform, RefreshControl, View } from 'react-native';
+import { Alert, FlatList, Platform, RefreshControl, View } from 'react-native';
 import Icon from 'react-native-remix-icon';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/use-theme';
@@ -194,11 +194,17 @@ export default function ChatsScreen() {
     if (!email) return;
     setAdding(true);
     try {
-      const res = await api.addContact({ email });
-      setContacts((prev) =>
-        prev.some((c) => c.user.id === res.contact.user.id) ? prev : [...prev, res.contact],
-      );
+      const res = await api.sendFriendRequest({ email });
       setContactEmail('');
+      if (res.request.status === 'accepted') {
+        const contactsRes = await api.listContacts();
+        setContacts(contactsRes.contacts);
+        Alert.alert('已互为联系人', res.request.toUser.name);
+      } else {
+        Alert.alert('好友申请已发送', `等待 ${res.request.toUser.name} 确认`);
+      }
+    } catch (e) {
+      Alert.alert('发送失败', e instanceof Error ? e.message : String(e));
     } finally {
       setAdding(false);
     }
@@ -324,7 +330,7 @@ export default function ChatsScreen() {
             size="sm"
             value={contactEmail}
             onChangeText={setContactEmail}
-            placeholder="按邮箱添加联系人（对方需已注册）"
+            placeholder="输入邮箱发送好友申请（对方需已注册）"
             autoCapitalize="none"
             keyboardType="email-address"
             style={{ flex: 1 }}
@@ -333,7 +339,7 @@ export default function ChatsScreen() {
             size="sm"
             variant="outline"
             fullWidth={false}
-            label={adding ? '添加中' : '添加'}
+            label={adding ? '发送中' : '发送申请'}
             loading={adding}
             disabled={!contactEmail.trim()}
             onPress={() => void addContact()}

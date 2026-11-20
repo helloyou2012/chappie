@@ -10,6 +10,7 @@
 | [system-design.md](system-design.md)   | **目标态架构**：领域模型、协议、数据模型、运行时、安全、演进     | 当前完成度（见 status）           |
 | [design-essence.md](design-essence.md) | **设计纪律**：信任、审批、执行恢复、上下文、群聊、记忆、反模式   | 具体代码位置（见 implementation） |
 | [client-cloud.md](client-cloud.md)     | **端云一体**：命令/事件/能力契约、离线、多端、推送、安全         | 功能清单（见 status）             |
+| [reception.md](reception.md)           | **接待权**：权威/策略、作用域、切换协议、接口与安全底线          | 当前完成度（见 status）           |
 | [ui-guidelines.md](ui-guidelines.md)   | **UI 规范**：色彩/排版/间距/组件规格，Web 与移动端设计系统       | 业务功能                          |
 | [implementation.md](implementation.md) | **实现要点**：代码地图、契约方案、核心/ai/客户端关键机制         | 目标态设计与路线图                |
 | [status.md](status.md)                 | **唯一事实来源**：能力矩阵、实现位置、已知限制、路线图、检查清单 | 设计原理                          |

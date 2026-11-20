@@ -14,7 +14,7 @@ import type { AvatarMode } from '@chappie/contract';
 import { and, eq } from 'drizzle-orm';
 import { dayjs } from './common/datetime';
 import { db } from './common/db';
-import { agentTask, avatar as avatarTable, member } from './db/schema';
+import { agentTask, avatar as avatarTable, conversationReception, member } from './db/schema';
 
 export type TurnPhase = 'run' | 'approval_resume';
 
@@ -32,11 +32,15 @@ export interface TurnSnapshot {
   aiModeUntil: string | Date | null;
   memberFound: boolean;
   taskStatus: string | null;
+  receptionState: string | null;
+  receptionVersion: number | null;
+  handoffUntil: string | Date | null;
 }
 
 export interface TurnEvaluationInput extends TurnSnapshot {
   ownerId: string;
   expectedMode: AvatarMode;
+  expectedAuthorityVersion: number | null;
   phase: TurnPhase;
 }
 
@@ -80,6 +84,21 @@ export function evaluateTurn(input: TurnEvaluationInput, now = dayjs()): TurnEva
     return { allowed: false, reason: '会话成员关系缺失' };
   }
 
+  // 接待权版本围栏：接管/交还/时段切换后，旧回合立即失效。
+  if (
+    input.expectedAuthorityVersion &&
+    input.receptionVersion !== null &&
+    input.expectedAuthorityVersion !== input.receptionVersion
+  ) {
+    return { allowed: false, reason: '接待授权版本已变化' };
+  }
+  if (input.handoffUntil && dayjs(input.handoffUntil).isAfter(now)) {
+    return { allowed: false, reason: '正在交接窗口内' };
+  }
+  if (input.receptionState && input.receptionState !== 'avatar' && input.expectedMode === 'auto') {
+    return { allowed: false, reason: '当前由真人接待' };
+  }
+
   const tempExpired = Boolean(input.aiModeUntil && dayjs(input.aiModeUntil).isBefore(now));
   // 临时的「静默档」到期后应回落到策略兜底，不再视为用户当前选择
   if (input.aiMode === 'off' && !tempExpired) {
@@ -99,6 +118,7 @@ export async function assertTurnAllowed(params: {
   ownerId: string;
   convId: string;
   expectedMode: AvatarMode;
+  expectedAuthorityVersion?: number | null;
   phase: TurnPhase;
 }): Promise<void> {
   let snapshot: TurnSnapshot;
@@ -118,6 +138,20 @@ export async function assertTurnAllowed(params: {
       .from(agentTask)
       .where(eq(agentTask.id, params.taskId))
       .limit(1);
+    const receptionRows = await db
+      .select({
+        state: conversationReception.state,
+        version: conversationReception.version,
+        handoffUntil: conversationReception.handoffUntil,
+      })
+      .from(conversationReception)
+      .where(
+        and(
+          eq(conversationReception.convId, params.convId),
+          eq(conversationReception.ownerId, params.ownerId),
+        ),
+      )
+      .limit(1);
     snapshot = {
       avatarStatus: avatarRows[0]?.status ?? null,
       avatarOwnerId: avatarRows[0]?.ownerId ?? null,
@@ -125,6 +159,9 @@ export async function assertTurnAllowed(params: {
       aiModeUntil: memberRows[0]?.aiModeUntil ?? null,
       memberFound: memberRows.length > 0,
       taskStatus: taskRows[0]?.status ?? null,
+      receptionState: receptionRows[0]?.state ?? null,
+      receptionVersion: receptionRows[0]?.version ?? null,
+      handoffUntil: receptionRows[0]?.handoffUntil ?? null,
     };
   } catch (e) {
     throw new TurnRevokedError(`无法确认回合权限：${String(e).slice(0, 120)}`);
@@ -134,6 +171,7 @@ export async function assertTurnAllowed(params: {
     ...snapshot,
     ownerId: params.ownerId,
     expectedMode: params.expectedMode,
+    expectedAuthorityVersion: params.expectedAuthorityVersion ?? null,
     phase: params.phase,
   });
   if (!verdict.allowed) throw new TurnRevokedError(verdict.reason);

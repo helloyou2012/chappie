@@ -381,3 +381,119 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* react-day-picker：对齐 Chappie 的密度与品牌色 */
+.rdp-root.rdp-chappie {
+  --rdp-accent-color: var(--brand);
+  --rdp-accent-background-color: var(--brand-soft);
+  --rdp-today-color: var(--brand);
+  --rdp-day-height: 34px;
+  --rdp-day-width: 34px;
+  --rdp-day_button-height: 32px;
+  --rdp-day_button-width: 32px;
+  --rdp-nav_button-height: 28px;
+  --rdp-nav_button-width: 28px;
+  --rdp-nav-height: 34px;
+  --rdp-weekday-padding: 2px 0;
+  --rdp-months-gap: 1rem;
+  font-size: 12px;
+  color: var(--ink-primary);
+}
+
+.rdp-root.rdp-chappie .rdp-caption_label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rdp-root.rdp-chappie .rdp-weekday {
+  color: var(--ink-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.rdp-root.rdp-chappie .rdp-day_button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.rdp-root.rdp-chappie .rdp-selected {
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.rdp-root.rdp-chappie .rdp-selected .rdp-day_button {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.rdp-root.rdp-chappie .rdp-selected .rdp-day_button:hover {
+  background: var(--brand-strong);
+}
+
+.rdp-root.rdp-chappie .rdp-dropdown_root {
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.rdp-root.rdp-chappie .rdp-dropdown_root:hover {
+  background: var(--surface-hover);
+}
+
+.rdp-root.rdp-chappie .rdp-month_caption {
+  font-size: 13px;
+}
+
+.rdp-root.rdp-chappie .rdp-button_next,
+.rdp-root.rdp-chappie .rdp-button_previous {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+
+.rdp-root.rdp-chappie .rdp-button_next:hover,
+.rdp-root.rdp-chappie .rdp-button_previous:hover {
+  background: var(--surface-hover);
+}
+
+.rdp-root.rdp-chappie .rdp-nav .rdp-chevron {
+  width: 14px;
+  height: 14px;
+  fill: var(--ink-tertiary);
+}
+
+.rdp-root.rdp-chappie .rdp-button_next:hover .rdp-chevron,
+.rdp-root.rdp-chappie .rdp-button_previous:hover .rdp-chevron {
+  fill: var(--brand);
+}
+
+.rdp-root.rdp-chappie .rdp-dropdown_root .rdp-chevron {
+  width: 12px;
+  height: 12px;
+  fill: var(--ink-tertiary);
+}
+
+.rdp-root.rdp-chappie .rdp-dropdown_root {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 年月下拉：统一为胶囊悬停态，去掉浏览器默认蓝色 focus 方框 */
+.rdp-root.rdp-chappie .rdp-dropdown:focus-visible ~ .rdp-caption_label,
+.rdp-root.rdp-chappie .rdp-caption_label:focus-visible {
+  outline: none;
+}
+
+.rdp-root.rdp-chappie .rdp-dropdown_root:focus-within {
+  background: var(--surface-hover);
+  border-radius: 6px;
+}
+
+.rdp-root.rdp-chappie .rdp-dropdown_root:focus-within .rdp-caption_label {
+  outline: none;
+}
+
+.rdp-root.rdp-chappie .rdp-dropdown:focus,
+.rdp-root.rdp-chappie .rdp-dropdown:focus-visible {
+  outline: none;
+}

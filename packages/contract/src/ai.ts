@@ -3,7 +3,7 @@
  * 对应设计方案 §4 档位与策略引擎、§6 数据模型、§8 能力体系、§9 记忆。
  */
 import { z } from 'zod';
-import { AvatarMode, RiskLevel } from './identity';
+import { AvatarMode, ReceptionStrategy, RiskLevel } from './identity';
 
 // ---------------------------------------------------------------------------
 // 策略 —— 设计方案 §4.2（规则 + 作用域，优先级：会话 > 联系人 > 日程 > 全局）
@@ -29,6 +29,8 @@ export type ScheduleWindow = z.infer<typeof ScheduleWindow>;
 
 export const PolicyRule = z.object({
   mode: AvatarMode,
+  /** 可选接待策略；缺省 = 由档位映射（manual→summon、draft→assist、auto→full、off→off） */
+  strategy: ReceptionStrategy.nullable().optional(),
   schedule: z.array(ScheduleWindow).default([]),
   allowCapabilities: z.array(z.string()).nullable().default(null),
   denyTopics: z.array(z.string()).default([]),
@@ -282,6 +284,10 @@ export const CalendarItem = z.object({
   date: z.string().nullable().default(null),
   /** 时间 HH:mm；旧数据可能是自由文本（如 "tomorrow 14:00"） */
   time: z.string(),
+  /** pending = 待批准；confirmed = 已确认；cancelled = 已取消 */
+  status: z.enum(['pending', 'confirmed', 'cancelled']).default('confirmed'),
+  /** 相关人（姓名/备注名，自由文本） */
+  attendees: z.array(z.string()).default([]),
 });
 export type CalendarItem = z.infer<typeof CalendarItem>;
 

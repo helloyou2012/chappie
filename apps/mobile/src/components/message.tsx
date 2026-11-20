@@ -16,7 +16,9 @@ export type CardAction =
   | 'approve'
   | 'modify_approve'
   | 'reject'
-  | 'cancel';
+  | 'cancel'
+  | 'grant_human'
+  | 'decline_human';
 
 export function MessageBubble({
   message,
@@ -586,6 +588,76 @@ function CardView({
             {card.summary}
           </Text>
         ) : null}
+      </Card>
+    );
+  }
+
+  if (card.kind === 'reception_digest') {
+    return (
+      <Card padding={12} style={{ width: 280 }}>
+        {header(
+          <Icon name="history-line" size={16} color={t.primary} />,
+          '分身接待摘要',
+          <Badge label="交接" tone="ai" />,
+        )}
+        <View style={{ flexDirection: 'row', gap: 4, marginBottom: 6 }}>
+          {[
+            ['收到', card.stats.received],
+            ['回复', card.stats.replied],
+            ['草稿', card.stats.drafts],
+            ['静默', card.stats.silent],
+            ['转交', card.stats.escalated],
+          ].map(([label, value]) => (
+            <View
+              key={String(label)}
+              style={{
+                flex: 1,
+                alignItems: 'center',
+                backgroundColor: t.surfaceRaised,
+                borderRadius: 6,
+                paddingVertical: 4,
+              }}
+            >
+              <Text variant="body" style={{ fontWeight: '600' }}>
+                {value}
+              </Text>
+              <Text variant="micro" tone="muted">
+                {label}
+              </Text>
+            </View>
+          ))}
+        </View>
+        <Text variant="bodySm" style={{ lineHeight: 19 }}>
+          {card.summary}
+        </Text>
+        {card.pending.length > 0 ? (
+          <Text variant="micro" tone="warning" style={{ marginTop: 6 }}>
+            待确认：{card.pending.map((p) => p.title).join('、')}
+          </Text>
+        ) : null}
+      </Card>
+    );
+  }
+
+  if (card.kind === 'human_request') {
+    return (
+      <Card padding={12} tone="warning" style={{ width: 280 }}>
+        {header(
+          <Icon name="user-line" size={16} color={t.warning} />,
+          '对方请求真人接待',
+          <Badge label="待处理" tone="warning" />,
+        )}
+        <Text variant="bodySm" style={{ lineHeight: 19 }}>
+          {card.requesterName} 希望与你本人沟通。
+          {card.reason ? `\n${card.reason}` : ''}
+        </Text>
+        {done ? (
+          <Text variant="micro" tone="success" style={{ marginTop: 8 }}>
+            {done === 'grant_human' ? '已接管该会话' : '已保持分身接待'}
+          </Text>
+        ) : (
+          actions(act('接管并回复', 'grant_human', true), act('保持分身接待', 'decline_human'))
+        )}
       </Card>
     );
   }

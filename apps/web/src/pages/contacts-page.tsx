@@ -3,10 +3,12 @@ import {
   api,
   type ContactView,
   type ConversationView,
+  type FriendRequestView,
   groupByInitial,
   MODE_DESCRIPTIONS,
   MODE_LABELS,
   type Policy,
+  useChatStore,
 } from '@chappie/shared';
 import { UserPlusIcon, UsersIcon } from '@heroicons/react/24/outline';
 import {
@@ -34,6 +36,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 
@@ -50,7 +53,10 @@ function contactPolicy(policies: Policy[], peerId: string): Policy | undefined {
 
 export function ContactsPage() {
   const navigate = useNavigate();
+  const friendRequestVersion = useChatStore((s) => s.friendRequestVersion);
   const [contacts, setContacts] = useState<ContactView[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<FriendRequestView[]>([]);
+  const [outgoingRequests, setOutgoingRequests] = useState<FriendRequestView[]>([]);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [groups, setGroups] = useState<ConversationView[]>([]);
   const [groupsOpen, setGroupsOpen] = useState(false);
@@ -62,6 +68,9 @@ export function ContactsPage() {
 
   const [aliasTarget, setAliasTarget] = useState<ContactView | null>(null);
   const [aliasDraft, setAliasDraft] = useState('');
+  const [tagsDraft, setTagsDraft] = useState('');
+  const [alwaysNotify, setAlwaysNotify] = useState(false);
+  const [forceHuman, setForceHuman] = useState(false);
   const [savingAlias, setSavingAlias] = useState(false);
 
   const [modeTarget, setModeTarget] = useState<ContactView | null>(null);
@@ -73,12 +82,15 @@ export function ContactsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [contactRes, policyRes, convRes] = await Promise.all([
+      const [contactRes, policyRes, convRes, requestRes] = await Promise.all([
         api.listContacts(),
         adminApi.listPolicies(),
         api.listConversations(),
+        api.listFriendRequests(),
       ]);
       setContacts(contactRes.contacts);
+      setIncomingRequests(requestRes.incoming);
+      setOutgoingRequests(requestRes.outgoing);
       setPolicies(policyRes.policies);
       setGroups(
         convRes.views.filter(
@@ -95,6 +107,10 @@ export function ContactsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (friendRequestVersion > 0) void load();
+  }, [friendRequestVersion, load]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -114,22 +130,67 @@ export function ContactsPage() {
     if (!value) return;
     setAdding(true);
     try {
-      const res = await api.addContact({ email: value });
-      setContacts((prev) =>
-        prev.some((c) => c.user.id === res.contact.user.id) ? prev : [...prev, res.contact],
-      );
+      const res = await api.sendFriendRequest({ email: value });
       setEmail('');
-      toast.success('已添加联系人', res.contact.user.name);
+      if (res.request.status === 'accepted') {
+        toast.success('已互为联系人', res.request.toUser.name);
+        await load();
+      } else {
+        toast.success('好友申请已发送', `等待 ${res.request.toUser.name} 确认`);
+        setOutgoingRequests((prev) => [res.request, ...prev]);
+      }
     } catch (e) {
-      toast.error('添加失败', e instanceof Error ? e.message : String(e));
+      toast.error('发送失败', e instanceof Error ? e.message : String(e));
     } finally {
       setAdding(false);
+    }
+  };
+
+  const acceptRequest = async (r: FriendRequestView) => {
+    setBusyId(r.id);
+    try {
+      await api.acceptFriendRequest(r.id);
+      toast.success('已添加好友', r.fromUser.name);
+      await load();
+    } catch (e) {
+      toast.error('接受失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const rejectRequest = async (r: FriendRequestView) => {
+    setBusyId(r.id);
+    try {
+      await api.rejectFriendRequest(r.id);
+      setIncomingRequests((prev) => prev.filter((x) => x.id !== r.id));
+      toast.success('已拒绝该申请');
+    } catch (e) {
+      toast.error('操作失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const cancelRequest = async (r: FriendRequestView) => {
+    setBusyId(r.id);
+    try {
+      await api.cancelFriendRequest(r.id);
+      setOutgoingRequests((prev) => prev.filter((x) => x.id !== r.id));
+      toast.success('已撤回申请');
+    } catch (e) {
+      toast.error('撤回失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
     }
   };
 
   const openAlias = (c: ContactView) => {
     setAliasTarget(c);
     setAliasDraft(c.alias ?? '');
+    setTagsDraft((c.tags ?? []).join('，'));
+    setAlwaysNotify(c.alwaysNotify);
+    setForceHuman(c.forceHuman);
   };
 
   const saveAlias = async () => {
@@ -138,6 +199,12 @@ export function ContactsPage() {
     try {
       const res = await api.updateContact(aliasTarget.user.id, {
         alias: aliasDraft.trim() || null,
+        tags: tagsDraft
+          .split(/[,，]/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+        alwaysNotify,
+        forceHuman,
       });
       setContacts((prev) => prev.map((c) => (c.user.id === res.contact.user.id ? res.contact : c)));
       setAliasTarget(null);
@@ -173,7 +240,7 @@ export function ContactsPage() {
             denyTopics: [],
             maxRisk: 'L1',
             rateLimitPerHour: 20,
-            escalateWhen: ['confidence<0.7'],
+            escalateWhen: [],
           },
         });
       }
@@ -245,14 +312,14 @@ export function ContactsPage() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void add();
                 }}
-                placeholder="按邮箱添加联系人（对方需已注册）"
+                placeholder="输入对方邮箱发送好友申请（对方需已注册）"
                 type="email"
                 className="pl-8"
               />
             </div>
             <Button onClick={() => void add()} disabled={adding || !email.trim()}>
               {adding ? <RiLoader4Line className="size-3.5 animate-spin" /> : null}
-              添加
+              发送申请
             </Button>
             <div className="relative w-full sm:w-56">
               <RiSearchLine className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-quaternary" />
@@ -265,6 +332,79 @@ export function ContactsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {incomingRequests.length > 0 ? (
+          <Card className="mb-4">
+            <CardContent className="space-y-2 py-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">好友申请</p>
+                <Badge variant="warning">{incomingRequests.length} 条待处理</Badge>
+              </div>
+              {incomingRequests.map((r) => (
+                <div
+                  key={r.id}
+                  className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2"
+                >
+                  <UserAvatar name={r.fromUser.name} className="size-8" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{r.fromUser.name}</p>
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {r.fromUser.email}
+                      {r.message ? ` · ${r.message}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      disabled={busyId === r.id}
+                      onClick={() => void acceptRequest(r)}
+                    >
+                      接受
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busyId === r.id}
+                      onClick={() => void rejectRequest(r)}
+                    >
+                      拒绝
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {outgoingRequests.length > 0 ? (
+          <Card className="mb-4">
+            <CardContent className="space-y-2 py-4">
+              <p className="text-sm font-medium">已发送的申请</p>
+              {outgoingRequests.map((r) => (
+                <div
+                  key={r.id}
+                  className="flex items-center gap-3 rounded-md border px-3 py-2 opacity-80"
+                >
+                  <UserAvatar name={r.toUser.name} className="size-7" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">{r.toUser.name}</p>
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      等待对方确认 · {r.toUser.email}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busyId === r.id}
+                    onClick={() => void cancelRequest(r)}
+                  >
+                    撤回
+                  </Button>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
 
         {/* 常驻入口：群聊 */}
         <Card className="mb-4">
@@ -291,7 +431,7 @@ export function ContactsPage() {
         ) : filtered.length === 0 ? (
           <div className="rounded-md border border-dashed py-16 text-center text-sm text-muted-foreground">
             {contacts.length === 0
-              ? '还没有联系人：在上方按邮箱添加，对方注册后即可发起会话。'
+              ? '还没有联系人：在上方按邮箱发送好友申请，对方接受后即可发起会话。'
               : '没有匹配的联系人。'}
           </div>
         ) : (
@@ -417,6 +557,29 @@ export function ContactsPage() {
             onChange={(e) => setAliasDraft(e.target.value)}
             placeholder="如：大学室友 / 王总"
           />
+          <Input
+            value={tagsDraft}
+            maxLength={200}
+            onChange={(e) => setTagsDraft(e.target.value)}
+            placeholder="分组标签，用逗号分隔：家人，工作，VIP"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            标签用于 contact_group 接待委托与策略匹配。
+          </p>
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div>
+              <p className="text-xs font-medium">重要消息始终提醒</p>
+              <p className="text-[10px] text-muted-foreground">静默/筛选模式下也推送给你</p>
+            </div>
+            <Switch checked={alwaysNotify} onCheckedChange={setAlwaysNotify} />
+          </div>
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div>
+              <p className="text-xs font-medium">强制真人接待</p>
+              <p className="text-[10px] text-muted-foreground">该联系人的消息不会被分身自动回复</p>
+            </div>
+            <Switch checked={forceHuman} onCheckedChange={setForceHuman} />
+          </div>
           <DialogFooter>
             <Button onClick={() => void saveAlias()} disabled={savingAlias}>
               {savingAlias ? <RiLoader4Line className="size-4 animate-spin" /> : null}

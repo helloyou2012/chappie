@@ -187,7 +187,6 @@ function FreezeButton({ avatar, onChange }: { avatar: Avatar; onChange: (a: Avat
 
 function PersonaSection({ avatar, onSaved }: { avatar: Avatar; onSaved: (a: Avatar) => void }) {
   const t = useTheme();
-  const [name, setName] = useState(avatar.name);
   const [persona, setPersona] = useState(avatar.persona);
   const [budget, setBudget] = useState(String(avatar.dailyBudgetUsd));
   const [saving, setSaving] = useState(false);
@@ -199,7 +198,6 @@ function PersonaSection({ avatar, onSaved }: { avatar: Avatar; onSaved: (a: Avat
     setSaving(true);
     try {
       const res = await adminApi.updateAvatar({
-        name: name.trim() || undefined,
         persona: persona.trim(),
         dailyBudgetUsd: Number(budget) > 0 ? Number(budget) : undefined,
       });
@@ -231,7 +229,9 @@ function PersonaSection({ avatar, onSaved }: { avatar: Avatar; onSaved: (a: Avat
           <Card>
             <Text variant="subtitle">分身人设</Text>
             <Field label="名称">
-              <Input value={name} onChangeText={setName} />
+              <Text variant="bodySm" tone="muted">
+                {avatar.name} · 跟随你的用户名
+              </Text>
             </Field>
             <Field label="人设描述">
               <Input
@@ -465,7 +465,7 @@ function PolicyCreateSheet({
             .filter(Boolean),
           maxRisk,
           rateLimitPerHour: Number(rateLimit) || 20,
-          escalateWhen: ['confidence<0.7'],
+          escalateWhen: [],
         },
       });
       onCreated();

@@ -84,6 +84,12 @@ export function findCandidates(
     add(a, 'mention');
   }
 
+  // 显式 @ 是排他寻址：人类消息一旦带 mention，只允许被 @ 的分身响应，
+  // 不再叠加 direct / auto / reply / continuation，避免“@ 了甲，乙的分身也插话”。
+  if (message.senderType === 'human' && message.mentions.length > 0) {
+    return [...byId.values()];
+  }
+
   if (message.senderType === 'human') {
     // 人类消息：其他成员的 human 各自的分身作为候选（direct=1v1 对话方，auto=群内）
     const otherHumanOwners = new Set(

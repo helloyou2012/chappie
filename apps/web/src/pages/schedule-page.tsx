@@ -24,7 +24,11 @@ import {
   startOfWeek,
   viewTitle,
 } from '@/components/schedule/calendar-utils';
-import { CreateEventDialog, EventDetailDialog } from '@/components/schedule/event-dialogs';
+import {
+  CreateEventDialog,
+  EditEventDialog,
+  EventDetailDialog,
+} from '@/components/schedule/event-dialogs';
 import { MiniCalendar } from '@/components/schedule/mini-calendar';
 import { MonthGrid } from '@/components/schedule/month-grid';
 import { TimeGrid } from '@/components/schedule/time-grid';
@@ -83,7 +87,10 @@ export function SchedulePage() {
   const [creating, setCreating] = useState(false);
 
   const [detail, setDetail] = useState<ScheduleEvent | null>(null);
+  const [editingEvent, setEditingEvent] = useState<ScheduleEvent | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [statusChanging, setStatusChanging] = useState(false);
+  const [updating, setUpdating] = useState(false);
 
   const [todoOpen, setTodoOpen] = useState(false);
   const [todoText, setTodoText] = useState('');
@@ -258,6 +265,48 @@ export function SchedulePage() {
       toast.error('删除日程失败', e instanceof Error ? e.message : String(e));
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const changeStatus = async (status: ScheduleEvent['status']) => {
+    if (!detail) return;
+    setStatusChanging(true);
+    try {
+      await adminApi.updateCalendarItem(detail.index, { status });
+      setDetail({ ...detail, status });
+      toast.success(
+        status === 'confirmed'
+          ? '日程已确认'
+          : status === 'cancelled'
+            ? '日程已取消'
+            : '日程已标记为待批准',
+      );
+      await load(true);
+    } catch (e) {
+      toast.error('修改状态失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setStatusChanging(false);
+    }
+  };
+
+  const updateEvent = async (fields: {
+    title: string;
+    date: string | null;
+    time: string;
+    attendees: string[];
+  }) => {
+    if (!editingEvent) return;
+    setUpdating(true);
+    try {
+      await adminApi.updateCalendarItem(editingEvent.index, fields);
+      setEditingEvent(null);
+      setDetail(null);
+      toast.success('日程已更新');
+      await load(true);
+    } catch (e) {
+      toast.error('修改日程失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -537,8 +586,21 @@ export function SchedulePage() {
         event={detail}
         calendarName={calendarName}
         deleting={deleting}
+        statusChanging={statusChanging}
         onClose={() => setDetail(null)}
         onDelete={() => void deleteEvent()}
+        onEdit={() => {
+          setEditingEvent(detail);
+          setDetail(null);
+        }}
+        onStatusChange={(status) => void changeStatus(status)}
+      />
+
+      <EditEventDialog
+        event={editingEvent}
+        updating={updating}
+        onClose={() => setEditingEvent(null)}
+        onSave={(fields) => void updateEvent(fields)}
       />
 
       <Dialog open={todoOpen} onOpenChange={(value) => !value && setTodoOpen(false)}>

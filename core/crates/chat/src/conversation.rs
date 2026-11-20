@@ -24,10 +24,12 @@ struct ConvRow {
     created_at: chrono::DateTime<chrono::Utc>,
     role: String,
     ai_mode: String,
+    ai_mode_source: String,
     ai_mode_until: Option<chrono::DateTime<chrono::Utc>>,
     last_read_seq: i64,
     unread: Option<i64>,
     peer_name: Option<String>,
+    peer_id: Option<String>,
     last_content: Option<serde_json::Value>,
     last_recalled: Option<bool>,
     last_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -38,7 +40,7 @@ struct ConvRow {
 pub async fn list_conversations(db: &Db, user_id: &str) -> AppResult<Vec<ConversationView>> {
     let rows = sqlx::query_as::<_, ConvRow>(
         r#"SELECT c.id, c.type AS conv_type, c.title, c.system_tag, c.last_seq, c.created_at,
-                  m.role, m.ai_mode, m.ai_mode_until, m.last_read_seq,
+                  m.role, m.ai_mode, m.ai_mode_source, m.ai_mode_until, m.last_read_seq,
                   (SELECT count(*) FROM message mm
                      WHERE mm.conv_id = c.id AND mm.seq > m.last_read_seq
                        AND mm.sender_id <> m.principal_id) AS unread,
@@ -47,6 +49,11 @@ pub async fn list_conversations(db: &Db, user_id: &str) -> AppResult<Vec<Convers
                      WHERE m2.conv_id = c.id AND m2.principal_id <> m.principal_id
                        AND p.type = CASE WHEN c.system_tag = 'avatar_self' THEN 'avatar' ELSE 'human' END
                      LIMIT 1) AS peer_name,
+                  (SELECT p.id FROM member m2
+                     JOIN principal p ON p.id = m2.principal_id
+                     WHERE m2.conv_id = c.id AND m2.principal_id <> m.principal_id
+                       AND p.type = CASE WHEN c.system_tag = 'avatar_self' THEN 'avatar' ELSE 'human' END
+                     LIMIT 1) AS peer_id,
                   lm.content AS last_content, lm.recalled AS last_recalled,
                   lm.created_at AS last_at, lm.sender_id AS last_sender_id,
                   sp.name AS last_sender_name
@@ -65,47 +72,56 @@ pub async fn list_conversations(db: &Db, user_id: &str) -> AppResult<Vec<Convers
     .fetch_all(&db.pg)
     .await?;
 
-    let views = rows
-        .into_iter()
-        .map(|r| {
-            let display_title = match (r.system_tag.as_deref(), r.conv_type.as_str()) {
-                (Some("avatar_self"), _) => r.peer_name.clone().unwrap_or_else(|| "我的分身".into()),
-                (_, "group") => r.title.clone().unwrap_or_else(|| "群聊".into()),
-                _ => r.peer_name.clone().unwrap_or_else(|| "对话".into()),
-            };
-            let last_msg_preview = r.last_content.as_ref().and_then(|c| {
-                if r.last_recalled == Some(true) {
-                    return Some("消息已撤回".to_string());
-                }
-                serde_json::from_value::<Content>(c.clone()).ok().map(|c| c.preview())
-            });
-            ConversationView {
-                conversation: crate::model::Conversation {
-                    id: r.id,
-                    conv_type: r.conv_type,
-                    title: r.title,
-                    system_tag: r.system_tag,
-                    last_seq: r.last_seq,
-                    created_at: time::iso(r.created_at),
-                },
-                my_principal_id: user_id.to_string(),
-                my_role: r.role,
-                my_ai_mode: r.ai_mode,
-                my_ai_mode_until: r.ai_mode_until.map(time::iso),
-                my_last_read_seq: r.last_read_seq,
-                unread_count: r
-                    .unread
-                    .unwrap_or(0)
-                    .try_into()
-                    .unwrap_or(0u32) as i64,
-                display_title,
-                last_msg_preview,
-                last_msg_at: r.last_at.map(time::iso),
-                last_msg_sender_id: r.last_sender_id,
-                last_msg_sender_name: r.last_sender_name,
+    let mut views = Vec::with_capacity(rows.len());
+    for r in rows {
+        let display_title = match (r.system_tag.as_deref(), r.conv_type.as_str()) {
+            (Some("avatar_self"), _) => r.peer_name.clone().unwrap_or_else(|| "我的分身".into()),
+            (_, "group") => r.title.clone().unwrap_or_else(|| "群聊".into()),
+            _ => r.peer_name.clone().unwrap_or_else(|| "对话".into()),
+        };
+        let last_msg_preview = r.last_content.as_ref().and_then(|c| {
+            if r.last_recalled == Some(true) {
+                return Some("消息已撤回".to_string());
             }
-        })
-        .collect();
+            serde_json::from_value::<Content>(c.clone())
+                .ok()
+                .map(|c| c.preview())
+        });
+        let my_reception =
+            crate::reception::get_reception(&db.pg, &r.id, user_id).await?;
+        let peer_reception = if r.conv_type == "direct" && r.system_tag.is_none() {
+            match r.peer_id.as_deref() {
+                Some(peer) => Some(crate::reception::get_reception(&db.pg, &r.id, peer).await?),
+                None => None,
+            }
+        } else {
+            None
+        };
+        views.push(ConversationView {
+            conversation: crate::model::Conversation {
+                id: r.id,
+                conv_type: r.conv_type,
+                title: r.title,
+                system_tag: r.system_tag,
+                last_seq: r.last_seq,
+                created_at: time::iso(r.created_at),
+            },
+            my_principal_id: user_id.to_string(),
+            my_role: r.role,
+            my_ai_mode: r.ai_mode,
+            my_ai_mode_source: r.ai_mode_source,
+            my_ai_mode_until: r.ai_mode_until.map(time::iso),
+            my_reception,
+            peer_reception,
+            my_last_read_seq: r.last_read_seq,
+            unread_count: r.unread.unwrap_or(0).try_into().unwrap_or(0u32) as i64,
+            display_title,
+            last_msg_preview,
+            last_msg_at: r.last_at.map(time::iso),
+            last_msg_sender_id: r.last_sender_id,
+            last_msg_sender_name: r.last_sender_name,
+        });
+    }
     Ok(views)
 }
 
@@ -270,19 +286,29 @@ struct ContactRow {
     avatar_url: Option<String>,
     user_created_at: chrono::DateTime<chrono::Utc>,
     alias: Option<String>,
+    tags: Vec<String>,
+    always_notify: bool,
+    force_human: bool,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub struct ContactView {
     pub user: crate::model::User,
     pub alias: Option<String>,
+    pub tags: Vec<String>,
+    pub always_notify: bool,
+    pub force_human: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub async fn list_contacts(db: &Db, user_id: &str) -> AppResult<Vec<ContactView>> {
     let rows = sqlx::query_as::<_, ContactRow>(
         r#"SELECT u.id, u.email, u.name, u.avatar_url, u.created_at AS user_created_at,
-                  c.alias, c.created_at
+                  c.alias,
+                  COALESCE((SELECT array_agg(t.tag ORDER BY t.tag)
+                            FROM contact_tag_member t
+                            WHERE t.user_id = c.user_id AND t.peer_id = c.peer_id), '{}') AS tags,
+                  c.always_notify, c.force_human, c.created_at
            FROM contact c JOIN "user" u ON u.id = c.peer_id
            WHERE c.user_id = $1
            ORDER BY c.created_at ASC"#,
@@ -301,6 +327,9 @@ pub async fn list_contacts(db: &Db, user_id: &str) -> AppResult<Vec<ContactView>
                 created_at: r.user_created_at,
             },
             alias: r.alias,
+            tags: r.tags,
+            always_notify: r.always_notify,
+            force_human: r.force_human,
             created_at: r.created_at,
         })
         .collect())
@@ -335,15 +364,26 @@ pub async fn add_contact(db: &Db, user_id: &str, peer_email: &str) -> AppResult<
     .map(|(a, c)| (a, c));
     let (alias, created_at) = created.ok_or_else(|| AppError::internal_msg("联系人写入后读取失败"))?;
     tracing::info!(user_id, peer_id = %peer.id, "contact added");
-    Ok(ContactView { user: peer, alias, created_at })
+    Ok(ContactView {
+        user: peer,
+        alias,
+        tags: vec![],
+        always_notify: false,
+        force_human: false,
+        created_at,
+    })
 }
 
 /// 设置/清除联系人备注名（空串或 None = 清除）
 pub async fn set_contact_alias(
     db: &Db,
+    events: &EventTx,
     user_id: &str,
     peer_id: &str,
     alias: Option<&str>,
+    tags: Option<Vec<String>>,
+    always_notify: Option<bool>,
+    force_human: Option<bool>,
 ) -> AppResult<ContactView> {
     let normalized = alias.map(str::trim).filter(|a| !a.is_empty());
     if let Some(a) = normalized {
@@ -351,14 +391,31 @@ pub async fn set_contact_alias(
             return Err(AppError::bad("备注名不能超过 40 个字符"));
         }
     }
-    let res = sqlx::query("UPDATE contact SET alias = $3 WHERE user_id = $1 AND peer_id = $2")
-        .bind(user_id)
-        .bind(peer_id)
-        .bind(normalized)
-        .execute(&db.pg)
-        .await?;
+    if let Some(ref tags) = tags {
+        if tags.len() > 20 || tags.iter().any(|t| t.trim().is_empty() || t.chars().count() > 20) {
+            return Err(AppError::bad("标签数量或长度不合法"));
+        }
+    }
+    let res = sqlx::query(
+        "UPDATE contact SET alias = $3,
+           always_notify = COALESCE($4, always_notify),
+           force_human = COALESCE($5, force_human)
+         WHERE user_id = $1 AND peer_id = $2",
+    )
+    .bind(user_id)
+    .bind(peer_id)
+    .bind(normalized)
+    .bind(always_notify)
+    .bind(force_human)
+    .execute(&db.pg)
+    .await?;
     if res.rows_affected() == 0 {
         return Err(AppError::not_found("联系人不存在"));
+    }
+    if let Some(tags) = tags {
+        crate::reception::set_contact_tags(db, events, user_id, peer_id, &tags).await?;
+    } else if always_notify.is_some() || force_human.is_some() {
+        crate::reception::refresh_owner_conversations(db, events, user_id).await?;
     }
     list_contacts(db, user_id)
         .await?
@@ -536,6 +593,97 @@ pub async fn remove_member(
     Ok(())
 }
 
+/// 群主转让：仅群主可操作；目标必须是群内真人成员。
+pub async fn transfer_owner(
+    db: &Db,
+    events: &EventTx,
+    actor_id: &str,
+    conv_id: &str,
+    target_user_id: &str,
+) -> AppResult<()> {
+    let meta = get_conv_meta(&db.pg, conv_id).await?;
+    ensure_group_mutable(&meta)?;
+    let actor_role = member_role(&db.pg, conv_id, actor_id).await?;
+    if actor_role.as_deref() != Some("owner") {
+        return Err(AppError::forbidden("只有群主可以转让群主"));
+    }
+    if target_user_id == actor_id {
+        return Err(AppError::bad("不能转让给自己"));
+    }
+    let target_role = member_role(&db.pg, conv_id, target_user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("目标成员不在群内"))?;
+    if target_role == "owner" {
+        return Err(AppError::bad("目标已经是群主"));
+    }
+    let target_type: Option<(String,)> =
+        sqlx::query_as("SELECT type FROM principal WHERE id = $1")
+            .bind(target_user_id)
+            .fetch_optional(&db.pg)
+            .await?;
+    if target_type.as_ref().map(|(t,)| t.as_str()) != Some("human") {
+        return Err(AppError::bad("只能转让给真人成员"));
+    }
+
+    let mut tx = db.pg.begin().await?;
+    sqlx::query("UPDATE member SET role = 'member' WHERE conv_id = $1 AND principal_id = $2")
+        .bind(conv_id)
+        .bind(actor_id)
+        .execute(&mut *tx)
+        .await?;
+    let res = sqlx::query(
+        "UPDATE member SET role = 'owner' WHERE conv_id = $1 AND principal_id = $2",
+    )
+    .bind(conv_id)
+    .bind(target_user_id)
+    .execute(&mut *tx)
+    .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::not_found("目标成员不在群内"));
+    }
+    tx.commit().await?;
+
+    notify_conversations_changed(db, events, conv_id).await;
+    tracing::info!(conv_id, actor = actor_id, target = target_user_id, "group owner transferred");
+    Ok(())
+}
+
+/// 解散群聊：仅群主可操作；会话、消息、成员与接待投影一并删除。
+pub async fn dissolve_group(
+    db: &Db,
+    events: &EventTx,
+    actor_id: &str,
+    conv_id: &str,
+) -> AppResult<()> {
+    let meta = get_conv_meta(&db.pg, conv_id).await?;
+    ensure_group_mutable(&meta)?;
+    let actor_role = member_role(&db.pg, conv_id, actor_id).await?;
+    if actor_role.as_deref() != Some("owner") {
+        return Err(AppError::forbidden("只有群主可以解散群聊"));
+    }
+    let recipients = crate::message::conversation_recipients(&db.pg, conv_id).await?;
+
+    let mut tx = db.pg.begin().await?;
+    sqlx::query("DELETE FROM delegation WHERE scope_type = 'conversation' AND scope_id = $1")
+        .bind(conv_id)
+        .execute(&mut *tx)
+        .await?;
+    let res = sqlx::query("DELETE FROM conversation WHERE id = $1")
+        .bind(conv_id)
+        .execute(&mut *tx)
+        .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::not_found("群聊不存在"));
+    }
+    tx.commit().await?;
+
+    if !recipients.is_empty() {
+        let _ = events.send(DomainEvent::ConversationsChanged { recipients });
+    }
+    tracing::info!(conv_id, actor = actor_id, "group dissolved");
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // 成员视图
 // ---------------------------------------------------------------------------
@@ -543,7 +691,7 @@ pub async fn remove_member(
 pub async fn get_members(db: &Db, conv_id: &str) -> AppResult<Vec<crate::model::MemberView>> {
     let rows = sqlx::query_as::<_, MemberRow>(
         r#"SELECT m.principal_id, p.type AS principal_type, p.owner_id, p.name,
-                  m.role, m.ai_mode, m.ai_mode_until, m.last_read_seq
+                  m.role, m.ai_mode, m.ai_mode_source, m.ai_mode_until, m.last_read_seq
            FROM member m JOIN principal p ON p.id = m.principal_id
            WHERE m.conv_id = $1
            ORDER BY (p.type = 'human') DESC, m.joined_at ASC"#,
@@ -559,6 +707,11 @@ pub async fn get_members(db: &Db, conv_id: &str) -> AppResult<Vec<crate::model::
         } else {
             false
         };
+        let reception = if r.principal_type == "human" {
+            Some(crate::reception::get_reception(&db.pg, conv_id, &r.principal_id).await?)
+        } else {
+            None
+        };
         views.push(crate::model::MemberView {
             principal_id: r.principal_id,
             principal_type: r.principal_type,
@@ -566,7 +719,9 @@ pub async fn get_members(db: &Db, conv_id: &str) -> AppResult<Vec<crate::model::
             name: r.name,
             role: r.role,
             ai_mode: r.ai_mode,
+            ai_mode_source: r.ai_mode_source,
             ai_mode_until: r.ai_mode_until.map(time::iso),
+            reception,
             last_read_seq: r.last_read_seq,
             online,
         });
@@ -582,6 +737,7 @@ struct MemberRow {
     name: String,
     role: String,
     ai_mode: String,
+    ai_mode_source: String,
     ai_mode_until: Option<chrono::DateTime<chrono::Utc>>,
     last_read_seq: i64,
 }
@@ -593,6 +749,7 @@ struct MemberRow {
 /// 切换我的分身在此会话的档位（支持临时模式）→ outbox policy.changed（Bun 失效缓存）
 pub async fn set_ai_mode(
     db: &Db,
+    events: &EventTx,
     user_id: &str,
     conv_id: &str,
     mode: &str,
@@ -600,36 +757,121 @@ pub async fn set_ai_mode(
 ) -> AppResult<()> {
     crate::message::ensure_member(&db.pg, conv_id, user_id).await?;
     let until = temp_hours.map(|h| time::now() + chrono::Duration::hours(h));
+    let mut tx = db.pg.begin().await?;
     let res = sqlx::query(
-        "UPDATE member SET ai_mode = $3, ai_mode_until = $4
+        "UPDATE member SET ai_mode = $3, ai_mode_source = 'explicit', ai_mode_until = $4
          WHERE conv_id = $1 AND principal_id = $2",
     )
     .bind(conv_id)
     .bind(user_id)
     .bind(mode)
     .bind(until)
-    .execute(&db.pg)
+    .execute(&mut *tx)
     .await?;
     if res.rows_affected() == 0 {
         return Err(AppError::not_found("会话不存在或你不是成员"));
     }
-
-    let mut tx = db.pg.begin().await?;
+    // 会话档位是显式覆盖：清掉旧的会话级委托，避免其继续压过新档位。
+    sqlx::query(
+        "DELETE FROM delegation
+         WHERE owner_id = $1 AND scope_type = 'conversation' AND scope_id = $2",
+    )
+    .bind(user_id)
+    .bind(conv_id)
+    .execute(&mut *tx)
+    .await?;
     let data = json!({ "userId": user_id, "convId": conv_id });
     outbox_insert(&mut tx, "policy.changed", user_id, &data).await?;
     tx.commit().await?;
+
+    let resolved = crate::reception::resolve_and_sync(&db.pg, conv_id, user_id).await?;
+    if resolved.changed {
+        if let Ok(recipients) = crate::message::conversation_recipients(&db.pg, conv_id).await {
+            let _ = events.send(DomainEvent::ReceptionChanged {
+                conv_id: conv_id.to_string(),
+                owner_id: user_id.to_string(),
+                state: resolved.view.state.clone(),
+                strategy: resolved.view.strategy.clone(),
+                version: resolved.view.version,
+                until: resolved.view.until.clone(),
+                reason: Some("档位切换".into()),
+                recipients,
+            });
+        }
+    }
     tracing::info!(conv_id, user_id, mode, ?temp_hours, "ai mode updated");
     Ok(())
 }
 
-/// 一键接管：outbox takeover.requested —— Bun 取消进行中任务并对该话题冷却（设计方案 §4.3）
-pub async fn takeover(db: &Db, user_id: &str, conv_id: &str) -> AppResult<()> {
-    crate::message::ensure_member(&db.pg, conv_id, user_id).await?;
+/// 一键接管：同步写接待权威 + 版本递增 + 交接窗口。
+/// 同时写 legacy `takeover.requested`，让 AI 取消进行中任务并冷却。
+pub async fn takeover(
+    db: &Db,
+    events: &EventTx,
+    user_id: &str,
+    conv_id: &str,
+) -> AppResult<crate::model::ReceptionView> {
+    let view = crate::reception::takeover(db, events, user_id, conv_id).await?;
     let mut tx = db.pg.begin().await?;
     let data = json!({ "userId": user_id, "convId": conv_id });
     outbox_insert(&mut tx, "takeover.requested", conv_id, &data).await?;
     tx.commit().await?;
-    tracing::info!(conv_id, user_id, "takeover requested");
+    tracing::info!(conv_id, user_id, version = view.version, "takeover applied");
+    Ok(view)
+}
+
+/// 交还分身：恢复 avatar 接待，AI 获得最新人类处理上下文。
+pub async fn release(
+    db: &Db,
+    events: &EventTx,
+    user_id: &str,
+    conv_id: &str,
+) -> AppResult<crate::model::ReceptionView> {
+    crate::reception::release(db, events, user_id, conv_id).await
+}
+
+/// 更新分身主体名称（AI 控制台改名后调用）。
+/// 主体名是消息 senderName / 成员栏 / 「我的分身」会话标题的唯一来源；
+/// 改名后通知与该分身有共同会话的真人刷新列表。
+pub async fn update_avatar_name(
+    db: &Db,
+    events: &EventTx,
+    avatar_id: &str,
+    name: &str,
+) -> AppResult<()> {
+    let normalized = name.trim();
+    if normalized.is_empty() {
+        return Err(AppError::bad("分身名称不能为空"));
+    }
+    if normalized.chars().count() > 60 {
+        return Err(AppError::bad("分身名称不能超过 60 个字符"));
+    }
+    let res = sqlx::query(
+        "UPDATE principal SET name = $2 WHERE id = $1 AND type = 'avatar'",
+    )
+    .bind(avatar_id)
+    .bind(normalized)
+    .execute(&db.pg)
+    .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::not_found("分身不存在"));
+    }
+
+    let recipients: Vec<(String,)> = sqlx::query_as(
+        r#"SELECT DISTINCT m2.principal_id
+           FROM member m1
+           JOIN member m2 ON m2.conv_id = m1.conv_id
+           JOIN principal p2 ON p2.id = m2.principal_id
+           WHERE m1.principal_id = $1 AND m2.principal_id <> $1 AND p2.type = 'human'"#,
+    )
+    .bind(avatar_id)
+    .fetch_all(&db.pg)
+    .await?;
+    if !recipients.is_empty() {
+        let _ = events.send(DomainEvent::ConversationsChanged {
+            recipients: recipients.into_iter().map(|r| r.0).collect(),
+        });
+    }
     Ok(())
 }
 

@@ -5,9 +5,9 @@
 import { z } from 'zod';
 import { FeedbackType } from './ai';
 import { CardActionRequest } from './cards';
-import { ConversationView, MemberView, Message } from './chat';
+import { ConversationView, MemberView, Message, ReceptionView } from './chat';
 import { DeviceCapabilities, DevicePlatform, DeviceView } from './device';
-import { AvatarMode, User } from './identity';
+import { AvatarMode, ReceptionState, ReceptionStrategy, User } from './identity';
 
 // ---------------------------------------------------------------------------
 // 认证（邮箱 + 验证码）
@@ -73,6 +73,12 @@ export const ContactView = z.object({
   user: User,
   /** 备注名，可选 */
   alias: z.string().nullable().default(null),
+  /** 联系人分组标签，用于 contact_group 策略与接待范围 */
+  tags: z.array(z.string()).default([]),
+  /** 紧急穿透：无论静默/筛选都提醒主人 */
+  alwaysNotify: z.boolean().default(false),
+  /** 紧急穿透：命中该联系人时强制真人接待 */
+  forceHuman: z.boolean().default(false),
   createdAt: z.string(),
 });
 
@@ -83,11 +89,51 @@ export const AddContactRequest = z.object({ email: z.string().email() });
 export const AddContactResponse = z.object({ contact: ContactView });
 export const RemoveContactResponse = z.object({ ok: z.boolean() });
 
-/** 更新联系人备注名；传空串或 null 清除 */
+/** 更新联系人备注名；传空串或 null 清除。tags 传入时整体替换。 */
 export const UpdateContactRequest = z.object({
-  alias: z.string().max(40).nullable(),
+  alias: z.string().max(40).nullable().optional(),
+  tags: z.array(z.string().min(1).max(20)).max(20).optional(),
+  alwaysNotify: z.boolean().optional(),
+  forceHuman: z.boolean().optional(),
 });
 export const UpdateContactResponse = z.object({ contact: ContactView });
+
+// ---------------------------------------------------------------------------
+// 好友申请
+// ---------------------------------------------------------------------------
+
+export const FriendRequestStatus = z.enum(['pending', 'accepted', 'rejected', 'cancelled']);
+export type FriendRequestStatus = z.infer<typeof FriendRequestStatus>;
+
+export const FriendRequestView = z.object({
+  id: z.string(),
+  fromUser: User,
+  toUser: User,
+  /** 相对当前登录用户的方向 */
+  direction: z.enum(['incoming', 'outgoing']),
+  message: z.string().nullable().default(null),
+  status: FriendRequestStatus,
+  createdAt: z.string(),
+  resolvedAt: z.string().nullable().default(null),
+});
+export type FriendRequestView = z.infer<typeof FriendRequestView>;
+
+export const SendFriendRequestRequest = z.object({
+  email: z.string().email(),
+  message: z.string().max(200).optional(),
+});
+export type SendFriendRequestRequest = z.infer<typeof SendFriendRequestRequest>;
+export const SendFriendRequestResponse = z.object({ request: FriendRequestView });
+export type SendFriendRequestResponse = z.infer<typeof SendFriendRequestResponse>;
+
+export const ListFriendRequestsResponse = z.object({
+  incoming: z.array(FriendRequestView).default([]),
+  outgoing: z.array(FriendRequestView).default([]),
+});
+export type ListFriendRequestsResponse = z.infer<typeof ListFriendRequestsResponse>;
+
+export const FriendRequestActionResponse = z.object({ request: FriendRequestView });
+export type FriendRequestActionResponse = z.infer<typeof FriendRequestActionResponse>;
 
 // ---------------------------------------------------------------------------
 // 会话成员管理（群聊）
@@ -99,6 +145,18 @@ export const AddMembersRequest = z.object({
 export const AddMembersResponse = z.object({ members: z.array(MemberView) });
 export const RemoveMemberResponse = z.object({ ok: z.boolean() });
 
+/** 群主转让：目标必须是群内的真人成员 */
+export const TransferOwnerRequest = z.object({
+  targetUserId: z.string(),
+});
+export const TransferOwnerResponse = z.object({
+  ok: z.boolean(),
+  members: z.array(MemberView).default([]),
+});
+
+/** 解散群聊：仅群主可用，会话与消息一并删除 */
+export const DissolveGroupResponse = z.object({ ok: z.boolean() });
+
 /** 会话设置：切换我的分身在此会话的档位（支持临时模式） */
 export const UpdateConversationSettingsRequest = z.object({
   aiMode: AvatarMode.optional(),
@@ -106,7 +164,80 @@ export const UpdateConversationSettingsRequest = z.object({
   tempHours: z.number().int().min(1).max(72).optional(),
 });
 
-export const TakeoverResponse = z.object({ ok: z.boolean() });
+export const TakeoverResponse = z.object({ ok: z.boolean(), reception: ReceptionView.optional() });
+
+// ---------------------------------------------------------------------------
+// 接待权 / 委托
+// ---------------------------------------------------------------------------
+
+export const GetReceptionResponse = z.object({
+  my: ReceptionView,
+  peer: ReceptionView.nullable().default(null),
+});
+
+export const UpdateReceptionRequest = z.object({
+  state: ReceptionState.optional(),
+  strategy: ReceptionStrategy.optional(),
+  /** 临时接待到期时间（ISO）；null 表示取消期限 */
+  until: z.string().nullable().optional(),
+  reason: z.string().optional(),
+});
+export const UpdateReceptionResponse = z.object({ reception: ReceptionView });
+
+export const RequestHumanRequest = z.object({
+  reason: z.string().max(200).optional(),
+});
+export const RequestHumanResponse = z.object({
+  ok: z.boolean(),
+  requestId: z.string(),
+  expiresAt: z.string().nullable().default(null),
+});
+
+export const DelegationScopeType = z.enum(['global', 'contact_group', 'contact', 'conversation']);
+
+export const DelegationScheduleWindow = z.object({
+  days: z.array(z.number().int().min(1).max(7)).default([]),
+  start: z.string(),
+  end: z.string(),
+});
+
+export const DelegationView = z.object({
+  id: z.string(),
+  ownerId: z.string(),
+  avatarId: z.string(),
+  scopeType: DelegationScopeType,
+  scopeId: z.string().nullable().default(null),
+  state: ReceptionState,
+  strategy: ReceptionStrategy,
+  schedule: z.array(DelegationScheduleWindow).default([]),
+  timezone: z.string().default('Asia/Shanghai'),
+  expiresAt: z.string().nullable().default(null),
+  revokedAt: z.string().nullable().default(null),
+  version: z.number().int(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type DelegationView = z.infer<typeof DelegationView>;
+
+export const ListDelegationsResponse = z.object({ delegations: z.array(DelegationView) });
+
+export const UpsertDelegationRequest = z.object({
+  scopeType: DelegationScopeType,
+  scopeId: z.string().nullable().optional(),
+  state: ReceptionState,
+  strategy: ReceptionStrategy,
+  schedule: z.array(DelegationScheduleWindow).default([]),
+  timezone: z.string().default('Asia/Shanghai'),
+  expiresAt: z.string().nullable().optional(),
+});
+export const UpsertDelegationResponse = z.object({ delegation: DelegationView });
+
+export const ResolveHumanRequestRequest = z.object({
+  approve: z.boolean(),
+});
+export const ResolveHumanRequestResponse = z.object({ ok: z.boolean() });
+
+export const GlobalReceptionResponse = GetReceptionResponse;
 
 // ---------------------------------------------------------------------------
 // 卡片 / 反馈 / 设备
@@ -178,8 +309,24 @@ export type UpdateContactResponse = z.infer<typeof UpdateContactResponse>;
 export type AddMembersRequest = z.infer<typeof AddMembersRequest>;
 export type AddMembersResponse = z.infer<typeof AddMembersResponse>;
 export type RemoveMemberResponse = z.infer<typeof RemoveMemberResponse>;
+export type TransferOwnerRequest = z.infer<typeof TransferOwnerRequest>;
+export type TransferOwnerResponse = z.infer<typeof TransferOwnerResponse>;
+export type DissolveGroupResponse = z.infer<typeof DissolveGroupResponse>;
 export type UpdateConversationSettingsRequest = z.infer<typeof UpdateConversationSettingsRequest>;
 export type TakeoverResponse = z.infer<typeof TakeoverResponse>;
+export type GetReceptionResponse = z.infer<typeof GetReceptionResponse>;
+export type UpdateReceptionRequest = z.infer<typeof UpdateReceptionRequest>;
+export type UpdateReceptionResponse = z.infer<typeof UpdateReceptionResponse>;
+export type RequestHumanRequest = z.infer<typeof RequestHumanRequest>;
+export type RequestHumanResponse = z.infer<typeof RequestHumanResponse>;
+export type DelegationScopeType = z.infer<typeof DelegationScopeType>;
+export type DelegationScheduleWindow = z.infer<typeof DelegationScheduleWindow>;
+export type ListDelegationsResponse = z.infer<typeof ListDelegationsResponse>;
+export type UpsertDelegationRequest = z.infer<typeof UpsertDelegationRequest>;
+export type UpsertDelegationResponse = z.infer<typeof UpsertDelegationResponse>;
+export type ResolveHumanRequestRequest = z.infer<typeof ResolveHumanRequestRequest>;
+export type ResolveHumanRequestResponse = z.infer<typeof ResolveHumanRequestResponse>;
+export type GlobalReceptionResponse = z.infer<typeof GlobalReceptionResponse>;
 export type FeedbackRequest = z.infer<typeof FeedbackRequest>;
 export type RegisterDeviceRequest = z.infer<typeof RegisterDeviceRequest>;
 export type RegisterDeviceResponse = z.infer<typeof RegisterDeviceResponse>;

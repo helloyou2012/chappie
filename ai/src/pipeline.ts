@@ -12,6 +12,7 @@ import { runAgent } from './agent-runtime';
 import { type Classification, classify } from './classifier';
 import { config } from './common/config';
 import { db } from './common/db';
+import { internal } from './common/internal';
 import { log, newId, newTraceId } from './common/log';
 import { aiKeys, redisSemaphoreAcquire, redisSemaphoreRelease, redisSetNx } from './common/redis';
 import { LEASE_TTL_S, LeaseLostError, RUNTIME_ID, withLease } from './common/task-lease';
@@ -339,6 +340,63 @@ export async function driveTask(
     }
   }
 
+  // 筛选策略：不自动代答，只把重要消息推给主人并记录。
+  if (policy.strategy === 'screen') {
+    const important =
+      classification.importance === 'high' ||
+      classification.importance === 'critical' ||
+      mentioned ||
+      explicitReply ||
+      continuation ||
+      policy.alwaysNotify;
+    if (important) {
+      const peerName =
+        trigger.senderType === 'human'
+          ? ((
+              await db
+                .select({ name: user.name })
+                .from(user)
+                .where(eq(user.id, trigger.senderId))
+                .limit(1)
+            )[0]?.name ?? '对方')
+          : '对方';
+      await internal
+        .pushCard(task.ownerId, {
+          kind: 'handover',
+          taskId: task.taskId,
+          summary: `筛选模式：${peerName} 的消息可能需要你处理。\n「${
+            trigger.content.type === 'text' ? trigger.content.text.slice(0, 200) : ''
+          }」`,
+          reason: `importance=${classification.importance}`,
+        })
+        .catch(() => undefined);
+    }
+    await skip(important ? '筛选：重要消息已提醒主人' : '筛选：重要度较低，已记录', {
+      screen: true,
+      importance: classification.importance,
+    });
+    return;
+  }
+
+  // 静默值守 + 紧急穿透：不回复，但重要消息仍提醒主人。
+  if (
+    policy.strategy === 'silent' &&
+    (policy.alwaysNotify ||
+      classification.importance === 'high' ||
+      classification.importance === 'critical')
+  ) {
+    await internal
+      .pushCard(task.ownerId, {
+        kind: 'handover',
+        taskId: task.taskId,
+        summary: `静默值守期间收到重要消息（${trigger.senderType === 'human' ? '真人' : '成员'}）：\n「${
+          trigger.content.type === 'text' ? trigger.content.text.slice(0, 200) : ''
+        }」`,
+        reason: policy.alwaysNotify ? '紧急穿透联系人' : `importance=${classification.importance}`,
+      })
+      .catch(() => undefined);
+  }
+
   // 分身并发限制（每分身 2 个并发任务）
   const semKey = aiKeys.semAvatar(task.avatarId);
   if (!(await redisSemaphoreAcquire(semKey, 2, 180))) {
@@ -369,6 +427,9 @@ export async function driveTask(
         convId: task.triggerConvId,
         trigger,
         mode: policy.mode,
+        strategy: policy.strategy,
+        authorityVersion: policy.authorityVersion,
+        via: task.triggerKind,
         allowCapabilities: policy.allowCapabilities,
         maxRisk: policy.maxRisk,
         classification,

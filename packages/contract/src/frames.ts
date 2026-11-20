@@ -109,6 +109,19 @@ export const ServerFrame = z.discriminatedUnion('type', [
   }),
   /** 会话信息刷新（成员/档位变化等，客户端据此重新拉取） */
   z.object({ type: z.literal('conversations_changed') }),
+  /** 好友申请变化（收到 / 接受 / 拒绝 / 取消） */
+  z.object({ type: z.literal('friend_requests_changed') }),
+  /** 接待态变化（真人/分身切换、版本递增、交接窗口） */
+  z.object({
+    type: z.literal('reception_changed'),
+    convId: z.string(),
+    ownerId: z.string(),
+    state: z.string(),
+    strategy: z.string(),
+    version: z.number().int(),
+    until: z.string().nullable().default(null),
+    reason: z.string().nullable().default(null),
+  }),
   z.object({ type: z.literal('error'), code: z.string().default('error'), message: z.string() }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;

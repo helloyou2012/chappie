@@ -1,5 +1,12 @@
 import { contentText } from '@chappie/contract';
-import { api, formatTime, type Message, useAuthStore, useChatStore } from '@chappie/shared';
+import {
+  api,
+  formatTime,
+  type Message,
+  STRATEGY_LABELS,
+  useAuthStore,
+  useChatStore,
+} from '@chappie/shared';
 import { ChatBubbleLeftRightIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import { RiInformationLine, RiLoader4Line } from '@remixicon/react';
 import { useEffect, useRef, useState } from 'react';
@@ -160,9 +167,18 @@ export function ChatPage() {
     }
   };
 
+  const peerReception = view.peerReception;
   const subtitle = isSelfConv
     ? '这是你和分身的控制通道：直接下达指令即可'
-    : `${members.filter((m) => m.principalType === 'human').length} 位成员 · ${members.filter((m) => m.principalType === 'avatar').length} 个分身`;
+    : isGroup
+      ? `${members.filter((m) => m.principalType === 'human').length} 位成员 · ${
+          members.filter((m) => m.principalType === 'avatar').length
+        } 个分身`
+      : peerReception?.state === 'avatar'
+        ? `对方由 AI 分身接待 · ${
+            STRATEGY_LABELS[peerReception.strategy] ?? peerReception.strategy
+          }`
+        : '对方当前为真人接待';
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -201,11 +217,13 @@ export function ChatPage() {
             </div>
           </div>
           <div data-tauri-drag-region className="flex shrink-0 items-center gap-2">
-            <ModeSwitch
-              convId={view.conversation.id}
-              mode={view.myAiMode}
-              until={view.myAiModeUntil}
-            />
+            {isSelfConv ? (
+              <Badge variant="ai" className="pointer-events-none">
+                控制通道
+              </Badge>
+            ) : (
+              <ModeSwitch convId={view.conversation.id} reception={view.myReception} />
+            )}
           </div>
         </header>
 
@@ -277,10 +295,12 @@ export function ChatPage() {
       <MemberPanel
         members={members}
         aiMode={view.myAiMode}
+        reception={view.myReception}
         onTakeover={() => void takeover()}
         busy={takeoverBusy}
         convId={convId}
         isGroup={isGroup && !isSelfConv}
+        isSelfConv={isSelfConv}
         myRole={view.myRole}
         onLeft={() => {
           void useChatStore.getState().loadConversations();

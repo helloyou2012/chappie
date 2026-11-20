@@ -32,7 +32,7 @@ export function AppShell() {
   return (
     <div className="flex h-full overflow-hidden bg-canvas py-1 pr-1">
       <IconRail />
-      <section className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-line bg-view shadow-card">
+      <section className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-line bg-view">
         {showConversations ? <Sidebar /> : null}
         <main className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <Outlet />

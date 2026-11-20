@@ -100,8 +100,21 @@ export const CreateCalendarItemRequest = z.object({
   date: z.string().nullable().optional(),
   /** HH:mm */
   time: z.string().min(1).max(20),
+  /** 手动创建默认已确认；分身创建时由确认流程设为待批准 */
+  status: z.enum(['pending', 'confirmed', 'cancelled']).optional(),
+  /** 相关人 */
+  attendees: z.array(z.string().min(1).max(40)).max(20).optional(),
 });
 export const CreateCalendarItemResponse = z.object({ ok: z.boolean() });
+
+export const UpdateCalendarItemRequest = z.object({
+  title: z.string().min(1).max(100).optional(),
+  date: z.string().nullable().optional(),
+  time: z.string().min(1).max(20).optional(),
+  status: z.enum(['pending', 'confirmed', 'cancelled']).optional(),
+  attendees: z.array(z.string().min(1).max(40)).max(20).optional(),
+});
+export const UpdateCalendarItemResponse = z.object({ ok: z.boolean() });
 
 export const GetTodoResponse = z.object({ items: z.array(TodoItem) });
 export const CreateTodoItemRequest = z.object({ text: z.string().min(1).max(200) });
@@ -158,6 +171,8 @@ export type GetCalendarResponse = z.infer<typeof GetCalendarResponse>;
 export type DeleteCalendarItemResponse = z.infer<typeof DeleteCalendarItemResponse>;
 export type CreateCalendarItemRequest = z.infer<typeof CreateCalendarItemRequest>;
 export type CreateCalendarItemResponse = z.infer<typeof CreateCalendarItemResponse>;
+export type UpdateCalendarItemRequest = z.infer<typeof UpdateCalendarItemRequest>;
+export type UpdateCalendarItemResponse = z.infer<typeof UpdateCalendarItemResponse>;
 export type GetTodoResponse = z.infer<typeof GetTodoResponse>;
 export type CreateTodoItemRequest = z.infer<typeof CreateTodoItemRequest>;
 export type CreateTodoItemResponse = z.infer<typeof CreateTodoItemResponse>;

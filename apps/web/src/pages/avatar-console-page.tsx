@@ -5,6 +5,7 @@ import { CapabilitiesTab } from '@/components/avatar/capabilities-tab';
 import { MemoryTab } from '@/components/avatar/memory-tab';
 import { PersonaTab } from '@/components/avatar/persona-tab';
 import { PolicyTab } from '@/components/avatar/policy-tab';
+import { ReceptionTab } from '@/components/avatar/reception-tab';
 import { UsageTab } from '@/components/avatar/usage-tab';
 import { UserAvatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -115,6 +116,7 @@ export function AvatarConsolePage() {
         <Tabs defaultValue="persona">
           <TabsList>
             <TabsTrigger value="persona">人设</TabsTrigger>
+            <TabsTrigger value="reception">接待</TabsTrigger>
             <TabsTrigger value="policy">策略</TabsTrigger>
             <TabsTrigger value="capabilities">能力</TabsTrigger>
             <TabsTrigger value="memory">记忆</TabsTrigger>
@@ -122,6 +124,12 @@ export function AvatarConsolePage() {
           </TabsList>
           <TabsContent value="persona">
             {avatar ? <PersonaTab avatar={avatar} onSaved={setAvatar} /> : null}
+          </TabsContent>
+          <TabsContent value="reception">
+            <ReceptionTab
+              trustLevel={avatar?.trustLevel ?? 2}
+              onTrustLevel={(trustLevel) => setAvatar((a) => (a ? { ...a, trustLevel } : a))}
+            />
           </TabsContent>
           <TabsContent value="policy">
             <PolicyTab />

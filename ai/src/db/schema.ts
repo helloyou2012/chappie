@@ -44,6 +44,8 @@ export const avatar = pgTable('avatar', {
   persona: text('persona').notNull().default(''),
   modelProfile: text('model_profile').notNull().default('default'),
   status: text('status').notNull().default('active'),
+  /** 冷启动信任等级：0 观察 / 1 草稿 / 2 低风险自动 / 3 全权 */
+  trustLevel: integer('trust_level').notNull().default(2),
   selfConvId: text('self_conv_id'),
   dailyBudgetUsd: numeric('daily_budget_usd', { precision: 10, scale: 4 }).notNull().default('1.0'),
   version: integer('version').notNull().default(1),
@@ -320,6 +322,7 @@ export const member = pgTable(
     principalId: text('principal_id').notNull(),
     role: text('role').notNull(),
     aiMode: text('ai_mode').notNull(),
+    aiModeSource: text('ai_mode_source').notNull().default('inherit'),
     aiModeUntil: ts('ai_mode_until'),
     lastReadSeq: integer('last_read_seq').notNull().default(0),
     joinedAt: ts('joined_at').notNull().defaultNow(),
@@ -341,6 +344,79 @@ export const message = pgTable('message', {
   clientMsgId: text('client_msg_id').notNull(),
   recalled: boolean('recalled').notNull().default(false),
   createdAt: ts('created_at').notNull().defaultNow(),
+});
+
+/** 接待态投影（core 写入；AI 只读） */
+export const conversationReception = pgTable(
+  'conversation_reception',
+  {
+    convId: text('conv_id').notNull(),
+    ownerId: text('owner_id').notNull(),
+    state: text('state').notNull(),
+    strategy: text('strategy').notNull(),
+    source: text('source').notNull().default('default'),
+    version: integer('version').notNull().default(1),
+    handoffUntil: ts('handoff_until'),
+    until: ts('until'),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.convId, t.ownerId] })],
+);
+
+/** 委托授权（core 写入；AI 只读，用于解析/审计展示） */
+export const delegation = pgTable('delegation', {
+  id: text('id').primaryKey(),
+  ownerId: text('owner_id').notNull(),
+  avatarId: text('avatar_id').notNull(),
+  scopeType: text('scope_type').notNull(),
+  scopeId: text('scope_id'),
+  state: text('state').notNull(),
+  strategy: text('strategy').notNull(),
+  schedule: jsonb('schedule').$type<unknown[]>().notNull().default([]),
+  timezone: text('timezone').notNull().default('Asia/Shanghai'),
+  expiresAt: ts('expires_at'),
+  revokedAt: ts('revoked_at'),
+  version: integer('version').notNull().default(1),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
+
+/** 联系人关系与紧急穿透（core 写入；AI 只读） */
+export const contact = pgTable(
+  'contact',
+  {
+    userId: text('user_id').notNull(),
+    peerId: text('peer_id').notNull(),
+    alias: text('alias'),
+    alwaysNotify: boolean('always_notify').notNull().default(false),
+    forceHuman: boolean('force_human').notNull().default(false),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.peerId] })],
+);
+
+/** 联系人分组标签（core 写入；AI 只读） */
+export const contactTagMember = pgTable(
+  'contact_tag_member',
+  {
+    userId: text('user_id').notNull(),
+    tag: text('tag').notNull(),
+    peerId: text('peer_id').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.tag, t.peerId] })],
+);
+
+/** 对端请求真人（core 写入；AI 只读/推送卡片） */
+export const humanRequest = pgTable('human_request', {
+  id: text('id').primaryKey(),
+  convId: text('conv_id').notNull(),
+  ownerId: text('owner_id').notNull(),
+  requesterId: text('requester_id').notNull(),
+  reason: text('reason'),
+  status: text('status').notNull().default('pending'),
+  expiresAt: ts('expires_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  resolvedAt: ts('resolved_at'),
 });
 
 export const conversation = pgTable('conversation', {

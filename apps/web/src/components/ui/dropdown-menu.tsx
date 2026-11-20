@@ -32,7 +32,7 @@ function DropdownMenuItem({ className, ...props }: React.ComponentProps<typeof B
   return (
     <BaseMenu.Item
       className={cn(
-        'flex h-7.5 cursor-default select-none items-center gap-2 rounded-md px-2 text-[13px] text-ink-secondary outline-none transition-colors data-[highlighted]:bg-surface-hover data-[highlighted]:text-ink data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'flex min-h-7.5 cursor-default select-none items-center gap-2 rounded-md px-2 py-1 text-[13px] text-ink-secondary outline-none transition-colors data-[highlighted]:bg-surface-hover data-[highlighted]:text-ink data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
       )}
       {...props}

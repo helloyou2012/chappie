@@ -23,6 +23,10 @@ pub struct SendParams {
     pub mentions: Vec<String>,
     pub reply_to: Option<String>,
     pub ai_meta: Option<AiMeta>,
+    /// AI 发送时捕获的接待版本（真人发送时忽略）
+    pub authority_version: i64,
+    /// 触发来源；core 用 `mention/self_chat/owner_approved/internal_card` 做豁免
+    pub via: Option<String>,
 }
 
 /// outbox 事件 envelope（对齐 packages/contract/src/events.ts）
@@ -94,6 +98,45 @@ pub async fn send_message(db: &Db, cfg: &Config, events: &EventTx, p: SendParams
             .await?;
     if is_member.is_none() {
         return Err(AppError::forbidden("发送者不是会话成员"));
+    }
+
+    // 2.5 接待权围栏：确认此刻谁被授权发言；真人发言在私聊中自动接管。
+    let conv_meta: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT type, system_tag FROM conversation WHERE id = $1")
+            .bind(&p.conv_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let (conv_type, system_tag) =
+        conv_meta.ok_or_else(|| AppError::not_found("会话不存在"))?;
+
+    if p.sender.principal_type == "avatar" {
+        let owner_id = p
+            .on_behalf_of
+            .as_deref()
+            .or(p.sender.owner_id.as_deref())
+            .ok_or_else(|| AppError::forbidden("分身消息缺少主人"))?;
+        let via = p.via.as_deref();
+        let is_internal_card = matches!(p.content, Content::Card { .. })
+            && (system_tag.as_deref() == Some("avatar_self") || via == Some("internal_card"));
+        if !is_internal_card {
+            crate::reception::enforce_avatar_send(
+                &mut tx,
+                &p.conv_id,
+                owner_id,
+                p.authority_version,
+                via,
+            )
+            .await?;
+        }
+    } else if p.sender.principal_type == "human" {
+        crate::reception::human_interjection(
+            &mut tx,
+            &p.conv_id,
+            &p.sender.id,
+            &conv_type,
+            system_tag.as_deref(),
+        )
+        .await?;
     }
 
     // 3. seq 分配：会话行锁，天然保证同会话串行且不回退
@@ -291,6 +334,7 @@ pub async fn mark_read(db: &Db, events: &EventTx, principal_id: &str, conv_id: &
 /// 卡片操作（草稿发送/审批决议/任务取消）→ outbox card.action，由 Bun 异步处理
 pub async fn card_action(
     db: &Db,
+    events: &EventTx,
     actor_id: &str,
     msg_id: &str,
     action: &str,
@@ -302,6 +346,20 @@ pub async fn card_action(
     let Content::Card { card, .. } = content else {
         return Err(AppError::bad("目标消息不是卡片"));
     };
+    // 对端请求真人：由卡片主人直接批准/拒绝，core 同步写接待权威。
+    if let CardPayload::HumanRequest { request_id, .. } = &card {
+        if matches!(action, "grant_human" | "decline_human") {
+            crate::reception::resolve_human_request(
+                db,
+                events,
+                actor_id,
+                request_id,
+                action == "grant_human",
+            )
+            .await?;
+            return Ok(());
+        }
+    }
     let data = json!({
         "msgId": msg_id,
         "convId": row.conv_id,
@@ -436,6 +494,8 @@ pub async fn send_system_message(
             mentions: vec![],
             reply_to: None,
             ai_meta: None,
+            authority_version: 0,
+            via: Some("system".into()),
         },
     )
     .await

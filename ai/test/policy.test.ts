@@ -142,6 +142,35 @@ describeDb('evaluatePolicy', () => {
     expect(r.mode).toBe('off');
   });
 
+  test('与自己的分身控制通道不受静默档影响', async () => {
+    await setMode('off');
+    const r = await evaluatePolicy(
+      input({
+        conv: { id: CONV, type: 'direct', systemTag: 'avatar_self' },
+        via: 'self_chat',
+        mentioned: true,
+      }),
+    );
+    expect(r.allow).toBe(true);
+    expect(r.mode).toBe('manual');
+    await setMode('auto');
+  });
+
+  test('控制通道不因低置信度或禁区话题转交主人', async () => {
+    await setMode('auto');
+    await setRule({ mode: 'auto', denyTopics: ['money'], escalateWhen: ['confidence<0.9'] });
+    const r = await evaluatePolicy(
+      input({
+        conv: { id: CONV, type: 'direct', systemTag: 'avatar_self' },
+        via: 'self_chat',
+        mentioned: true,
+        classification: classify('你好'),
+      }),
+    );
+    expect(r.allow).toBe(true);
+    await setRule({ denyTopics: [], escalateWhen: ['confidence<0.7'] });
+  });
+
   test('自动档 → 允许并透传风险上限与能力白名单', async () => {
     await setMode('auto');
     await setRule({ maxRisk: 'L2', allowCapabilities: ['calendar.read'] });

@@ -98,6 +98,16 @@ push：internal.pushCard 成功后的唯一推送入口（Expo Push）
   纯寒暄（“好的”“嗯”等）不延续。
 - **工作态信号**：`agent-runtime` 在任务开始/结束时调用内部接口 `/internal/v1/typing`，
   客户端据此把发送按钮切换为停止/接管（Web `chat-input`、Mobile `chat/[id]`）。
+- **好友申请**：`core/crates/chat/src/friend.rs`；接受后在同一事务写入双向 `contact`；
+  反向申请自动合并；WS `friend_requests_changed` 驱动客户端刷新。
+- **群主转让 / 解散**：`conversation::transfer_owner` / `dissolve_group`；仅群主可操作，
+  解散级联删除会话、消息、成员与接待投影。
+- **接待权（Delegation / Reception）**：`core/crates/chat/src/reception.rs` 解析
+  全局/分组/联系人/会话四级委托，写 `conversation_reception` 投影与版本号；
+  `message::send_message` 在事务内做版本围栏，旧 AI 回合在接管后会被拒绝。
+  对端请求真人由 `human_request` 表限流，主人批准走卡片动作同步切换。
+- **交接摘要与冷启动**：`ai/src/reception.ts` 生成 `reception_digest`；`avatar.trust_level`
+  控制 L0 观察 / L1 草稿 / L2 低风险自动 / L3 全权。
 - **归属隔离**：控制台按登录用户取自己的 avatar（不接受 avatarId 入参）；资源按 `avatar_id/owner_id`
   过滤；卡片操作校验任务归属（详见 [system-design.md §26.4](system-design.md#264-权限与隔离)）。
 - **日程提醒**：`calendar_reminder` 台账（`avatarId + entryId + startAt` 唯一键），提前 10 分钟推送，

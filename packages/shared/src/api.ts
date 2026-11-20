@@ -16,16 +16,21 @@ import type {
   CreateTodoItemRequest,
   CreateTodoItemResponse,
   DailyReport,
+  DelegationView,
   DeviceCapabilities,
   FeedbackType,
+  FriendRequestActionResponse,
   GetCalendarResponse,
+  GetReceptionResponse,
   GetTaskResponse,
   GetTodoResponse,
   ListApprovalsResponse,
   ListCapabilitiesResponse,
   ListContactsResponse,
   ListConversationsResponse,
+  ListDelegationsResponse,
   ListDevicesResponse,
+  ListFriendRequestsResponse,
   ListMembersResponse,
   ListMemoriesResponse,
   ListMessagesResponse,
@@ -35,10 +40,18 @@ import type {
   Policy,
   PolicyRule,
   PreviewResponse,
+  ReceptionStrategy,
+  ReceptionView,
   RemoveMemberResponse,
+  RequestHumanResponse,
   SendCodeResponse,
+  SendFriendRequestResponse,
+  TransferOwnerResponse,
+  UpdateCalendarItemRequest,
+  UpdateCalendarItemResponse,
   UpdateContactRequest,
   UpdateContactResponse,
+  UpdateReceptionRequest,
   UpdateTodoItemRequest,
   UsageDay,
   VerifyCodeResponse,
@@ -153,6 +166,17 @@ export const api = {
     s<UpdateContactResponse>('PATCH', `/api/v1/contacts/${peerId}`, req),
   removeContact: (peerId: string) => s<{ ok: boolean }>('DELETE', `/api/v1/contacts/${peerId}`),
 
+  // 好友申请
+  sendFriendRequest: (req: { email: string; message?: string }) =>
+    s<SendFriendRequestResponse>('POST', '/api/v1/friend-requests', req),
+  listFriendRequests: () => s<ListFriendRequestsResponse>('GET', '/api/v1/friend-requests'),
+  acceptFriendRequest: (id: string) =>
+    s<FriendRequestActionResponse>('POST', `/api/v1/friend-requests/${id}/accept`),
+  rejectFriendRequest: (id: string) =>
+    s<FriendRequestActionResponse>('POST', `/api/v1/friend-requests/${id}/reject`),
+  cancelFriendRequest: (id: string) =>
+    s<FriendRequestActionResponse>('POST', `/api/v1/friend-requests/${id}/cancel`),
+
   // 会话
   listConversations: () => s<ListConversationsResponse>('GET', '/api/v1/conversations'),
   createConversation: (req: {
@@ -176,10 +200,42 @@ export const api = {
     s<AddMembersResponse>('POST', `/api/v1/conversations/${convId}/members`, req),
   removeMember: (convId: string, principalId: string) =>
     s<RemoveMemberResponse>('DELETE', `/api/v1/conversations/${convId}/members/${principalId}`),
+  transferOwner: (convId: string, targetUserId: string) =>
+    s<TransferOwnerResponse>('POST', `/api/v1/conversations/${convId}/transfer-owner`, {
+      targetUserId,
+    }),
+  dissolveGroup: (convId: string) =>
+    s<{ ok: boolean }>('DELETE', `/api/v1/conversations/${convId}`),
   updateSettings: (convId: string, req: { aiMode?: string; tempHours?: number }) =>
     s<{ ok: boolean }>('PATCH', `/api/v1/conversations/${convId}/settings`, req),
   takeover: (convId: string) =>
-    s<{ ok: boolean }>('POST', `/api/v1/conversations/${convId}/takeover`),
+    s<{ ok: boolean; reception?: ReceptionView }>(
+      'POST',
+      `/api/v1/conversations/${convId}/takeover`,
+    ),
+  release: (convId: string) =>
+    s<{ ok: boolean; reception?: ReceptionView }>(
+      'POST',
+      `/api/v1/conversations/${convId}/release`,
+    ),
+  getReception: (convId: string) =>
+    s<GetReceptionResponse>('GET', `/api/v1/conversations/${convId}/reception`),
+  updateReception: (convId: string, req: UpdateReceptionRequest) =>
+    s<{ reception: ReceptionView }>('PUT', `/api/v1/conversations/${convId}/reception`, req),
+  requestHuman: (convId: string, reason?: string) =>
+    s<RequestHumanResponse>('POST', `/api/v1/conversations/${convId}/request-human`, { reason }),
+  listDelegations: () => s<ListDelegationsResponse>('GET', '/api/v1/reception/delegations'),
+  upsertDelegation: (req: {
+    scopeType: 'global' | 'contact_group' | 'contact' | 'conversation';
+    scopeId?: string | null;
+    state: string;
+    strategy: ReceptionStrategy;
+    schedule?: { days: number[]; start: string; end: string }[];
+    timezone?: string;
+    expiresAt?: string | null;
+  }) => s<{ delegation: DelegationView }>('POST', '/api/v1/reception/delegations', req),
+  revokeDelegation: (id: string) =>
+    s<{ ok: boolean }>('DELETE', `/api/v1/reception/delegations/${id}`),
   cardAction: (msgId: string, req: CardActionRequest) =>
     s<{ ok: boolean }>('POST', `/api/v1/cards/${msgId}/action`, req),
   feedback: (msgId: string, req: { type: FeedbackType; correctedText?: string; reason?: string }) =>
@@ -200,7 +256,7 @@ export const api = {
 
 export const adminApi = {
   getAvatar: () => a<{ avatar: Avatar; style: unknown | null }>('GET', '/admin/v1/avatar'),
-  updateAvatar: (req: { name?: string; persona?: string; dailyBudgetUsd?: number }) =>
+  updateAvatar: (req: { persona?: string; dailyBudgetUsd?: number; trustLevel?: number }) =>
     a<{ avatar: Avatar }>('PATCH', '/admin/v1/avatar', req),
   preview: (text: string) => a<PreviewResponse>('POST', '/admin/v1/avatar/preview', { text }),
   freezeAvatar: (frozen: boolean) =>
@@ -256,6 +312,8 @@ export const adminApi = {
   listCalendar: () => a<GetCalendarResponse>('GET', '/admin/v1/calendar'),
   createCalendarItem: (req: CreateCalendarItemRequest) =>
     a<CreateCalendarItemResponse>('POST', '/admin/v1/calendar', req),
+  updateCalendarItem: (index: number, req: UpdateCalendarItemRequest) =>
+    a<UpdateCalendarItemResponse>('PATCH', `/admin/v1/calendar/${index}`, req),
   deleteCalendarItem: (index: number) =>
     a<{ ok: boolean }>('DELETE', `/admin/v1/calendar/${index}`),
   listTodo: () => a<GetTodoResponse>('GET', '/admin/v1/todo'),
@@ -294,15 +352,22 @@ export type {
   Conversation,
   ConversationView,
   DailyReport,
+  DelegationScheduleWindow,
+  DelegationView,
   DeviceView,
   Explanation,
   FeedbackType,
+  FriendRequestStatus,
+  FriendRequestView,
   MemberView,
   MemoryItem,
   Message,
   Policy,
   PolicyRule,
   PolicyScopeType,
+  ReceptionState,
+  ReceptionStrategy,
+  ReceptionView,
   RiskLevel,
   ScheduleWindow,
   StyleProfile,

@@ -63,6 +63,7 @@ function avatarApi(r: AvatarRow): Avatar {
     status: r.status as Avatar['status'],
     selfConvId: r.selfConvId,
     dailyBudgetUsd: Number(r.dailyBudgetUsd),
+    trustLevel: r.trustLevel,
     version: r.version,
   };
 }
@@ -180,14 +181,21 @@ export function createAdminApp() {
       name?: string;
       persona?: string;
       dailyBudgetUsd?: number;
+      trustLevel?: number;
     };
+    // 分身名称固定跟随主人的用户名，不提供单独改名。
+    if (body.name !== undefined) {
+      return c.json(err('bad_request', '分身名称跟随你的用户名，不能单独修改'), 400);
+    }
     await db
       .update(avatarTable)
       .set({
-        ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.persona !== undefined ? { persona: body.persona } : {}),
         ...(body.dailyBudgetUsd !== undefined
           ? { dailyBudgetUsd: String(body.dailyBudgetUsd) }
+          : {}),
+        ...(body.trustLevel !== undefined
+          ? { trustLevel: Math.max(0, Math.min(3, Math.round(body.trustLevel))) }
           : {}),
         version: sql`${avatarTable.version} + 1`,
       })
@@ -250,10 +258,9 @@ export function createAdminApp() {
       name?: string;
       rule?: PolicyRule;
     };
-    // contact_group 需要联系人分组标签，尚未实现；conversation 已纳入策略评估。
-    const allowed = ['global', 'contact', 'conversation', 'schedule'];
+    const allowed = ['global', 'contact', 'contact_group', 'conversation', 'schedule'];
     if (!body.scopeType || !allowed.includes(body.scopeType)) {
-      return c.json(err('bad_request', 'scopeType 不合法（contact_group 暂未实现）'), 400);
+      return c.json(err('bad_request', 'scopeType 不合法'), 400);
     }
     if (!body.rule?.mode) return c.json(err('bad_request', '缺少 rule.mode'), 400);
     const id = newId('p');
@@ -511,6 +518,8 @@ export function createAdminApp() {
       title?: string;
       date?: string | null;
       time?: string;
+      status?: CalendarItem['status'];
+      attendees?: string[];
     };
     const title = body.title?.trim();
     const time = body.time?.trim();
@@ -521,8 +530,16 @@ export function createAdminApp() {
     if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return c.json(err('bad_request', 'date 需为 YYYY-MM-DD'), 400);
     }
+    const status = body.status ?? 'confirmed';
+    if (!['pending', 'confirmed', 'cancelled'].includes(status)) {
+      return c.json(err('bad_request', 'status 不合法'), 400);
+    }
+    const attendees = (body.attendees ?? [])
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .slice(0, 20);
     const items = await readToolData<CalendarItem[]>(avatar.id, 'calendar', []);
-    items.push({ id: newId('cal'), title, date, time });
+    items.push({ id: newId('cal'), title, date, time, status, attendees });
     await writeToolData(avatar.id, 'calendar', items);
     return c.json({ ok: true });
   });
@@ -546,6 +563,67 @@ export function createAdminApp() {
     const targetId = normalized[index]?.id;
     const remaining = raw.filter((x) => normalizeCalendarItem(x).id !== targetId);
     await writeToolData(avatar.id, 'calendar', remaining);
+    return c.json({ ok: true });
+  });
+
+  /** 页面上修改日程（标题/时间/状态）；按展示顺序的稳定 id 定位。 */
+  app.patch('/admin/v1/calendar/:index', async (c) => {
+    const avatar = await requireAvatar(c);
+    if (!avatar) return c.json(err('avatar_not_ready', '分身正在初始化'), 409);
+    const index = Number(c.req.param('index'));
+    if (!Number.isInteger(index) || index < 0) {
+      return c.json(err('bad_request', 'index 不合法'), 400);
+    }
+    const body = (await c.req.json().catch(() => ({}))) as {
+      title?: string;
+      date?: string | null;
+      time?: string;
+      status?: CalendarItem['status'];
+      attendees?: string[];
+    };
+    if (body.title !== undefined && !body.title.trim()) {
+      return c.json(err('bad_request', 'title 不能为空'), 400);
+    }
+    if (body.status !== undefined && !['pending', 'confirmed', 'cancelled'].includes(body.status)) {
+      return c.json(err('bad_request', 'status 不合法'), 400);
+    }
+    const date = body.date === undefined ? undefined : body.date?.trim() || null;
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return c.json(err('bad_request', 'date 需为 YYYY-MM-DD'), 400);
+    }
+    if (body.time !== undefined && (!body.time.trim() || body.time.length > 20)) {
+      return c.json(err('bad_request', 'time 不合法'), 400);
+    }
+    if (body.attendees !== undefined && body.attendees.length > 20) {
+      return c.json(err('bad_request', '相关人最多 20 个'), 400);
+    }
+
+    const raw = await readToolData<CalendarItem[]>(avatar.id, 'calendar', []);
+    const normalized = raw
+      .map((x) => normalizeCalendarItem(x))
+      .sort((a, b) =>
+        `${a.date ?? '9999'} ${a.time}`.localeCompare(`${b.date ?? '9999'} ${b.time}`),
+      );
+    if (index >= normalized.length) return c.json(err('not_found', '日程不存在'), 404);
+    const targetId = normalized[index]?.id;
+    const targetIndex = raw.findIndex((x) => normalizeCalendarItem(x).id === targetId);
+    if (targetIndex < 0) return c.json(err('not_found', '日程不存在'), 404);
+    const current = normalizeCalendarItem(raw[targetIndex]!);
+    raw[targetIndex] = {
+      id: current.id!,
+      title: body.title?.trim() ?? current.title,
+      date: date === undefined ? current.date : date,
+      time: body.time?.trim() ?? current.time,
+      status: body.status ?? current.status,
+      attendees:
+        body.attendees === undefined
+          ? current.attendees
+          : body.attendees
+              .map((x) => x.trim())
+              .filter(Boolean)
+              .slice(0, 20),
+    };
+    await writeToolData(avatar.id, 'calendar', raw);
     return c.json({ ok: true });
   });
 

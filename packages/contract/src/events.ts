@@ -77,6 +77,31 @@ export const TakeoverRequestedData = z.object({
   convId: z.string(),
 });
 
+/** 接待态变化：core 同步写权威后通知 AI 取消任务/刷新缓存/生成摘要 */
+export const ReceptionChangedData = z.object({
+  userId: z.string(),
+  convId: z.string().nullable().default(null),
+  state: z.string(),
+  strategy: z.string(),
+  version: z.number().int(),
+  fromState: z.string().nullable().default(null),
+  fromStrategy: z.string().nullable().default(null),
+  actorId: z.string().nullable().default(null),
+  actorType: z.string().nullable().default(null),
+  reason: z.string().nullable().default(null),
+  handoffUntil: z.string().nullable().default(null),
+});
+
+/** 对端请求真人 */
+export const HumanRequestedData = z.object({
+  requestId: z.string(),
+  convId: z.string(),
+  ownerId: z.string(),
+  requesterId: z.string(),
+  reason: z.string().nullable().default(null),
+  expiresAt: z.string().nullable().default(null),
+});
+
 export const EVENT_TOPICS = [
   'user.created',
   'message.created',
@@ -85,6 +110,8 @@ export const EVENT_TOPICS = [
   'card.action',
   'feedback.submitted',
   'takeover.requested',
+  'reception.changed',
+  'human.requested',
   'member.changed',
 ] as const;
 export type EventTopic = (typeof EVENT_TOPICS)[number];

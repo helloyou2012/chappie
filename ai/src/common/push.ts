@@ -104,6 +104,18 @@ export function previewOfCard(card: CardPayload): PushMessage | null {
         body: '打开应用查看今天的日报。',
         data: { kind: card.kind, reportId: card.reportId, day: card.day },
       };
+    case 'human_request':
+      return {
+        title: '对方请求真人接待',
+        body: `${card.requesterName} 希望与你本人沟通。`,
+        data: { kind: card.kind, requestId: card.requestId, convId: card.convId },
+      };
+    case 'reception_digest':
+      return {
+        title: '分身接待摘要',
+        body: '分身已停止，交接摘要已生成。',
+        data: { kind: card.kind, convId: card.convId ?? '' },
+      };
     default:
       // draft / task：主人在场时高频出现，推送会造成骚扰 —— 不推
       return null;

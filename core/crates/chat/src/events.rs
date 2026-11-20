@@ -43,6 +43,19 @@ pub enum DomainEvent {
     ConversationsChanged {
         recipients: Vec<String>,
     },
+    FriendRequestsChanged {
+        recipients: Vec<String>,
+    },
+    ReceptionChanged {
+        conv_id: String,
+        owner_id: String,
+        state: String,
+        strategy: String,
+        version: i64,
+        until: Option<String>,
+        reason: Option<String>,
+        recipients: Vec<String>,
+    },
 }
 
 pub type EventTx = broadcast::Sender<DomainEvent>;

@@ -35,6 +35,41 @@ export type User = z.infer<typeof User>;
 export const AvatarMode = z.enum(['manual', 'draft', 'auto', 'off']);
 export type AvatarMode = z.infer<typeof AvatarMode>;
 
+/**
+ * 接待权威：此刻谁被授权对外发言。
+ * 与档位/策略正交：human 表示真人接待，avatar 表示分身接待，paused 表示暂停。
+ */
+export const ReceptionState = z.enum(['human', 'avatar', 'paused']);
+export type ReceptionState = z.infer<typeof ReceptionState>;
+
+/**
+ * 接待策略：分身具体怎么处理消息。
+ * summon=仅被召唤，assist=草稿，full=全权，screen=筛选，decline=礼貌拒接，
+ * escalate=低风险代答/高风险转人，silent=静默值守，off=不工作。
+ */
+export const ReceptionStrategy = z.enum([
+  'summon',
+  'assist',
+  'full',
+  'screen',
+  'decline',
+  'escalate',
+  'silent',
+  'off',
+]);
+export type ReceptionStrategy = z.infer<typeof ReceptionStrategy>;
+
+/** 当前接待态由哪一层授权来源决定。 */
+export const ReceptionSource = z.enum([
+  'conversation',
+  'contact',
+  'group',
+  'schedule',
+  'global',
+  'default',
+]);
+export type ReceptionSource = z.infer<typeof ReceptionSource>;
+
 export const AvatarStatus = z.enum(['active', 'frozen']);
 export type AvatarStatus = z.infer<typeof AvatarStatus>;
 
@@ -48,6 +83,8 @@ export const Avatar = z.object({
   status: AvatarStatus,
   selfConvId: z.string().nullable().default(null),
   dailyBudgetUsd: z.number().default(1.0),
+  /** 冷启动信任等级：0 观察 / 1 草稿 / 2 低风险自动 / 3 全权 */
+  trustLevel: z.number().int().min(0).max(3).default(2),
   version: z.number().int().default(1),
 });
 export type Avatar = z.infer<typeof Avatar>;

@@ -6,7 +6,13 @@
  */
 import { z } from 'zod';
 import { CardPayload } from './cards';
-import { AvatarMode, PrincipalType } from './identity';
+import {
+  AvatarMode,
+  PrincipalType,
+  ReceptionSource,
+  ReceptionState,
+  ReceptionStrategy,
+} from './identity';
 
 // ---------------------------------------------------------------------------
 // 消息内容（可扩展注册表）
@@ -80,6 +86,10 @@ export function contentText(c: Content | null | undefined): string {
           return `[分身日报] ${k.day}`;
         case 'calendar_reminder':
           return `[日程提醒] ${k.title}`;
+        case 'reception_digest':
+          return '[分身接待摘要]';
+        case 'human_request':
+          return `[请求真人] ${k.requesterName}`;
       }
       return '[卡片]';
     }
@@ -108,6 +118,10 @@ export const AiMeta = z.object({
   confidence: z.number().nullable().default(null),
   /** AI 对 AI 跳数，防互聊死循环 —— 设计方案 §29.6 */
   hopCount: z.number().int().default(0),
+  /** 发送时捕获的接待版本；core 在写入路径做围栏校验，旧版本直接拒绝 */
+  authorityVersion: z.number().int().default(0),
+  /** 本次发送的触发来源（mention/self_chat/direct/auto/reply/continuation/owner_approved） */
+  via: z.string().nullable().default(null),
   explanation: Explanation.nullable().default(null),
 });
 export type AiMeta = z.infer<typeof AiMeta>;
@@ -155,12 +169,31 @@ export type Conversation = z.infer<typeof Conversation>;
 
 export const MemberRole = z.enum(['owner', 'member']);
 
+/** 档位是用户显式选择还是继承策略（用于区分「显式手动」与「默认手动」）。 */
+export const AiModeSource = z.enum(['explicit', 'inherit']);
+export type AiModeSource = z.infer<typeof AiModeSource>;
+
+/** 某个会话中某位主人的接待态投影 */
+export const ReceptionView = z.object({
+  state: ReceptionState,
+  strategy: ReceptionStrategy,
+  /** 单调递增的授权版本：AI 发送时必须回传，旧版本会被 core 拒绝 */
+  version: z.number().int().default(0),
+  /** 临时接待态到期时间（ISO）；null 表示无期限 */
+  until: z.string().nullable().default(null),
+  source: ReceptionSource.default('default'),
+  /** 对端是否可以请求真人接管 */
+  counterpartyRequestable: z.boolean().default(true),
+});
+export type ReceptionView = z.infer<typeof ReceptionView>;
+
 export const Member = z.object({
   convId: z.string(),
   principalId: z.string(),
   role: MemberRole,
   /** 该成员的分身在此会话的档位（仅 avatar 成员有意义；human 成员表示其分身档位） */
   aiMode: AvatarMode.default('manual'),
+  aiModeSource: AiModeSource.default('inherit'),
   aiModeUntil: z.string().nullable().default(null),
   lastReadSeq: z.number().int().default(0),
   joinedAt: z.string(),
@@ -175,7 +208,10 @@ export const MemberView = z.object({
   name: z.string(),
   role: MemberRole,
   aiMode: AvatarMode,
+  aiModeSource: AiModeSource.default('inherit'),
   aiModeUntil: z.string().nullable().default(null),
+  /** 该主人（human 成员）在此会话的接待态；avatar 成员为 null */
+  reception: ReceptionView.nullable().default(null),
   lastReadSeq: z.number().int(),
   online: z.boolean().default(false),
 });
@@ -187,7 +223,11 @@ export const ConversationView = z.object({
   myPrincipalId: z.string(),
   myRole: MemberRole,
   myAiMode: AvatarMode,
+  myAiModeSource: AiModeSource.default('inherit'),
   myAiModeUntil: z.string().nullable().default(null),
+  myReception: ReceptionView,
+  /** 单聊时对方的接待态；群聊/系统会话为 null */
+  peerReception: ReceptionView.nullable().default(null),
   myLastReadSeq: z.number().int().default(0),
   unreadCount: z.number().int().default(0),
   /** 会话展示名（direct：对方名；group：群名；avatar_self：我的分身） */

@@ -83,6 +83,53 @@ export const CalendarReminderCard = z.object({
 });
 export type CalendarReminderCard = z.infer<typeof CalendarReminderCard>;
 
+/** 接待摘要：分身接待期间发生了什么，接管/收回时交给主人 */
+export const ReceptionDigestCard = z.object({
+  kind: z.literal('reception_digest'),
+  convId: z.string().nullable().default(null),
+  from: z.string(),
+  to: z.string(),
+  stats: z.object({
+    received: z.number().int().default(0),
+    replied: z.number().int().default(0),
+    drafts: z.number().int().default(0),
+    silent: z.number().int().default(0),
+    escalated: z.number().int().default(0),
+  }),
+  threads: z
+    .array(
+      z.object({
+        convId: z.string(),
+        peerName: z.string(),
+        lastText: z.string().default(''),
+        status: z.string().default('handled'),
+      }),
+    )
+    .default([]),
+  pending: z
+    .array(
+      z.object({
+        kind: z.string(),
+        id: z.string(),
+        title: z.string(),
+      }),
+    )
+    .default([]),
+  summary: z.string().default(''),
+});
+export type ReceptionDigestCard = z.infer<typeof ReceptionDigestCard>;
+
+/** 对端请求真人：主人可批准/拒绝 */
+export const HumanRequestCard = z.object({
+  kind: z.literal('human_request'),
+  requestId: z.string(),
+  convId: z.string(),
+  requesterName: z.string(),
+  reason: z.string().default(''),
+  expiresAt: z.string().nullable().default(null),
+});
+export type HumanRequestCard = z.infer<typeof HumanRequestCard>;
+
 export const CardPayload = z.discriminatedUnion('kind', [
   DraftCard,
   ApprovalCard,
@@ -90,6 +137,8 @@ export const CardPayload = z.discriminatedUnion('kind', [
   HandoverCard,
   ReportCard,
   CalendarReminderCard,
+  ReceptionDigestCard,
+  HumanRequestCard,
 ]);
 export type CardPayload = z.infer<typeof CardPayload>;
 
@@ -102,6 +151,8 @@ export const CardAction = z.enum([
   'modify_approve', // 审批：修改参数后批准
   'reject', // 审批：拒绝
   'cancel', // 任务：取消
+  'grant_human', // 对端请求真人：批准
+  'decline_human', // 对端请求真人：拒绝
 ]);
 export type CardAction = z.infer<typeof CardAction>;
 

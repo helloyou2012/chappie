@@ -42,6 +42,25 @@ export function Avatar({
       >
         {initial}
       </Text>
+      {variant === 'avatar' ? (
+        <View
+          style={{
+            position: 'absolute',
+            right: -2,
+            bottom: -2,
+            paddingHorizontal: 3,
+            paddingVertical: 1,
+            borderRadius: 999,
+            backgroundColor: t.primary,
+            borderWidth: 1,
+            borderColor: t.bg,
+          }}
+        >
+          <Text style={{ fontSize: Math.max(8, size * 0.2), fontWeight: '700', color: '#fff' }}>
+            AI
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

@@ -3,6 +3,7 @@ import { SparklesIcon } from '@heroicons/react/24/outline';
 import { RiAtLine, RiCloseLine, RiSendPlaneFill, RiStopCircleLine } from '@remixicon/react';
 import { useRef, useState } from 'react';
 import { UserAvatar } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/toast';
 import { getRealtimeClient } from '@/lib/realtime';
@@ -167,13 +168,18 @@ export function ChatInput({
                   name={c.name}
                   variant={c.principalType === 'avatar' ? 'avatar' : 'human'}
                   className="size-5"
+                  showAiBadge={false}
                 />
                 <span className="flex-1 truncate">{c.name}</span>
                 {c.principalType === 'avatar' ? (
-                  <span className="flex items-center gap-0.5 text-[11px] text-agent">
-                    <SparklesIcon className="size-2.5" /> 分身
-                  </span>
-                ) : null}
+                  <Badge variant="ai" className="shrink-0">
+                    <SparklesIcon className="size-2.5" /> AI 分身
+                  </Badge>
+                ) : (
+                  <Badge variant="muted" className="shrink-0">
+                    真人
+                  </Badge>
+                )}
               </button>
             ))}
           </div>

@@ -7,10 +7,12 @@ import {
   RiCheckLine,
   RiCloseCircleLine,
   RiDraftLine,
+  RiHistoryLine,
   RiLoader4Line,
   RiShieldKeyholeLine,
   RiTaskLine,
   RiTimeLine,
+  RiUserLine,
 } from '@remixicon/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -28,7 +30,16 @@ interface CardViewProps {
 
 async function act(
   msgId: string,
-  action: 'send' | 'edit' | 'discard' | 'approve' | 'modify_approve' | 'reject' | 'cancel',
+  action:
+    | 'send'
+    | 'edit'
+    | 'discard'
+    | 'approve'
+    | 'modify_approve'
+    | 'reject'
+    | 'cancel'
+    | 'grant_human'
+    | 'decline_human',
   editedText?: string,
 ) {
   await api.cardAction(msgId, { action, editedText });
@@ -48,6 +59,10 @@ export function CardView({ msgId, card }: CardViewProps) {
       return <HandoverCardView card={card} />;
     case 'calendar_reminder':
       return <CalendarReminderCardView card={card} />;
+    case 'reception_digest':
+      return <ReceptionDigestCardView card={card} />;
+    case 'human_request':
+      return <HumanRequestCardView msgId={msgId} card={card} />;
     default:
       return null;
   }
@@ -456,6 +471,122 @@ function CalendarReminderCardView({
         ) : null}
         <Button size="sm" variant="outline" className="mt-1" onClick={() => navigate('/schedule')}>
           查看日程安排 <RiArrowRightLine className="size-3" />
+        </Button>
+      </div>
+    </CardShell>
+  );
+}
+
+function ReceptionDigestCardView({
+  card,
+}: {
+  card: Extract<CardPayload, { kind: 'reception_digest' }>;
+}) {
+  return (
+    <CardShell
+      icon={<RiHistoryLine className="size-4" />}
+      title="分身接待摘要"
+      badge={<Badge variant="ai">交接</Badge>}
+    >
+      <div className="mb-2 grid grid-cols-5 gap-1 text-center text-[10px]">
+        {(
+          [
+            ['收到', card.stats.received],
+            ['回复', card.stats.replied],
+            ['草稿', card.stats.drafts],
+            ['静默', card.stats.silent],
+            ['转交', card.stats.escalated],
+          ] as const
+        ).map(([label, value]) => (
+          <div key={label} className="rounded-md bg-surface-veil px-1 py-1.5">
+            <div className="text-sm font-semibold text-ink">{value}</div>
+            <div className="text-ink-tertiary">{label}</div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
+        {card.summary}
+      </p>
+      {card.pending.length > 0 ? (
+        <div className="mt-2 space-y-1">
+          <p className="text-[10px] font-medium text-warning">待你确认</p>
+          {card.pending.slice(0, 5).map((p) => (
+            <p key={p.id} className="text-[11px] text-ink-tertiary">
+              · {p.title}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {card.threads.length > 0 ? (
+        <div className="mt-2 space-y-1 border-t border-line pt-2">
+          {card.threads.slice(0, 3).map((t) => (
+            <p key={`${t.convId}-${t.lastText}`} className="truncate text-[11px] text-ink-tertiary">
+              {t.peerName}：{t.lastText}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </CardShell>
+  );
+}
+
+function HumanRequestCardView({
+  msgId,
+  card,
+}: {
+  msgId: string;
+  card: Extract<CardPayload, { kind: 'human_request' }>;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const run = async (action: 'grant_human' | 'decline_human') => {
+    setBusy(action);
+    try {
+      await act(msgId, action);
+      setDone(action);
+      toast.success(action === 'grant_human' ? '已接管该会话' : '已拒绝请求');
+    } catch (e) {
+      toast.error('操作失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  if (done) {
+    return (
+      <CardShell
+        icon={<RiUserLine className="size-4" />}
+        title={done === 'grant_human' ? '已接管该会话' : '已拒绝请求'}
+        badge={<Badge variant={done === 'grant_human' ? 'success' : 'muted'}>已处理</Badge>}
+      >
+        <p className="text-xs text-muted-foreground">
+          {done === 'grant_human'
+            ? '对端会看到「真人已接管」。分身已停止，并会生成交接摘要。'
+            : '保持分身接待，对端不会收到强制切换。'}
+        </p>
+      </CardShell>
+    );
+  }
+  return (
+    <CardShell
+      icon={<RiUserLine className="size-4" />}
+      title="对方请求真人接待"
+      tone="warning"
+      badge={<Badge variant="warning">待处理</Badge>}
+    >
+      <p className="text-sm leading-relaxed">{card.requesterName} 希望与你本人沟通。</p>
+      {card.reason ? <p className="mt-1 text-xs text-muted-foreground">{card.reason}</p> : null}
+      <div className="mt-3 flex gap-2">
+        <Button size="sm" disabled={busy !== null} onClick={() => void run('grant_human')}>
+          {busy === 'grant_human' ? <RiLoader4Line className="size-3 animate-spin" /> : null}
+          接管并回复
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy !== null}
+          onClick={() => void run('decline_human')}
+        >
+          保持分身接待
         </Button>
       </div>
     </CardShell>

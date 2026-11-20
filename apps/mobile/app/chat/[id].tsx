@@ -5,6 +5,9 @@ import {
   formatTime,
   type Message,
   type PendingMessage,
+  RECEPTION_LABELS,
+  type ReceptionStrategy,
+  STRATEGY_LABELS,
   useAuthStore,
   useChatStore,
 } from '@chappie/shared';
@@ -19,7 +22,15 @@ import { realtime } from '@/realtime';
 import { modeLabels } from '@/theme';
 import { Badge, BottomSheet, Button, Chip, IconButton, Input, Text } from '@/ui';
 
-const MODE_CYCLE = ['manual', 'draft', 'auto', 'off'] as const;
+const STRATEGIES: ReceptionStrategy[] = [
+  'summon',
+  'assist',
+  'full',
+  'screen',
+  'decline',
+  'escalate',
+  'silent',
+];
 
 export default function ChatScreen() {
   const t = useTheme();
@@ -36,7 +47,7 @@ export default function ChatScreen() {
   const loadMessages = useChatStore((s) => s.loadMessages);
   const loadMembers = useChatStore((s) => s.loadMembers);
   const setActiveConv = useChatStore((s) => s.setActiveConv);
-  const updateMode = useChatStore((s) => s.updateConversationMode);
+  const loadConversations = useChatStore((s) => s.loadConversations);
   const addPending = useChatStore((s) => s.addPending);
   const myId = useAuthStore((s) => s.user?.id ?? '');
 
@@ -144,16 +155,39 @@ export default function ChatScreen() {
     }
   };
 
-  const chooseMode = (mode: (typeof MODE_CYCLE)[number], tempHours?: number) => {
-    if (!convId) return;
-    setModeSheetOpen(false);
-    void updateMode(convId, mode, tempHours).catch(() => undefined);
-  };
-
   const takeover = () => {
     if (!convId) return;
     setModeSheetOpen(false);
-    void api.takeover(convId).catch(() => undefined);
+    void api
+      .takeover(convId)
+      .then(() => loadConversations())
+      .catch(() => undefined);
+  };
+
+  const changeReception = (
+    state: 'human' | 'avatar',
+    strategy: ReceptionStrategy,
+    tempHours?: number,
+  ) => {
+    if (!convId) return;
+    setModeSheetOpen(false);
+    void api
+      .updateReception(convId, {
+        state,
+        strategy,
+        until: tempHours ? new Date(Date.now() + tempHours * 3600_000).toISOString() : null,
+      })
+      .then(() => loadConversations())
+      .catch(() => undefined);
+  };
+
+  const release = () => {
+    if (!convId) return;
+    setModeSheetOpen(false);
+    void api
+      .release(convId)
+      .then(() => loadConversations())
+      .catch(() => undefined);
   };
 
   const mentionCandidates = members.filter((m) => m.principalId !== myId);
@@ -204,17 +238,36 @@ export default function ChatScreen() {
             ) : null}
           </View>
           <Text variant="micro" tone="muted" numberOfLines={1}>
-            {members.filter((m) => m.principalType === 'human').length} 位成员 ·{' '}
-            {members.filter((m) => m.principalType === 'avatar').length} 个分身
+            {view?.conversation.systemTag === 'avatar_self'
+              ? '与分身直接对话，无需切换接待身份'
+              : view?.conversation.type === 'group'
+                ? `${members.filter((m) => m.principalType === 'human').length} 位成员 · ${
+                    members.filter((m) => m.principalType === 'avatar').length
+                  } 个分身`
+                : view?.peerReception?.state === 'avatar'
+                  ? '对方由 AI 分身接待'
+                  : '对方当前为真人接待'}
           </Text>
         </View>
-        <Button
-          size="sm"
-          variant="secondary"
-          fullWidth={false}
-          label={`${modeLabels[view?.myAiMode ?? 'manual']}${view?.myAiModeUntil ? ' · 临时' : ''}`}
-          onPress={() => setModeSheetOpen(true)}
-        />
+        {view?.conversation.systemTag === 'avatar_self' ? (
+          <Badge label="控制通道" tone="ai" />
+        ) : (
+          <Button
+            size="sm"
+            variant="secondary"
+            fullWidth={false}
+            label={`${
+              view?.myReception
+                ? RECEPTION_LABELS[view.myReception.state]
+                : modeLabels[view?.myAiMode ?? 'manual']
+            }${
+              view?.myReception?.state === 'avatar'
+                ? ` · ${STRATEGY_LABELS[view.myReception.strategy] ?? ''}`
+                : ''
+            }${view?.myReception?.until ? ' · 临时' : ''}`}
+            onPress={() => setModeSheetOpen(true)}
+          />
+        )}
         {view && view.conversation.type === 'group' && view.conversation.systemTag === null ? (
           <IconButton icon="team-line" label="成员管理" onPress={() => setMemberSheetOpen(true)} />
         ) : null}
@@ -435,25 +488,44 @@ export default function ChatScreen() {
         />
       ) : null}
 
-      {/* 档位选择（含临时 2 小时与接管） */}
+      {/* 接待权选择（真人/分身 + 策略 + 临时托管） */}
       <BottomSheet
         visible={modeSheetOpen}
         onClose={() => setModeSheetOpen(false)}
-        title="我的分身档位"
-        description="选择后立即生效；临时档位到期自动回落。"
+        title="接待方式"
+        description="真人接待时分身只在你召唤或确认草稿时协助；临时托管到期自动回落。"
       >
-        {MODE_CYCLE.map((m) => {
-          const active = view?.myAiMode === m && !view?.myAiModeUntil;
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+          <Button
+            size="sm"
+            variant={view?.myReception?.state !== 'avatar' ? 'primary' : 'outline'}
+            label="真人接待"
+            onPress={() => changeReception('human', view?.myReception?.strategy ?? 'assist')}
+            style={{ flex: 1 }}
+          />
+          <Button
+            size="sm"
+            variant={view?.myReception?.state === 'avatar' ? 'primary' : 'outline'}
+            label="分身接待"
+            onPress={() => release()}
+            style={{ flex: 1 }}
+          />
+        </View>
+        <Text variant="micro" tone="muted" style={{ marginTop: 14 }}>
+          分身策略
+        </Text>
+        {STRATEGIES.map((s) => {
+          const active = view?.myReception?.strategy === s;
           return (
             <View
-              key={m}
+              key={s}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}
             >
               <Button
                 size="sm"
                 variant={active ? 'primary' : 'outline'}
-                label={`${modeLabels[m] ?? m}${active ? '（当前）' : ''}`}
-                onPress={() => chooseMode(m)}
+                label={`${STRATEGY_LABELS[s] ?? s}${active ? '（当前）' : ''}`}
+                onPress={() => changeReception('avatar', s)}
                 style={{ flex: 1 }}
               />
               <Button
@@ -461,7 +533,7 @@ export default function ChatScreen() {
                 variant="outline"
                 fullWidth={false}
                 label="临时 2h"
-                onPress={() => chooseMode(m, 2)}
+                onPress={() => changeReception('avatar', s, 2)}
               />
             </View>
           );

@@ -9,7 +9,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast';
 
 export function PersonaTab({ avatar, onSaved }: { avatar: Avatar; onSaved: (a: Avatar) => void }) {
-  const [name, setName] = useState(avatar.name);
   const [persona, setPersona] = useState(avatar.persona);
   const [budget, setBudget] = useState(String(avatar.dailyBudgetUsd));
   const [saving, setSaving] = useState(false);
@@ -22,7 +21,6 @@ export function PersonaTab({ avatar, onSaved }: { avatar: Avatar; onSaved: (a: A
     setSaving(true);
     try {
       const res = await adminApi.updateAvatar({
-        name: name.trim() || undefined,
         persona: persona.trim(),
         dailyBudgetUsd: Number(budget) > 0 ? Number(budget) : undefined,
       });
@@ -63,7 +61,10 @@ export function PersonaTab({ avatar, onSaved }: { avatar: Avatar; onSaved: (a: A
         <CardContent className="space-y-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium">分身名称</label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} />
+            <div className="flex h-8 items-center rounded-md border border-line bg-surface-veil px-2.5 text-sm text-ink-secondary">
+              {avatar.name}
+              <span className="ml-auto text-[10px] text-ink-tertiary">跟随你的用户名</span>
+            </div>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium">人设描述</label>
