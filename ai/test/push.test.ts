@@ -61,6 +61,7 @@ describe('previewOfCard：卡片 → 推送文案', () => {
         title: '整理纪要',
         status: 'running',
         steps: [],
+        summary: '',
       }),
     ).toBeNull();
   });

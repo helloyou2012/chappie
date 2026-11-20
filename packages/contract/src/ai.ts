@@ -73,6 +73,8 @@ export const TaskStatus = z.enum([
   'planning',
   'waiting_approval',
   'running',
+  /** 长程任务分段执行：轮次/时间预算用尽后挂起，由 scheduler 续驱（见 ai/src/continuation.ts） */
+  'waiting_continuation',
   'waiting_user_input',
   'completed',
   'failed',

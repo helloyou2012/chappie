@@ -1,8 +1,9 @@
 /**
- * Agent 运行时 —— 设计方案 §7、§27.4：
+ * Agent 运行时 —— 设计方案 §7、§7.3、§27.4：
  *   提示词分层装配（系统规则 → 人设 → 策略约束 → 记忆 → 会话上下文 → 工具定义）
  *   不可信数据隔离（他人消息一律视为数据，指令通道只有主人与策略）
- *   ReAct 简化循环（工具调用，最多 3 轮）
+ *   ReAct 循环（单段 AI_MAX_TOOL_ROUNDS 轮工具调用；长任务单段预算用尽时
+ *   挂起 waiting_continuation，由 scheduler 的 continuation sweep 续驱 —— continuation.ts）
  *   护栏（注入残留检测、隐私脱敏）
  *   不确定即转人（handover / 低置信度转草稿）
  */
@@ -16,7 +17,7 @@ import type {
   ReceptionStrategy,
   RiskLevel,
 } from '@chappie/contract';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
   type ApprovalRecord,
   approvalArgsHash,
@@ -86,7 +87,10 @@ export interface ResumeCheckpoint {
   maxRisk: RiskLevel;
 }
 
-const MAX_TOOL_ROUNDS = 3;
+/** 单段工具轮次预算（每段独立计数；跨段由时限 / 最大段数约束，见 continuation.ts） */
+const SEGMENT_TOOL_ROUNDS = Math.max(1, config.maxToolRounds);
+/** 单段执行时间预算：超时且工作未完成 → 挂起续跑（长程任务） */
+const SEGMENT_BUDGET_MS = Math.max(1, config.taskSegmentMaxSeconds) * 1000;
 const LOW_CONFIDENCE = 0.7;
 
 function modeToStrategy(mode: AvatarMode): ReceptionStrategy {
@@ -133,7 +137,14 @@ export interface AgentInput {
 }
 
 export interface AgentOutcome {
-  status: 'replied' | 'drafted' | 'handed_over' | 'waiting_approval' | 'failed' | 'silent';
+  status:
+    | 'replied'
+    | 'drafted'
+    | 'handed_over'
+    | 'waiting_approval'
+    | 'waiting_continuation'
+    | 'failed'
+    | 'silent';
   text?: string;
   messageId?: string;
   cardMsgId?: string;
@@ -188,7 +199,8 @@ ${opts.avatar.persona || `你是 ${opts.ownerName} 的数字分身，语气自�
 ${memoryBlock}
 
 【工具】
-如需查询/创建/修改/删除日程、增删改待办、翻译、总结等，调用对应工具；删除日程、删除待办属高风险操作，会先转给主人确认。修改/删除时优先先用查询工具确认目标存在，再用关键词精确匹配。`;
+如需查询/创建/修改/删除日程、增删改待办、翻译、总结等，调用对应工具；删除日程、删除待办属高风险操作，会先转给主人确认。修改/删除时优先先用查询工具确认目标存在，再用关键词精确匹配。
+多步任务按「计划 → 逐步执行 → 汇总」处理：每拿到一个工具结果，基于它决定下一步；全部做完后用简洁的话汇总结果，不要中途停下来等待对方确认。长任务会自动分段执行，中间会向主人同步进度，你只需专注把当前步骤做对。`;
 }
 
 function namesOf(
@@ -329,6 +341,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
       ownerId: avatarTable.ownerId,
       name: avatarTable.name,
       persona: avatarTable.persona,
+      selfConvId: avatarTable.selfConvId,
     })
     .from(avatarTable)
     .where(eq(avatarTable.id, input.avatarId))
@@ -338,6 +351,8 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     await failTask(input.taskId, '分身不存在');
     return { status: 'failed', toolsUsed, confidence: 0 };
   }
+  // 控制通道（systemTag=avatar_self）：长任务挂起时不需要向对方发中间回复
+  const isSelfChat = avatar.selfConvId === input.convId;
   // 工作期间广播「正在输入」：客户端据此把发送按钮切换为停止/接管
   void internal.typing(input.convId, avatar.id, 20_000).catch(() => undefined);
   const stopTyping = () => void internal.typing(input.convId, avatar.id, 0).catch(() => undefined);
@@ -573,7 +588,10 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     }
   };
 
-  for (let round = startRound; round <= MAX_TOOL_ROUNDS; round++) {
+  // 段内轮次预算：每段独立计数，挂起续跑后从检查点轮次起新预算
+  const segmentEnd = startRound + SEGMENT_TOOL_ROUNDS;
+  let round = startRound;
+  for (; round < segmentEnd; round++) {
     assertLeaseAlive(input.taskId);
     const revokedBeforeModel = await checkTurn('run');
     if (revokedBeforeModel) {
@@ -582,6 +600,16 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
         confidence,
         costUsd,
         tokensUsed,
+      });
+    }
+    // 单段时间预算：多步任务超时段落挂起，交 scheduler 续驱（设计方案 §7.3 异步任务）
+    if (round > startRound && tools.length > 0 && Date.now() - t0 > SEGMENT_BUDGET_MS) {
+      return parkForContinuation(input, mkCheckpoint(round), {
+        costUsd,
+        tokensUsed,
+        toolsUsed,
+        confidence,
+        isSelfChat,
       });
     }
     devCrashPoint('before_model');
@@ -604,6 +632,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     } catch (e) {
       log.error('model call failed', { taskId: input.taskId, error: String(e) });
       await failTask(input.taskId, `模型调用失败: ${String(e)}`);
+      await finishContinuationCard(input.taskId, 'failed', '模型调用失败，任务已停止。');
       stopTyping();
       return { status: 'failed', toolsUsed, confidence: 0 };
     }
@@ -849,6 +878,11 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
       costUsd,
       tokensUsed,
     });
+    await finishContinuationCard(
+      input.taskId,
+      'failed',
+      `已转交 ${ownerName} 本人处理：${handoverReason}`,
+    );
     await saveMemorySafely(input, context.messages, peerId);
     return {
       status: 'handed_over',
@@ -866,6 +900,18 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
   }
 
   if (!finalText) {
+    // 只有「轮次预算真正用尽」且已发生工具调用才挂起续跑（长程任务）；
+    // 模型返回空文本等异常仍走兜底话术，避免把偶发异常变成无限续跑。
+    const roundsExhausted = round >= segmentEnd;
+    if (roundsExhausted && tools.length > 0 && toolsUsed.length > 0) {
+      return parkForContinuation(input, mkCheckpoint(segmentEnd), {
+        costUsd,
+        tokensUsed,
+        toolsUsed,
+        confidence,
+        isSelfChat,
+      });
+    }
     finalText = '收到，我先记下了，稍后给你确切答复 🙂';
   }
 
@@ -887,6 +933,11 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
       costUsd,
       tokensUsed,
     });
+    await finishContinuationCard(
+      input.taskId,
+      'failed',
+      `回复被安全护栏拦截（${guarded.reason}），已转交主人。`,
+    );
     stopTyping();
     return { status: 'handed_over', toolsUsed, confidence };
   }
@@ -923,6 +974,11 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
     };
     const { msgId } = await internal.pushCard(input.ownerId, draftCard);
     await addStep(input.taskId, ++stepIdx, 'card', { kind: 'draft' }, { cardMsgId: msgId });
+    await finishContinuationCard(
+      input.taskId,
+      'completed',
+      `分身已完成处理，草稿等你确认：${safeText.slice(0, 100)}`,
+    );
     await finishTask(input.taskId, 'completed', {
       result: safeText,
       decision: { action: 'draft', reason: explanation.reason, confidence },
@@ -960,6 +1016,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
       costUsd,
       tokensUsed,
     });
+    await finishContinuationCard(input.taskId, 'completed', safeText);
     outcome = {
       status: 'replied',
       text: safeText,
@@ -1032,6 +1089,299 @@ async function deliverText(
     input.traceId,
   );
   return msg.msgId;
+}
+
+// ---------------------------------------------------------------------------
+// 长程任务：分段挂起（waiting_continuation）与进度卡片
+// ---------------------------------------------------------------------------
+
+export interface ContinuationMeta {
+  segmentCount: number;
+  cardMsgId: string | null;
+  cardTitle: string;
+  interimSent: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// 检查点压缩：长任务跨段续跑时，较早的步骤折叠为摘要，避免消息无限膨胀
+// ---------------------------------------------------------------------------
+
+/** 保留的最近消息条数（另加首条任务提示与一条步骤摘要） */
+const CHECKPOINT_KEEP_MESSAGES = 24;
+/** 摘要最多列出的步骤数与总字符 */
+const SUMMARY_MAX_STEPS = 20;
+const SUMMARY_MAX_CHARS = 2000;
+
+function summarizeToolContent(content: string | undefined): string {
+  if (!content) return '已执行';
+  try {
+    const data = JSON.parse(content) as Record<string, unknown>;
+    const text = data.summary ?? data.message ?? data.error;
+    if (typeof text === 'string' && text.trim()) return text.trim().slice(0, 160);
+  } catch {
+    // 非 JSON 输出按原文截断
+  }
+  return content.slice(0, 160);
+}
+
+/** 被折叠区间的可读摘要：工具调用 → 结果摘要；模型文本 → 截断保留 */
+export function summarizeDroppedMessages(dropped: ChatMessage[]): string {
+  const outputById = new Map<string, string>();
+  for (const m of dropped) {
+    if (m.role === 'tool' && m.toolCallId) outputById.set(m.toolCallId, m.content);
+  }
+  const lines: string[] = [];
+  for (const m of dropped) {
+    if (m.role === 'assistant' && m.toolCalls?.length) {
+      for (const call of m.toolCalls) {
+        lines.push(`- ${call.name}: ${summarizeToolContent(outputById.get(call.id))}`);
+      }
+    } else if (m.role === 'assistant' && m.content.trim()) {
+      lines.push(`- ${m.content.trim().slice(0, 120)}`);
+    }
+  }
+  if (lines.length === 0) return '';
+  const body = lines.slice(-SUMMARY_MAX_STEPS).join('\n').slice(0, SUMMARY_MAX_CHARS);
+  return `【此前已完成步骤摘要（较早的完整记录已折叠）】\n${body}`;
+}
+
+/**
+ * 压缩检查点消息：首条（任务提示） + 折叠摘要 + 最近 N 条。
+ * 截断点向前对齐到 assistant，避免保留悬空的 tool 结果（Anthropic/OpenAI 都要求成对）。
+ */
+export function compactCheckpointMessages(messages: ChatMessage[]): ChatMessage[] {
+  if (messages.length <= CHECKPOINT_KEEP_MESSAGES + 1) return messages;
+  let cut = messages.length - CHECKPOINT_KEEP_MESSAGES;
+  while (cut > 1 && messages[cut]?.role === 'tool') cut -= 1;
+  const head = messages[0]!;
+  const dropped = messages.slice(1, cut);
+  const kept = messages.slice(cut);
+  const summary = summarizeDroppedMessages(dropped);
+  return summary ? [head, { role: 'assistant', content: summary }, ...kept] : [head, ...kept];
+}
+
+/** 由已用工具序列构建进度卡片步骤：连续同名合并 ×N，只保留最近 8 组 */
+export function buildTaskCardSteps(
+  toolsUsed: string[],
+): Extract<CardPayload, { kind: 'task' }>['steps'] {
+  const grouped: { id: string; count: number }[] = [];
+  for (const id of toolsUsed) {
+    const last = grouped[grouped.length - 1];
+    if (last && last.id === id) last.count += 1;
+    else grouped.push({ id, count: 1 });
+  }
+  const steps: Extract<CardPayload, { kind: 'task' }>['steps'] = grouped.slice(-8).map((g) => ({
+    name: getTool(g.id)?.name ?? g.id,
+    status: 'done' as const,
+    detail: g.count > 1 ? `执行 ${g.count} 次` : undefined,
+  }));
+  if (steps.length === 0) steps.push({ name: '分析任务', status: 'done' });
+  steps.push({ name: '继续处理中…', status: 'running' });
+  return steps;
+}
+
+/**
+ * 单段预算（轮次 / 时间）用尽且工作未完成：
+ *   保存检查点 → 推/更新进度卡片 → 挂起 waiting_continuation 并释放租约。
+ * scheduler 的 continuation sweep 延迟认领并从检查点续跑（continuation.ts）。
+ * 外部会话首次挂起时向对方发一句中间回复，避免「已读不回」；后续段落只更新主人的进度卡片。
+ * 调用点均已过撤权围栏（时间护栏紧跟 checkTurn；轮次护栏在交付前围栏之后）。
+ */
+async function parkForContinuation(
+  input: AgentInput,
+  cp: ResumeCheckpoint,
+  meta: {
+    costUsd: number;
+    tokensUsed: number;
+    toolsUsed: string[];
+    confidence: number;
+    isSelfChat: boolean;
+  },
+): Promise<AgentOutcome> {
+  // 检查点先行（saveCheckpoint 不吞错）：没有检查点的挂起无从续跑，宁可任务失败。
+  // 跨段续跑前压缩历史，防止长任务把较早步骤的完整工具输出无限带入上下文。
+  await saveCheckpoint(input.taskId, {
+    ...cp,
+    messages: compactCheckpointMessages(cp.messages),
+  });
+  await updateTaskStats(input.taskId, meta.costUsd, meta.tokensUsed);
+
+  // 读取上一段的续跑元数据（段数 / 进度卡片 / 中间回复标记）
+  const ctxRows = await db
+    .select({ context: agentTask.context })
+    .from(agentTask)
+    .where(eq(agentTask.id, input.taskId))
+    .limit(1);
+  const prev = (ctxRows[0]?.context?.continuation ?? {}) as Partial<ContinuationMeta>;
+  const segmentCount = (typeof prev.segmentCount === 'number' ? prev.segmentCount : 0) + 1;
+  const cardTitle =
+    prev.cardTitle ??
+    `处理「${input.trigger.content.type === 'text' ? input.trigger.content.text.slice(0, 20) : '任务'}」`;
+  const card: CardPayload = {
+    kind: 'task',
+    taskId: input.taskId,
+    title: cardTitle,
+    status: 'running',
+    steps: buildTaskCardSteps(meta.toolsUsed),
+    summary: `第 ${segmentCount} 段完成，已执行 ${meta.toolsUsed.length} 次工具调用，稍后自动继续。`,
+  };
+
+  let cardMsgId = typeof prev.cardMsgId === 'string' ? prev.cardMsgId : null;
+  if (cardMsgId) {
+    try {
+      await internal.updateCard(cardMsgId, card);
+    } catch {
+      cardMsgId = null; // 原卡片不可更新（被撤回等）→ 重推一张
+    }
+  }
+  if (!cardMsgId) {
+    try {
+      const pushed = await internal.pushCard(input.ownerId, card);
+      cardMsgId = pushed.msgId;
+    } catch (e) {
+      // 进度卡片是辅助信息：推送失败不应阻断续跑（挂起本身依赖的是检查点）
+      log.warn('task card push failed, continue parking', {
+        taskId: input.taskId,
+        error: String(e),
+      });
+    }
+  }
+
+  // 外部会话：首次挂起时告知对方「在处理」；后续段落静默推进（进度只给主人看）
+  let interimSent = Boolean(prev.interimSent);
+  if (!meta.isSelfChat && !interimSent) {
+    const sent = await deliverText(
+      input,
+      '这件事我需要一点时间处理，弄好马上告诉你 🙂',
+      {
+        decision: 'reply',
+        reason: '长程任务分段执行，先告知对方处理中',
+        confidence: meta.confidence,
+        toolsUsed: meta.toolsUsed,
+        memoriesUsed: [],
+      },
+      'L0',
+    ).catch(() => null);
+    if (sent) interimSent = true;
+  }
+
+  // 段审计 + 续跑元数据落库（索引从 150 起，避开恢复路径的 200+ 与审批路径的 98/99）
+  await addStep(
+    input.taskId,
+    150 + segmentCount,
+    'continuation_park',
+    { round: cp.round, segmentCount, toolsUsed: meta.toolsUsed.slice(-5) },
+    { ok: true, cardMsgId },
+  );
+  await db
+    .update(agentTask)
+    .set({
+      context: sql`coalesce(${agentTask.context}, '{}'::jsonb) || ${JSON.stringify({
+        continuation: { segmentCount, cardMsgId, cardTitle, interimSent },
+      })}::jsonb`,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(agentTask.id, input.taskId), eq(agentTask.lockedBy, RUNTIME_ID)));
+
+  // 条件迁移 → waiting_continuation 并释放租约；0 行 = 已被接管/取消，让位
+  const parked = await db
+    .update(agentTask)
+    .set({
+      status: 'waiting_continuation',
+      lockedBy: null,
+      leaseUntil: null,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(agentTask.id, input.taskId),
+        eq(agentTask.lockedBy, RUNTIME_ID),
+        inArray(agentTask.status, ['planning', 'running']),
+      ),
+    )
+    .returning({ id: agentTask.id });
+  if (parked.length === 0) {
+    return { status: 'handed_over', toolsUsed: meta.toolsUsed, confidence: meta.confidence };
+  }
+
+  await appendAudit(
+    input.taskId,
+    input.avatarId,
+    'continuation.park',
+    { round: cp.round, segmentCount, toolsUsed: meta.toolsUsed.length },
+    { ok: true, cardMsgId },
+    null,
+  );
+  // 不清除「正在输入」：TTL 20s 自然过期，续跑段会重新广播
+  log.info('agent task parked for continuation', {
+    taskId: input.taskId,
+    segmentCount,
+    round: cp.round,
+    toolsUsed: meta.toolsUsed.length,
+  });
+  return {
+    status: 'waiting_continuation',
+    toolsUsed: meta.toolsUsed,
+    confidence: meta.confidence,
+  };
+}
+
+/** 任务最终交付 / 转交时收尾进度卡片（无续跑卡片则静默跳过；失败不影响交付语义） */
+export async function finishContinuationCard(
+  taskId: string,
+  status: 'completed' | 'failed' | 'cancelled',
+  result: string,
+): Promise<void> {
+  try {
+    const rows = await db
+      .select({ context: agentTask.context })
+      .from(agentTask)
+      .where(eq(agentTask.id, taskId))
+      .limit(1);
+    const ctx = (rows[0]?.context ?? {}) as { continuation?: Partial<ContinuationMeta> };
+    const cardMsgId = ctx.continuation?.cardMsgId;
+    if (typeof cardMsgId !== 'string' || !cardMsgId) return;
+
+    // 从任务账本还原执行历史，让收尾卡片保留可回放的步骤（而不是只剩一个「已完成」）
+    const toolRows = await db
+      .select({ input: taskStep.input, output: taskStep.output })
+      .from(taskStep)
+      .where(and(eq(taskStep.taskId, taskId), eq(taskStep.type, 'tool')))
+      .orderBy(asc(taskStep.idx));
+    const history: Extract<CardPayload, { kind: 'task' }>['steps'] = [];
+    for (const row of toolRows.slice(-8)) {
+      const input = row.input as { tool?: unknown } | null;
+      if (typeof input?.tool !== 'string') continue;
+      const output = row.output as { summary?: unknown; error?: unknown } | null;
+      const detail =
+        typeof output?.summary === 'string'
+          ? output.summary.slice(0, 80)
+          : typeof output?.error === 'string'
+            ? output.error.slice(0, 80)
+            : undefined;
+      history.push({
+        name: getTool(input.tool)?.name ?? input.tool,
+        status: output?.error ? 'failed' : 'done',
+        detail,
+      });
+    }
+    history.push({
+      name: status === 'completed' ? '已完成' : status === 'cancelled' ? '已取消' : '已停止',
+      status: 'done',
+      detail: result.slice(0, 120),
+    });
+
+    await internal.updateCard(cardMsgId, {
+      kind: 'task',
+      taskId,
+      title: ctx.continuation?.cardTitle ?? '分身任务',
+      status,
+      steps: history,
+      summary: result.slice(0, 200),
+    });
+  } catch {
+    // 卡片收尾失败不影响任务交付
+  }
 }
 
 async function saveMemorySafely(

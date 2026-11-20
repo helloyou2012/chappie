@@ -64,6 +64,7 @@
 | 日程创建确认                          | ✅   | `calendar.create` 先写入「待批准」条目并生成确认卡片；批准后改「已确认」；页面可改标题/日期/时间/相关人/状态 |
 | 日程提醒                              | ✅   | 提前 10 分钟；台账唯一键去重；15 分钟时效线                                                                  |
 | 会话延续（P1）                        | ✅   | 回复分身消息 / 被 @ 后 10 分钟内同发送者后续；最多 5 次                                                      |
+| 长程任务（分段执行 + 定时续驱）       | ✅   | 单段轮次/时间预算用尽挂起 `waiting_continuation`，scheduler 续跑；进度卡片可取消；时限/段数/预算护栏         |
 | 定时/事件触发的其他主动任务           | 🚧   | 目前仅日报 + 日程提醒                                                                                        |
 | 群聊多人审批 / 委托审批               | ⬜   | 审批人固定为主人；群管理员/法定人数是后续能力                                                                |
 | 真实外部工具（邮件/网页/支付）        | 🚧   | `web.search`、`payment.send` 为演示实现；日历/待办为内置能力，邮件未实现                                     |
@@ -113,6 +114,7 @@
 | 接待权         | `core/crates/chat/src/reception.rs`、`chat/src/message.rs`、`gateway/src/rest.rs`                              |
 | 接待摘要       | `ai/src/reception.ts`、`ai/src/outbox-worker.ts`、`packages/contract/src/cards.ts`                             |
 | AI 流水线      | `ai/src/outbox-worker.ts`、`ai/src/pipeline.ts`、`ai/src/agent-runtime.ts`                                     |
+| 长程任务续驱   | `ai/src/continuation.ts`、`ai/src/agent-runtime.ts`（parkForContinuation）、`ai/src/scheduler.ts`（快 tick）   |
 | 策略与档位     | `ai/src/policy.ts`、`ai/src/scheduler.ts`                                                                      |
 | 审批           | `ai/src/approval.ts`、`ai/src/turn-guard.ts`                                                                   |
 | 工具与授权     | `ai/src/tool-gateway.ts`                                                                                       |
@@ -165,6 +167,17 @@
 24. **大规模部署**：fanout 具备多节点语义，未做分片扇出；多节点需统一 `SERVER_EPOCH`。
 25. **桌面端原生能力**：仅窗口容器、拖拽与图标；托盘 / 原生通知 / 自动更新未接。
 26. **邮件投递**：接入 Resend；未配置 `RESEND_API_KEY` 时验证码仅打印日志（开发模式）。
+
+### 3.5 长程任务
+
+27. **分段续驱、非工作流引擎**：长任务仍是 `agent_task` + checkpoint + 租约，scheduler 轮询续跑；
+    进程内无队列，多实例靠条件认领保证幂等。Temporal 类持久化工作流仍是目标态。
+28. **进度卡片步骤是确定性派生**：按已执行工具序列生成，不是模型自报的计划；
+    模型无法中途修改计划或向主人提问（`waiting_user_input` 仍只有状态位）。
+29. **续跑不重算完整策略**：沿用检查点中的 mode/strategy/maxRisk 快照，
+    续跑前只校验配额、撤权、审批与预算（与崩溃恢复一致，见限制 18）。
+30. **外部会话的中途汇报克制**：仅首次挂起发一句「处理中」，后续只更新主人的进度卡片；
+    不向对方逐段同步，避免刷屏。
 
 ## 4. 路线图
 

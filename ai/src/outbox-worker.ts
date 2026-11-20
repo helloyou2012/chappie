@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { CardPayload, MemberSnapshot, Message } from '@chappie/contract';
 import { and, asc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { resumeFromApproval } from './agent-runtime';
+import { finishContinuationCard, resumeFromApproval } from './agent-runtime';
 import { appendAudit } from './common/audit';
 import { client, db } from './common/db';
 import { internal } from './common/internal';
@@ -69,6 +69,11 @@ async function cancelPendingApprovals(
       null,
     );
   }
+}
+
+/** 任务取消后把长程任务的进度卡片收尾为 cancelled；无卡片或失败则静默跳过。 */
+async function updateContinuationCardCancelled(taskId: string): Promise<void> {
+  await finishContinuationCard(taskId, 'cancelled', '任务已被主人取消。');
 }
 
 interface OutboxRow {
@@ -419,6 +424,8 @@ async function handleCardAction(data: {
           });
         } else {
           await cancelPendingApprovals([card.taskId], data.actorId, '任务被主人取消');
+          // 同步收尾长程任务的进度卡片，避免仍显示「进行中」
+          await updateContinuationCardCancelled(card.taskId);
         }
       }
       break;
@@ -610,7 +617,7 @@ async function handleTakeover(data: { userId: string; convId: string }): Promise
       and(
         eq(agentTask.ownerId, data.userId),
         eq(agentTask.triggerConvId, data.convId),
-        sql`${agentTask.status} IN ('created', 'planning', 'running', 'waiting_approval', 'waiting_user_input')`,
+        sql`${agentTask.status} IN ('created', 'planning', 'running', 'waiting_approval', 'waiting_continuation', 'waiting_user_input')`,
       ),
     )
     .returning({ id: agentTask.id });
@@ -620,6 +627,8 @@ async function handleTakeover(data: { userId: string; convId: string }): Promise
     data.userId,
     '主人接管会话',
   );
+  // 长程任务的进度卡片同步收尾，避免接管后仍显示「进行中」
+  for (const row of cancelled) await updateContinuationCardCancelled(row.id);
 
   // 话题冷却 15 分钟（设计方案 §4.3）
   await redisSetEx(aiKeys.cooldown(data.convId, data.userId), '1', 15 * 60);
@@ -683,7 +692,7 @@ async function handleReceptionChanged(data: {
       and(
         eq(agentTask.ownerId, data.userId),
         eq(agentTask.triggerConvId, data.convId),
-        sql`${agentTask.status} IN ('created', 'planning', 'running', 'waiting_approval', 'waiting_user_input')`,
+        sql`${agentTask.status} IN ('created', 'planning', 'running', 'waiting_approval', 'waiting_continuation', 'waiting_user_input')`,
       ),
     )
     .returning({ id: agentTask.id });
@@ -693,6 +702,7 @@ async function handleReceptionChanged(data: {
     data.userId,
     '真人接管会话',
   );
+  for (const row of cancelled) await updateContinuationCardCancelled(row.id);
   await redisSetEx(aiKeys.cooldown(data.convId, data.userId), '1', 15 * 60);
   await appendAudit(
     cancelled[0]?.id ?? 'reception',

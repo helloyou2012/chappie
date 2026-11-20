@@ -217,6 +217,7 @@ export const fixtureTaskCardMessage: Message = {
         { name: '检索日历', status: 'done', detail: '找到 3 场会议' },
         { name: '生成纪要', status: 'running' },
       ],
+      summary: '第 1 段完成，已执行 3 次工具调用，稍后自动继续。',
     },
   },
   mentions: [],

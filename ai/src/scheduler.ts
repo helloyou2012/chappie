@@ -11,6 +11,7 @@ import { dayjs } from './common/datetime';
 import { db } from './common/db';
 import { internal } from './common/internal';
 import { log, newId } from './common/log';
+import { sweepContinuations } from './continuation';
 import {
   agentTask,
   approval,
@@ -24,7 +25,10 @@ import {
 import { sweepOrphanTasks } from './recovery';
 import { normalizeCalendarItem } from './tool-gateway';
 
-const TICK_MS = 30_000;
+/** 快 tick：长程任务续驱（挂起 ~AI_CONTINUATION_DELAY_S 后即续，节奏要跟上） */
+const FAST_TICK_MS = 5_000;
+/** 慢 tick：审批超时 / 日报 / 日程提醒 / 孤儿恢复 */
+const SLOW_TICK_MS = 30_000;
 const REPORT_HOUR_MINUTE = '09:00';
 /** 日程提醒提前量（分钟） */
 const CALENDAR_REMIND_AHEAD_MIN = 10;
@@ -35,18 +39,25 @@ const CALENDAR_REMIND_BATCH = 50;
 
 export async function runScheduler(signal?: AbortSignal): Promise<void> {
   log.info('scheduler started');
+  let lastSlowAt = 0;
   while (!signal?.aborted) {
+    const now = Date.now();
     try {
-      await sweepExpiredApprovals();
-      await runDueReports();
-      // 日程到点提醒（调度触发：分身第一次「主动开口」—— 设计方案 §7.3 定时/事件触发）
-      await sweepCalendarReminders();
-      // 孤儿任务恢复（租约过期 = worker 崩溃 —— 设计方案 §27.4 中断恢复）
-      await sweepOrphanTasks();
+      // 长程任务续驱：高频小批量（条件认领保证幂等，多实例安全）
+      await sweepContinuations();
+      if (now - lastSlowAt >= SLOW_TICK_MS) {
+        lastSlowAt = now;
+        await sweepExpiredApprovals();
+        await runDueReports();
+        // 日程到点提醒（调度触发：分身第一次「主动开口」—— 设计方案 §7.3 定时/事件触发）
+        await sweepCalendarReminders();
+        // 孤儿任务恢复（租约过期 = worker 崩溃 —— 设计方案 §27.4 中断恢复）
+        await sweepOrphanTasks();
+      }
     } catch (e) {
       log.error('scheduler tick failed', { error: String(e) });
     }
-    await sleep(TICK_MS);
+    await sleep(FAST_TICK_MS);
   }
   log.info('scheduler stopped');
 }

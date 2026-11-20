@@ -78,8 +78,11 @@ outbox-worker ──► pipeline ──┬─► router（候选分身）
                                    ├─ tool-gateway（L0-L3 + canonical args）
                                    ├─ approval（参数指纹/操作者/过期/严格 JSON）
                                    ├─ 护栏（注入残留 / 敏感信息脱敏）
+                                   ├─ 长程任务：单段轮次/时间预算用尽 → 挂起 waiting_continuation
+                                   │    （进度卡片 + 外部会话一次性中间回复）
                                    └─ 交付：直接发送 / 草稿卡片 / 转交卡片
 scheduler：日报（每日 09:00）· 审批超时清理 · 日程提醒 · 孤儿任务恢复
+            · continuation sweep（快 tick：挂起任务时限/段数/预算护栏 → 从检查点续跑）
 push：internal.pushCard 成功后的唯一推送入口（Expo Push）
 ```
 
@@ -98,6 +101,12 @@ push：internal.pushCard 成功后的唯一推送入口（Expo Push）
   纯寒暄（“好的”“嗯”等）不延续。
 - **工作态信号**：`agent-runtime` 在任务开始/结束时调用内部接口 `/internal/v1/typing`，
   客户端据此把发送按钮切换为停止/接管（Web `chat-input`、Mobile `chat/[id]`）。
+- **长程任务（分段执行）**：`ai/src/agent-runtime.ts` 单段 ReAct 预算
+  （`AI_MAX_TOOL_ROUNDS` 轮 / `AI_TASK_SEGMENT_MAX_S` 秒）用尽且工作未完成时，
+  保存检查点挂起为 `waiting_continuation`（`ai/src/continuation.ts`），进度经 TaskCard
+  推给主人并可取消；scheduler 快 tick（5s）护栏校验（时限/最大段数/日预算）后从检查点续跑；
+  外部会话首次挂起发一句中间回复避免已读不回。接管/取消/撤权对挂起态同样生效；
+  崩溃在续跑段内则由 recovery 分支 B 从检查点恢复，两套机制不冲突。
 - **好友申请**：`core/crates/chat/src/friend.rs`；接受后在同一事务写入双向 `contact`；
   反向申请自动合并；WS `friend_requests_changed` 驱动客户端刷新。
 - **群主转让 / 解散**：`conversation::transfer_owner` / `dissolve_group`；仅群主可操作，

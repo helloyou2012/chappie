@@ -166,6 +166,18 @@ export const mockProvider: Provider = {
     // 工具结果已回填 → 生成自然语言总结（ReAct 第二轮）
     const toolMsg = lastToolMessage(req.messages);
     if (toolMsg) {
+      // 链式多轮演示：同一指令要「日程 + 待办」时，查完日程继续查待办（长任务多步执行）
+      const hasQueriedTodo = req.messages.some(
+        (m) => m.role === 'assistant' && m.toolCalls?.some((tc) => tc.name === 'todo.list'),
+      );
+      if (
+        allow.has('todo.list') &&
+        /待办/.test(userText) &&
+        /日程|安排/.test(userText) &&
+        !hasQueriedTodo
+      ) {
+        return toolResult('todo.list', {}, req, 0.9);
+      }
       return textResult(summarizeToolOutput(toolMsg.content), req, 0.9);
     }
 

@@ -514,6 +514,11 @@ function CardView({
           card.title,
           <Badge label={card.status} />,
         )}
+        {card.summary ? (
+          <Text variant="caption" tone="muted" style={{ marginTop: 4 }}>
+            {card.summary}
+          </Text>
+        ) : null}
         {card.steps.map((s) => (
           <View
             key={`${s.name}-${s.status}`}
@@ -545,6 +550,7 @@ function CardView({
             </Text>
           </View>
         ))}
+        {card.status === 'running' && done === null ? actions(act('取消任务', 'cancel')) : null}
       </Card>
     );
   }

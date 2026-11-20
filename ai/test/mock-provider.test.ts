@@ -130,6 +130,74 @@ describe('mockProvider 工具触发', () => {
     expect(r.text).toContain('今天有 2 项安排');
     expect(r.confidence).toBeGreaterThanOrEqual(0.9);
   });
+
+  test('「日程 + 待办」指令 → 日程查完后继续查待办（链式多轮，长任务演示）', async () => {
+    const first = await mockProvider.complete(req('帮我看看今天的日程和待办'), {
+      model: 'x',
+      baseUrl: '',
+      apiKey: '',
+    });
+    expect(first.toolCalls[0]?.name).toBe('calendar.read');
+
+    const second = await mockProvider.complete(
+      {
+        system: '你是 alice 的 AI 分身。',
+        messages: [
+          { role: 'user', content: '帮我看看今天的日程和待办' },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [{ id: 'c1', name: 'calendar.read', args: { day: 'today' } }],
+          },
+          {
+            role: 'tool',
+            toolCallId: 'c1',
+            content: JSON.stringify({ summary: '今天有 2 项安排：10:00 评审；11:30 1:1' }),
+          },
+        ],
+        tools: ALL_TOOLS,
+        mockHints: { ownerName: 'alice', triggerText: '帮我看看今天的日程和待办' },
+      },
+      { model: 'x', baseUrl: '', apiKey: '' },
+    );
+    // 第二轮：日程结果回填后继续发起 todo.list，而不是直接总结
+    expect(second.toolCalls[0]?.name).toBe('todo.list');
+
+    // 第三轮：待办结果回填后给出最终总结
+    const third = await mockProvider.complete(
+      {
+        system: '你是 alice 的 AI 分身。',
+        messages: [
+          { role: 'user', content: '帮我看看今天的日程和待办' },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [{ id: 'c1', name: 'calendar.read', args: { day: 'today' } }],
+          },
+          {
+            role: 'tool',
+            toolCallId: 'c1',
+            content: JSON.stringify({ summary: '今天有 2 项安排：10:00 评审；11:30 1:1' }),
+          },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [{ id: 'c2', name: 'todo.list', args: {} }],
+          },
+          {
+            role: 'tool',
+            toolCallId: 'c2',
+            content: JSON.stringify({ summary: '待办有 1 项：买咖啡' }),
+          },
+        ],
+        tools: ALL_TOOLS,
+        mockHints: { ownerName: 'alice', triggerText: '帮我看看今天的日程和待办' },
+      },
+      { model: 'x', baseUrl: '', apiKey: '' },
+    );
+    expect(third.toolCalls).toEqual([]);
+    expect(third.text).toContain('买咖啡');
+  });
 });
 
 describe('mockProvider 审批续跑', () => {

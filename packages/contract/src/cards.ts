@@ -49,6 +49,8 @@ export const TaskCard = z.object({
   title: z.string(),
   status: z.enum(['running', 'completed', 'failed', 'cancelled']),
   steps: z.array(TaskCardStep).default([]),
+  /** 进度摘要（长程任务每段执行后更新） */
+  summary: z.string().default(''),
 });
 export type TaskCard = z.infer<typeof TaskCard>;
 

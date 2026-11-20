@@ -34,6 +34,18 @@ export interface AiConfig {
   recoveryBatch: number;
   /** 提示词历史区字符预算（有界上下文） */
   contextCharBudget: number;
+  /** 单段 ReAct 循环最多工具轮次（每段独立计数；跨段由时限/段数约束） */
+  maxToolRounds: number;
+  /** 单段执行时间预算（秒）：超时且工作未完成 → 挂起 waiting_continuation */
+  taskSegmentMaxSeconds: number;
+  /** 挂起任务续驱延迟（秒）：scheduler 每隔该时间扫一次 waiting_continuation */
+  continuationDelaySeconds: number;
+  /** 续驱每 tick 认领上限 */
+  continuationBatch: number;
+  /** 长程任务整体时限（秒）：超时未完成 → 转交主人并结束 */
+  longTaskMaxSeconds: number;
+  /** 长程任务最大执行段数：防止快速空转刷段 */
+  longTaskMaxSegments: number;
   /** 合理沉默阈值：低于该置信度且满足其他条件时沉默；0 = 关闭 */
   silenceMinConfidence: number;
   /** Expo Push access token（未配置则推送降级跳过，功能不报错） */
@@ -73,6 +85,12 @@ export function loadConfig(): AiConfig {
     recoveryApprovalGraceSeconds: Number(env('AI_RECOVERY_APPROVAL_GRACE_S', '120')),
     recoveryBatch: Number(env('AI_RECOVERY_BATCH', '5')),
     contextCharBudget: Number(env('AI_CONTEXT_CHAR_BUDGET', '6000')),
+    maxToolRounds: Number(env('AI_MAX_TOOL_ROUNDS', '10')),
+    taskSegmentMaxSeconds: Number(env('AI_TASK_SEGMENT_MAX_S', '240')),
+    continuationDelaySeconds: Number(env('AI_CONTINUATION_DELAY_S', '5')),
+    continuationBatch: Number(env('AI_CONTINUATION_BATCH', '3')),
+    longTaskMaxSeconds: Number(env('AI_LONG_TASK_MAX_S', '1800')),
+    longTaskMaxSegments: Number(env('AI_LONG_TASK_MAX_SEGMENTS', '8')),
     silenceMinConfidence: Number(env('AI_SILENCE_MIN_CONFIDENCE', '0.6')),
     expoPushToken: env('EXPO_ACCESS_TOKEN'),
     expoPushUrl: env('EXPO_PUSH_URL', 'https://exp.host/--/api/v2/push/send'),

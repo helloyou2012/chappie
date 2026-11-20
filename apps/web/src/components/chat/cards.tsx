@@ -376,6 +376,7 @@ function TaskCardView({
       }
     >
       <div className="space-y-1.5">
+        {card.summary ? <div className="text-xs text-muted-foreground">{card.summary}</div> : null}
         {card.steps.map((s) => (
           <div key={`${s.name}-${s.status}`} className="flex items-start gap-2 text-xs">
             {s.status === 'done' ? (
