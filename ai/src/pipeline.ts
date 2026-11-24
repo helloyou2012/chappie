@@ -6,8 +6,9 @@
  * driveTask 持任务租约执行（task-lease）；崩溃后由 recovery.ts 认领续跑 —— 设计方案 §27.4。
  */
 
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { MemberSnapshot, Message } from '@chappie/contract';
-import { and, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, ne, sql } from 'drizzle-orm';
 import { runAgent } from './agent-runtime';
 import { type Classification, classify } from './classifier';
 import { config } from './common/config';
@@ -46,6 +47,37 @@ export async function processMessageCreated(data: {
   if (message.senderType === 'system') return;
   // 卡片消息（分身发出的通知）不触发新链路
   if (message.content.type === 'card') return;
+
+  // 附件突发合并：同一发送者先发图片/文件、随后发文本时，只让最后一条触发一次回复。
+  // outbox 按会话串行，这里的等待会让后续消息排在本条之后，但消息已落库，可直接查询到。
+  if (
+    config.attachmentBurstMs > 0 &&
+    message.senderType === 'human' &&
+    (message.content.type === 'image' || message.content.type === 'file') &&
+    !message.mentions?.length
+  ) {
+    await sleep(config.attachmentBurstMs);
+    const later = await db
+      .select({ msgId: messageTable.msgId })
+      .from(messageTable)
+      .where(
+        and(
+          eq(messageTable.convId, message.convId),
+          eq(messageTable.senderId, message.senderId),
+          eq(messageTable.senderType, 'human'),
+          gt(messageTable.seq, message.seq),
+        ),
+      )
+      .orderBy(asc(messageTable.seq))
+      .limit(1);
+    if (later.length > 0) {
+      log.info('attachment burst: superseded by later message', {
+        msgId: message.msgId,
+        laterMsgId: later[0]!.msgId,
+      });
+      return;
+    }
+  }
 
   const convRows = await db
     .select({ id: conversation.id, type: conversation.type, systemTag: conversation.systemTag })

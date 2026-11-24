@@ -32,12 +32,20 @@ export interface ToolDef {
   parameters: Record<string, unknown>;
 }
 
+export interface PromptImage {
+  mime: string;
+  /** base64（不含 data: 前缀） */
+  data: string;
+}
+
 export interface CompleteRequest {
   system: string;
   messages: ChatMessage[];
   tools?: ToolDef[];
   temperature?: number;
   maxTokens?: number;
+  /** 多模态图片：附加到首条 user 消息（仅在 MODEL_MULTIMODAL=true 时由运行时填充） */
+  images?: PromptImage[];
   /** 启用供应商 SSE 流式（工具调用仍等流结束后一次性返回） */
   stream?: boolean;
   /** 开启扩展思考（provider 支持 thinking 时生效） */

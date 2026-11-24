@@ -200,3 +200,46 @@ describe('anthropic 流式 thinking', () => {
     expect(r.toolCalls).toEqual([]);
   });
 });
+
+describe('anthropic 多工具结果分组', () => {
+  test('同一轮多个 tool_result 合并进一条 user 消息', async () => {
+    let captured: { messages?: { role: string; content: unknown }[] } = {};
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      captured = JSON.parse(String(init?.body ?? '{}'));
+      return new Response(
+        JSON.stringify({
+          model: 'claude-x',
+          content: [{ type: 'text', text: 'ok' }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    await anthropicProvider.complete(
+      {
+        system: 'sys',
+        messages: [
+          { role: 'user', content: 'hi' },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [
+              { id: 'a', name: 'calendar.read', args: { day: 'today' } },
+              { id: 'b', name: 'calendar.read', args: { day: 'tomorrow' } },
+            ],
+          },
+          { role: 'tool', toolCallId: 'a', content: 'A' },
+          { role: 'tool', toolCallId: 'b', content: 'B' },
+        ],
+        tools: TOOLS,
+      },
+      { model: 'claude-x', baseUrl: 'http://mock', apiKey: 'k' },
+    );
+    const msgs = captured.messages ?? [];
+    expect(msgs).toHaveLength(3);
+    const last = msgs[2] as { role: string; content: { type: string; tool_use_id: string }[] };
+    expect(last.role).toBe('user');
+    expect(last.content.map((b) => b.tool_use_id)).toEqual(['a', 'b']);
+  });
+});

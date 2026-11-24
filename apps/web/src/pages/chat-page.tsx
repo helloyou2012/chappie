@@ -3,15 +3,17 @@ import {
   api,
   formatTime,
   type Message,
+  type PendingMessage,
+  resolveAttachmentUrl,
   STRATEGY_LABELS,
   useAuthStore,
   useChatStore,
 } from '@chappie/shared';
 import { ChatBubbleLeftRightIcon, SparklesIcon } from '@heroicons/react/24/outline';
-import { RiInformationLine, RiLoader4Line } from '@remixicon/react';
-import { useEffect, useRef, useState } from 'react';
+import { RiAttachment2, RiFileTextLine, RiInformationLine, RiLoader4Line } from '@remixicon/react';
+import { type DragEvent, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChatInput } from '@/components/chat/chat-input';
+import { ChatInput, type ChatInputHandle } from '@/components/chat/chat-input';
 import { MemberPanel } from '@/components/chat/member-panel';
 import { MessageBubble } from '@/components/chat/message-bubble';
 import { ModeSwitch } from '@/components/chat/mode-switch';
@@ -48,6 +50,34 @@ export function ChatPage() {
   const [takeoverBusy, setTakeoverBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<ChatInputHandle>(null);
+  const dragDepthRef = useRef(0);
+  const [dragging, setDragging] = useState(false);
+  const hasFileDrag = (e: DragEvent) => Array.from(e.dataTransfer.types).includes('Files');
+  const onDragEnter = (e: DragEvent) => {
+    if (!hasFileDrag(e)) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setDragging(true);
+  };
+  const onDragOver = (e: DragEvent) => {
+    if (!hasFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  const onDragLeave = () => {
+    if (dragDepthRef.current === 0) return;
+    dragDepthRef.current -= 1;
+    if (dragDepthRef.current === 0) setDragging(false);
+  };
+  const onDrop = (e: DragEvent) => {
+    dragDepthRef.current = 0;
+    setDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    e.preventDefault();
+    chatInputRef.current?.addFiles(files);
+  };
   const atBottomRef = useRef(true);
   const lastScrollKeyRef = useRef<{
     convId?: string;
@@ -200,8 +230,15 @@ export function ChatPage() {
         : '对方当前为真人接待';
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div className="flex min-h-0 min-w-0 flex-1">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: 拖拽上传是鼠标增强，键盘/触摸可用底部附件按钮 */}
+      <div
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
         <header
           data-tauri-drag-region
           className="flex h-14 shrink-0 select-none items-center justify-between gap-3 px-3"
@@ -252,7 +289,7 @@ export function ChatPage() {
             const el = e.currentTarget;
             atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
           }}
-          className="scrollbar-thin min-h-0 flex-1 overflow-y-auto py-3"
+          className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto py-3"
         >
           {messages.length > 0 ? (
             <div className="mb-2 flex justify-center">
@@ -283,11 +320,7 @@ export function ChatPage() {
           ))}
 
           {pending.map((p) => (
-            <PendingBubble
-              key={p.clientMsgId}
-              text={contentText(p.content)}
-              createdAt={p.createdAt}
-            />
+            <PendingBubble key={p.clientMsgId} pending={p} />
           ))}
 
           {/* 固定高度占位：loading 消失时高度不变，避免贴底视图向上弹一下 */}
@@ -314,12 +347,22 @@ export function ChatPage() {
         </div>
 
         <ChatInput
+          ref={chatInputRef}
           convId={convId}
           members={members}
           avatarTyping={avatarTyping}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
         />
+
+        {dragging ? (
+          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-brand/5 p-6">
+            <div className="flex items-center gap-2 rounded-xl border border-brand/30 bg-view px-4 py-2.5 text-sm font-medium text-ink shadow-pop">
+              <RiAttachment2 className="size-4 text-brand" />
+              松开以添加附件
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <MemberPanel
@@ -341,22 +384,69 @@ export function ChatPage() {
   );
 }
 
-function PendingBubble({ text, createdAt }: { text: string; createdAt: string }) {
+function PendingBubble({ pending }: { pending: PendingMessage }) {
+  const content = pending.content;
+  const uploading = pending.status === 'uploading';
   return (
-    <div className="flex flex-row-reverse gap-2 px-4 py-1.5 opacity-60">
+    <div className="flex flex-row-reverse gap-2 px-4 py-1.5">
       <div className="w-8 shrink-0" />
       <div className="flex max-w-[72%] flex-col items-end gap-1">
         <div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
           <span>我</span>
-          <span>{formatTime(createdAt)}</span>
-          <RiLoader4Line className="size-2.5 animate-spin" />
+          <span>{formatTime(pending.createdAt)}</span>
+          {pending.status === 'failed' ? (
+            <span className="text-destructive">上传失败</span>
+          ) : (
+            <>
+              <RiLoader4Line className="size-2.5 animate-spin" />
+              <span>{uploading ? '上传中' : '发送中'}</span>
+            </>
+          )}
         </div>
-        <div className="rounded-2xl bg-primary/70 px-3.5 py-2 text-sm text-primary-foreground break-words whitespace-pre-wrap">
-          {text}
-        </div>
+        {content.type === 'image' ? (
+          <div className="relative overflow-hidden rounded-xl bg-muted">
+            {content.url ? (
+              <img
+                src={resolveAttachmentUrl(content.url)}
+                alt={content.name ?? '图片'}
+                className={cn('max-h-60 max-w-[260px] object-contain', uploading && 'opacity-70')}
+              />
+            ) : (
+              <div className="flex h-36 w-52 items-center justify-center">
+                <RiLoader4Line className="size-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+            {uploading ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/25">
+                <RiLoader4Line className="size-5 animate-spin text-white" />
+              </div>
+            ) : null}
+          </div>
+        ) : content.type === 'file' ? (
+          <div className="flex w-64 items-center gap-2 rounded-xl bg-primary/70 px-3 py-2 text-primary-foreground">
+            <RiFileTextLine className="size-5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-xs font-medium">{content.name}</div>
+              {typeof content.size === 'number' ? (
+                <div className="text-[10px] opacity-80">{formatBytes(content.size)}</div>
+              ) : null}
+            </div>
+            {uploading ? <RiLoader4Line className="size-4 shrink-0 animate-spin" /> : null}
+          </div>
+        ) : (
+          <div className="rounded-2xl bg-primary/70 px-3.5 py-2 text-sm text-primary-foreground break-words whitespace-pre-wrap">
+            {contentText(content)}
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /** 供外部类型推断使用 */

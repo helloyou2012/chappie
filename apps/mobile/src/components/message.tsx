@@ -1,9 +1,9 @@
 import { contentText } from '@chappie/contract';
 import type { CardPayload, MemberView, Message } from '@chappie/shared';
-import { api, formatTime, stripToolCallMarkup } from '@chappie/shared';
+import { api, formatTime, resolveAttachmentUrl, stripToolCallMarkup } from '@chappie/shared';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, View } from 'react-native';
+import { Animated, Easing, Image, Linking, Pressable, View } from 'react-native';
 import Icon from 'react-native-remix-icon';
 import { useTheme } from '@/hooks/use-theme';
 import { realtime } from '@/realtime';
@@ -65,6 +65,14 @@ export function MessageBubble({
       : contentText(message.content);
   // 历史消息可能已把文本形式的 <tool_call> 落库：渲染时兜底剥离
   const text = isAvatar ? stripToolCallMarkup(rawText) : rawText;
+  const media =
+    !message.recalled && (message.content.type === 'image' || message.content.type === 'file')
+      ? message.content
+      : null;
+  const imageHeight =
+    media?.type === 'image' && media.width && media.height
+      ? Math.min(280, Math.round((220 * media.height) / media.width))
+      : 160;
   const canRecall = !message.recalled && (mine || message.onBehalfOf === myId);
 
   const feedback = (type: 'like' | 'report') => {
@@ -90,7 +98,51 @@ export function MessageBubble({
           activity={message.aiMeta?.activity ?? []}
           streaming={Boolean(message.aiMeta?.streaming) && !message.recalled}
         />
-        {text ? (
+        {media ? (
+          media.type === 'image' ? (
+            <Pressable
+              onPress={() => void Linking.openURL(resolveAttachmentUrl(media.url))}
+              onLongPress={() => setSheetOpen(true)}
+            >
+              <Image
+                source={{ uri: resolveAttachmentUrl(media.url) }}
+                style={{ width: 220, height: imageHeight, borderRadius: 14 }}
+                resizeMode="cover"
+              />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={() => void Linking.openURL(resolveAttachmentUrl(media.url))}
+              onLongPress={() => setSheetOpen(true)}
+              style={{
+                width: 260,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                borderRadius: 12,
+                backgroundColor: mine ? t.bubbleUser : isAvatar ? t.surfaceRaised : t.bubble,
+                padding: 10,
+              }}
+            >
+              <Icon name="file-text-line" size={20} color={mine ? t.bubbleUserText : t.textMuted} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text
+                  variant="caption"
+                  numberOfLines={1}
+                  style={{ fontWeight: '600', color: mine ? t.bubbleUserText : t.text }}
+                >
+                  {media.name}
+                </Text>
+                {typeof media.size === 'number' ? (
+                  <Text variant="micro" style={{ color: mine ? t.bubbleUserText : t.textMuted }}>
+                    {formatBytes(media.size)}
+                  </Text>
+                ) : null}
+              </View>
+              <Icon name="download-line" size={16} color={mine ? t.bubbleUserText : t.textMuted} />
+            </Pressable>
+          )
+        ) : text ? (
           <MessageSurface
             mine={mine}
             isAvatar={isAvatar}
@@ -728,4 +780,10 @@ function BlinkingCursor({ color }: { color?: string }) {
     return () => loop.stop();
   }, [opacity]);
   return <Animated.Text style={{ color, opacity }}>▍</Animated.Text>;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }

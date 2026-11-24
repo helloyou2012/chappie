@@ -18,6 +18,13 @@ import { dayjs } from './common/datetime';
 import { db } from './common/db';
 import { capabilityGrant, toolData } from './db/schema';
 import { complete } from './model-gateway';
+import { readToolData, writeToolData } from './tool-data';
+import { calendarIcsTools } from './tools/calendar-ics';
+import { contactTools } from './tools/contacts';
+import { emailTools } from './tools/email';
+import { fileTools } from './tools/files';
+import { walletTools } from './tools/wallet';
+import { webTools } from './tools/web';
 
 const RISK_ORDER: Record<RiskLevel, number> = { L0: 0, L1: 1, L2: 2, L3: 3 };
 
@@ -205,24 +212,6 @@ export async function cancelPendingCalendarItem(avatarId: string, taskId: string
 }
 
 /** 供 admin-api（日程/待办页）复用：读 avatar 级工具数据，无记录时返回 fallback */
-export async function readToolData<T>(avatarId: string, kind: string, fallback: T): Promise<T> {
-  const rows = await db
-    .select({ data: toolData.data })
-    .from(toolData)
-    .where(and(eq(toolData.avatarId, avatarId), eq(toolData.kind, kind)));
-  return rows.length ? ((rows[0].data as T) ?? fallback) : fallback;
-}
-
-export async function writeToolData(avatarId: string, kind: string, data: unknown): Promise<void> {
-  await db
-    .insert(toolData)
-    .values({ avatarId, kind, data })
-    .onConflictDoUpdate({
-      target: [toolData.avatarId, toolData.kind],
-      set: { data, updatedAt: sql`now()` },
-    });
-}
-
 function todayCalendar(): CalendarItem[] {
   const today = dayjs().format('YYYY-MM-DD');
   return [
@@ -267,7 +256,7 @@ async function callModelText(system: string, user: string): Promise<string> {
 // 内置工具注册表
 // ---------------------------------------------------------------------------
 
-export const BUILTIN_TOOLS: BuiltinTool[] = [
+const BASE_TOOLS: BuiltinTool[] = [
   {
     id: 'calendar.read',
     name: '查询日程',
@@ -659,56 +648,19 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       return { summary: `总结：${summary}`, text: summary };
     },
   },
-  {
-    id: 'web.search',
-    name: '搜索',
-    description: '在网络上搜索信息（演示实现返回模拟结果）',
-    risk: 'L0',
-    idempotent: true,
-    jsonSchema: {
-      type: 'object',
-      required: ['query'],
-      properties: { query: { type: 'string' } },
-    },
-    validate: z.object({ query: z.string().min(1).max(200) }),
-    async exec(args) {
-      const q = String(args.query);
-      return {
-        summary: `搜到 3 条与「${q}」相关的信息（演示数据）：1) 概念综述；2) 实践指南；3) 最新动态。`,
-        items: [`${q} 概念综述`, `${q} 实践指南`, `${q} 最新动态`],
-      };
-    },
-  },
-  {
-    id: 'payment.send',
-    name: '发起转账',
-    description: '给他人转账（高风险，需主人确认）',
-    risk: 'L2',
-    idempotent: false,
-    jsonSchema: {
-      type: 'object',
-      required: ['amount'],
-      properties: {
-        amount: { type: 'number', description: '金额（元）' },
-        currency: { type: 'string', default: 'CNY' },
-        note: { type: 'string' },
-      },
-    },
-    validate: z.object({
-      amount: z.number().positive(),
-      currency: z.string().default('CNY'),
-      note: z.string().optional(),
-    }),
-    async exec(args) {
-      const txId = `tx_${uuidv4().slice(0, 8)}`;
-      return {
-        ok: true,
-        transactionId: txId,
-        summary: `已代你向对方转账 ¥${Number(args.amount)}（演示交易 ${txId}），请留意到账通知。`,
-      };
-    },
-  },
 ];
+
+export const BUILTIN_TOOLS: BuiltinTool[] = [
+  ...BASE_TOOLS,
+  ...contactTools,
+  ...walletTools,
+  ...webTools,
+  ...emailTools,
+  ...fileTools,
+  ...calendarIcsTools,
+];
+
+export { readToolData, writeToolData } from './tool-data';
 
 export function getTool(id: string): BuiltinTool | undefined {
   return BUILTIN_TOOLS.find((t) => t.id === id);

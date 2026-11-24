@@ -1,5 +1,6 @@
-import { contentText } from '@chappie/contract';
+import { type Content, contentText } from '@chappie/contract';
 import {
+  adminApi,
   api,
   dayjs,
   formatTime,
@@ -11,9 +12,21 @@ import {
   useAuthStore,
   useChatStore,
 } from '@chappie/shared';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  View,
+} from 'react-native';
+import Icon from 'react-native-remix-icon';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MemberSheet } from '@/components/member-sheet';
 import { type CardAction, MessageBubble } from '@/components/message';
@@ -21,6 +34,10 @@ import { useTheme } from '@/hooks/use-theme';
 import { realtime } from '@/realtime';
 import { modeLabels } from '@/theme';
 import { Badge, BottomSheet, Button, Chip, IconButton, Input, Text } from '@/ui';
+
+function newClientId(): string {
+  return `cm_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
 
 const STRATEGIES: ReceptionStrategy[] = [
   'summon',
@@ -49,6 +66,8 @@ export default function ChatScreen() {
   const setActiveConv = useChatStore((s) => s.setActiveConv);
   const loadConversations = useChatStore((s) => s.loadConversations);
   const addPending = useChatStore((s) => s.addPending);
+  const updatePending = useChatStore((s) => s.updatePending);
+  const removePending = useChatStore((s) => s.removePending);
   const myId = useAuthStore((s) => s.user?.id ?? '');
 
   const view = conversations.find((c) => c.conversation.id === convId);
@@ -72,6 +91,21 @@ export default function ChatScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [olderExhausted, setOlderExhausted] = useState(false);
   const [showJump, setShowJump] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  /** 同步发送锁：state 更新前拦住连点 */
+  const sendingRef = useRef(false);
+  const lastSentAtRef = useRef(0);
+  const [attachments, setAttachments] = useState<
+    Array<{
+      uri: string;
+      name: string;
+      type: string;
+      isImage: boolean;
+      width?: number;
+      height?: number;
+      size?: number;
+    }>
+  >([]);
   const [, setTypingTick] = useState(0);
   const listRef = useRef<FlatList>(null);
   const atBottomRef = useRef(true);
@@ -138,27 +172,189 @@ export default function ChatScreen() {
     );
   }, [messages.length, pending.length, lastSig]);
 
-  const send = () => {
+  const uploadOne = async (att: {
+    uri: string;
+    name: string;
+    type: string;
+    isImage: boolean;
+    width?: number;
+    height?: number;
+    size?: number;
+  }): Promise<Content> => {
+    const { file: info, url } = await adminApi.uploadFile(
+      { uri: att.uri, name: att.name, type: att.type },
+      att.name,
+    );
+    return info.mime.startsWith('image/')
+      ? {
+          type: 'image',
+          schemaVersion: 1,
+          url,
+          name: info.name,
+          ...(att.width ? { width: att.width } : {}),
+          ...(att.height ? { height: att.height } : {}),
+        }
+      : {
+          type: 'file',
+          schemaVersion: 1,
+          url,
+          name: info.name,
+          ...(info.size ? { size: info.size } : {}),
+        };
+  };
+
+  const send = async () => {
+    // 同步锁 + 短冷却：拦截连点等重复提交
+    if (sendingRef.current || Date.now() - lastSentAtRef.current < 600) return;
     const value = text.trim();
-    if (!value || !convId) return;
+    if (!value && attachments.length === 0) return;
+    if (!convId) return;
     const ws = realtime();
-    if (!ws?.isOpen) return;
-    const content = { type: 'text' as const, schemaVersion: 1, text: value };
-    const clientMsgId = ws.sendMessage(convId, content, {
-      mentions,
-      replyTo: replyTo?.msgId ?? null,
+    if (!ws?.isOpen) {
+      Alert.alert('连接未就绪', '正在重新连接，请稍候再试');
+      return;
+    }
+    sendingRef.current = true;
+    lastSentAtRef.current = Date.now();
+    setUploading(true);
+
+    const batch = [...attachments];
+    const batchIds = batch.map(() => newClientId());
+    const textId = value ? newClientId() : null;
+    const createdAt = dayjs().toISOString();
+    const replyToId = replyTo?.msgId ?? null;
+
+    // 1) 立即上屏：图片用本地预览，文本同时显示
+    batch.forEach((att, i) => {
+      const content: Content = att.isImage
+        ? {
+            type: 'image',
+            schemaVersion: 1,
+            url: att.uri,
+            name: att.name,
+            ...(att.width ? { width: att.width } : {}),
+            ...(att.height ? { height: att.height } : {}),
+          }
+        : {
+            type: 'file',
+            schemaVersion: 1,
+            url: '',
+            name: att.name,
+            ...(att.size ? { size: att.size } : {}),
+          };
+      addPending({
+        clientMsgId: batchIds[i]!,
+        convId,
+        content,
+        mentions: [],
+        replyTo: replyToId,
+        createdAt,
+        status: 'uploading',
+      });
     });
-    addPending({
-      clientMsgId,
-      convId,
-      content,
-      mentions,
-      replyTo: replyTo?.msgId ?? null,
-      createdAt: dayjs().toISOString(),
-    });
+    if (value && textId) {
+      addPending({
+        clientMsgId: textId,
+        convId,
+        content: { type: 'text', schemaVersion: 1, text: value },
+        mentions,
+        replyTo: replyToId,
+        createdAt,
+        status: 'sending',
+      });
+    }
     setText('');
     setMentions([]);
     setReplyTo(null);
+    setAttachments([]);
+
+    const uploaded: { clientMsgId: string; content: Content }[] = [];
+    const failed: string[] = [];
+    try {
+      // 2) 异步上传；完成后只更新 pending，不立即发 WS
+      for (let i = 0; i < batch.length; i++) {
+        const att = batch[i]!;
+        const clientMsgId = batchIds[i]!;
+        try {
+          const content = await uploadOne(att);
+          updatePending(convId, clientMsgId, { content, status: 'sending' });
+          uploaded.push({ clientMsgId, content });
+        } catch {
+          removePending(convId, clientMsgId);
+          failed.push(att.name);
+          setAttachments((prev) => [...prev, att]);
+        }
+      }
+
+      // 3) 全部上传完成后快速提交，附件+文本落在同一个 AI 合并窗口内
+      for (const item of uploaded) {
+        ws.sendMessage(convId, item.content, {
+          clientMsgId: item.clientMsgId,
+          mentions: [],
+          replyTo: replyToId,
+        });
+      }
+      if (value && textId) {
+        ws.sendMessage(
+          convId,
+          { type: 'text', schemaVersion: 1, text: value },
+          { clientMsgId: textId, mentions, replyTo: replyToId },
+        );
+      }
+      if (failed.length > 0) {
+        Alert.alert('部分附件上传失败', failed.join('、'));
+      }
+    } catch (e) {
+      Alert.alert('发送失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      sendingRef.current = false;
+      setUploading(false);
+    }
+  };
+
+  const pickImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('需要相册权限', '请在系统设置中允许访问照片');
+      return;
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.85,
+      allowsMultipleSelection: true,
+    });
+    if (res.canceled) return;
+    setAttachments((prev) => [
+      ...prev,
+      ...res.assets.map((asset) => ({
+        uri: asset.uri,
+        name: asset.fileName ?? `image-${Date.now()}.jpg`,
+        type: asset.mimeType ?? 'image/jpeg',
+        isImage: true,
+        width: asset.width,
+        height: asset.height,
+        size: asset.fileSize,
+      })),
+    ]);
+  };
+
+  const pickFile = async () => {
+    const res = await DocumentPicker.getDocumentAsync({
+      type: ['application/pdf', 'text/*', 'application/json', 'application/zip'],
+      multiple: true,
+      copyToCacheDirectory: true,
+    });
+    if (res.canceled) return;
+    setAttachments((prev) => [
+      ...prev,
+      ...res.assets.map((asset) => ({
+        uri: asset.uri,
+        name: asset.name,
+        type: asset.mimeType ?? 'application/octet-stream',
+        isImage: (asset.mimeType ?? '').startsWith('image/'),
+        size: asset.size,
+      })),
+    ]);
   };
 
   const onCardAction = (msgId: string, action: CardAction, editedText?: string) => {
@@ -304,31 +500,122 @@ export default function ChatScreen() {
         }
         renderItem={({ item }) => {
           if (item.kind === 'pending') {
+            const pc = item.pending.content;
+            const uploading = item.pending.status === 'uploading';
             return (
               <View
                 style={{
                   alignItems: 'flex-end',
                   paddingHorizontal: 14,
                   paddingVertical: 5,
-                  opacity: 0.6,
                 }}
               >
-                <Text variant="micro" tone="muted" style={{ marginBottom: 3 }}>
-                  我 · {formatTime(item.pending.createdAt)} · 发送中
-                </Text>
                 <View
                   style={{
-                    backgroundColor: t.primary,
-                    borderRadius: 16,
-                    paddingHorizontal: 13,
-                    paddingVertical: 9,
-                    maxWidth: '82%',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    marginBottom: 3,
                   }}
                 >
-                  <Text style={{ fontSize: 15, color: t.primaryFg }}>
-                    {contentText(item.pending.content)}
+                  <Text variant="micro" tone="muted">
+                    我 · {formatTime(item.pending.createdAt)} · {uploading ? '上传中' : '发送中'}
                   </Text>
+                  <ActivityIndicator size="small" color={t.textMuted} />
                 </View>
+                {pc.type === 'image' ? (
+                  <View
+                    style={{
+                      position: 'relative',
+                      borderRadius: 16,
+                      overflow: 'hidden',
+                      backgroundColor: t.surfaceRaised,
+                    }}
+                  >
+                    {pc.url ? (
+                      <Image
+                        source={{ uri: pc.url }}
+                        style={{
+                          width: 220,
+                          height:
+                            pc.width && pc.height
+                              ? Math.min(280, Math.round((220 * pc.height) / pc.width))
+                              : 160,
+                          opacity: uploading ? 0.7 : 1,
+                        }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View
+                        style={{
+                          width: 220,
+                          height: 160,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <ActivityIndicator color={t.primary} />
+                      </View>
+                    )}
+                    {uploading ? (
+                      <View
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          backgroundColor: 'rgba(0,0,0,0.25)',
+                        }}
+                      >
+                        <ActivityIndicator color="#fff" />
+                      </View>
+                    ) : null}
+                  </View>
+                ) : pc.type === 'file' ? (
+                  <View
+                    style={{
+                      width: 260,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                      borderRadius: 12,
+                      backgroundColor: t.primary,
+                      padding: 10,
+                    }}
+                  >
+                    <Icon name="file-text-line" size={20} color={t.primaryFg} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text
+                        variant="caption"
+                        numberOfLines={1}
+                        style={{ color: t.primaryFg, fontWeight: '600' }}
+                      >
+                        {pc.name ?? '文件'}
+                      </Text>
+                      {typeof pc.size === 'number' ? (
+                        <Text variant="micro" style={{ color: t.primaryFg, opacity: 0.8 }}>
+                          {formatBytes(pc.size)}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {uploading ? <ActivityIndicator color={t.primaryFg} /> : null}
+                  </View>
+                ) : (
+                  <View
+                    style={{
+                      backgroundColor: t.primary,
+                      borderRadius: 16,
+                      paddingHorizontal: 13,
+                      paddingVertical: 9,
+                      maxWidth: '82%',
+                    }}
+                  >
+                    <Text style={{ fontSize: 15, color: t.primaryFg }}>{contentText(pc)}</Text>
+                  </View>
+                )}
               </View>
             );
           }
@@ -472,6 +759,46 @@ export default function ChatScreen() {
             />
           </View>
         ) : null}
+        {attachments.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingTop: 8 }}
+          >
+            {attachments.map((att, index) => (
+              <View
+                key={`${att.name}-${index}`}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  backgroundColor: t.surfaceRaised,
+                  borderRadius: 10,
+                  padding: 4,
+                }}
+              >
+                {att.isImage ? (
+                  <Image
+                    source={{ uri: att.uri }}
+                    style={{ width: 34, height: 34, borderRadius: 6 }}
+                  />
+                ) : (
+                  <Icon name="file-text-line" size={16} color={t.textMuted} />
+                )}
+                <Text variant="micro" tone="muted" numberOfLines={1} style={{ maxWidth: 110 }}>
+                  {att.name}
+                </Text>
+                <IconButton
+                  icon="close-line"
+                  label="移除附件"
+                  size={24}
+                  tone="muted"
+                  onPress={() => setAttachments((prev) => prev.filter((_, i) => i !== index))}
+                />
+              </View>
+            ))}
+          </ScrollView>
+        ) : null}
         <View
           style={{
             flexDirection: 'row',
@@ -481,6 +808,23 @@ export default function ChatScreen() {
             paddingTop: 8,
           }}
         >
+          <IconButton
+            icon="image-line"
+            label="发送图片"
+            size={36}
+            tone="muted"
+            disabled={uploading}
+            onPress={() => void pickImage()}
+          />
+          <IconButton
+            icon="attachment-2"
+            label="发送文件"
+            size={36}
+            tone="muted"
+            disabled={uploading}
+            onPress={() => void pickFile()}
+          />
+          {uploading ? <ActivityIndicator size="small" color={t.primary} /> : null}
           <Input
             value={text}
             onChangeText={(v) => {
@@ -507,8 +851,8 @@ export default function ChatScreen() {
               size={44}
               tone="primary"
               filled
-              disabled={!text.trim()}
-              onPress={send}
+              disabled={(!text.trim() && attachments.length === 0) || uploading}
+              onPress={() => void send()}
             />
           )}
         </View>
@@ -585,4 +929,10 @@ export default function ChatScreen() {
       </BottomSheet>
     </KeyboardAvoidingView>
   );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }

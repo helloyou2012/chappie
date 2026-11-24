@@ -5,16 +5,73 @@
 
 import { config } from '../common/config';
 import { assertStreamOk, readSse } from './sse';
-import type { ChatMessage, CompleteRequest, CompleteResult, Provider, ToolCall } from './types';
+import type {
+  ChatMessage,
+  CompleteRequest,
+  CompleteResult,
+  PromptImage,
+  Provider,
+  ToolCall,
+} from './types';
 import { createToolNameMap, estimateCost, safeJsonParse } from './types';
 
 type AnthropicBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string; signature: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content: string };
 
 type AnthropicMessage = { role: 'user' | 'assistant'; content: string | AnthropicBlock[] };
+
+/**
+ * Anthropic 要求同一条 assistant tool_use 的所有 tool_result 必须出现在
+ * 「紧接着的下一条 user 消息」里：把连续 tool 消息合并成一个 content 数组。
+ */
+function toAnthropicMessages(
+  messages: ChatMessage[],
+  toWire: (name: string) => string,
+  includeThinking: boolean,
+  images?: PromptImage[],
+): AnthropicMessage[] {
+  const out: AnthropicMessage[] = [];
+  let toolResults: AnthropicBlock[] = [];
+  let imagesAttached = false;
+  const flush = () => {
+    if (toolResults.length > 0) {
+      out.push({ role: 'user', content: toolResults });
+      toolResults = [];
+    }
+  };
+  for (const m of messages) {
+    if (m.role === 'tool') {
+      toolResults.push({
+        type: 'tool_result',
+        tool_use_id: m.toolCallId ?? '',
+        content: m.content,
+      });
+      continue;
+    }
+    flush();
+    // 图片附件附加到首条 user 消息（任务提示），工具轮沿用同一份上下文
+    if (!imagesAttached && m.role === 'user' && images?.length) {
+      const blocks: AnthropicBlock[] = [];
+      if (m.content) blocks.push({ type: 'text', text: m.content });
+      for (const img of images) {
+        blocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: img.mime, data: img.data },
+        });
+      }
+      out.push({ role: 'user', content: blocks });
+      imagesAttached = true;
+      continue;
+    }
+    out.push(toAnthropicMessage(m, toWire, includeThinking));
+  }
+  flush();
+  return out;
+}
 
 function toAnthropicMessage(
   m: ChatMessage,
@@ -63,7 +120,7 @@ export const anthropicProvider: Provider = {
       // Anthropic 要求 max_tokens > budget_tokens，否则 400
       max_tokens: thinking ? Math.max(baseTokens, config.thinkingBudgetTokens + 512) : baseTokens,
       system: req.system,
-      messages: req.messages.map((m) => toAnthropicMessage(m, names.toWire, thinking)),
+      messages: toAnthropicMessages(req.messages, names.toWire, thinking, req.images),
       // 开启 thinking 时官方要求 temperature=1
       temperature: thinking ? 1 : (req.temperature ?? 0.6),
       thinking: thinkingParam(thinking, config.thinkingBudgetTokens),
@@ -140,7 +197,7 @@ async function streamAnthropic(
     model: ctx.model,
     max_tokens: thinking ? Math.max(baseTokens, config.thinkingBudgetTokens + 512) : baseTokens,
     system: req.system,
-    messages: req.messages.map((m) => toAnthropicMessage(m, names.toWire, thinking)),
+    messages: toAnthropicMessages(req.messages, names.toWire, thinking, req.images),
     temperature: thinking ? 1 : (req.temperature ?? 0.6),
     stream: true,
     thinking: thinkingParam(thinking, config.thinkingBudgetTokens),

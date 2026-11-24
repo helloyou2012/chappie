@@ -2,6 +2,7 @@ import { ApiError, type Avatar, adminApi } from '@chappie/shared';
 import { RiLoader4Line, RiLockLine, RiRobot2Line } from '@remixicon/react';
 import { useEffect, useState } from 'react';
 import { CapabilitiesTab } from '@/components/avatar/capabilities-tab';
+import { FilesTab } from '@/components/avatar/files-tab';
 import { MemoryTab } from '@/components/avatar/memory-tab';
 import { PersonaTab } from '@/components/avatar/persona-tab';
 import { PolicyTab } from '@/components/avatar/policy-tab';
@@ -121,6 +122,7 @@ export function AvatarConsolePage() {
             <TabsTrigger value="capabilities">能力</TabsTrigger>
             <TabsTrigger value="memory">记忆</TabsTrigger>
             <TabsTrigger value="usage">用量</TabsTrigger>
+            <TabsTrigger value="files">文件</TabsTrigger>
           </TabsList>
           <TabsContent value="persona">
             {avatar ? <PersonaTab avatar={avatar} onSaved={setAvatar} /> : null}
@@ -142,6 +144,9 @@ export function AvatarConsolePage() {
           </TabsContent>
           <TabsContent value="usage">
             <UsageTab />
+          </TabsContent>
+          <TabsContent value="files">
+            <FilesTab />
           </TabsContent>
         </Tabs>
       </div>

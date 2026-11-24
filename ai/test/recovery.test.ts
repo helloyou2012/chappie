@@ -384,7 +384,7 @@ describeDb('任务断连恢复（租约 + 检查点 + 幂等账本）', () => {
       approver: ids.user,
       title: '请求执行：发起转账',
       toolName: 'payment.send',
-      args: { amount: 300, currency: 'CNY' },
+      args: { to: 'Bob', amount: 300, currency: 'CNY' },
       status: 'approved',
       expiresAt: new Date(Date.now() + 3600_000),
       resolvedAt: new Date(Date.now() - 5 * 60_000), // 超过 120s 宽限
@@ -420,7 +420,7 @@ describeDb('任务断连恢复（租约 + 检查点 + 幂等账本）', () => {
       approver: ids.user,
       title: '请求执行：发起转账',
       toolName: 'payment.send',
-      args: { amount: 300, currency: 'CNY' },
+      args: { to: 'Bob', amount: 300, currency: 'CNY' },
       status: 'approved',
       expiresAt: new Date(Date.now() + 3600_000),
       resolvedAt: new Date(Date.now() - 5 * 60_000),

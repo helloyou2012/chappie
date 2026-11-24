@@ -24,6 +24,7 @@ import {
 } from './db/schema';
 import { sweepOrphanTasks } from './recovery';
 import { normalizeCalendarItem } from './tool-gateway';
+import { sweepCalendarSources } from './tools/calendar-ics';
 
 /** 快 tick：长程任务续驱（挂起 ~AI_CONTINUATION_DELAY_S 后即续，节奏要跟上） */
 const FAST_TICK_MS = 5_000;
@@ -51,6 +52,8 @@ export async function runScheduler(signal?: AbortSignal): Promise<void> {
         await runDueReports();
         // 日程到点提醒（调度触发：分身第一次「主动开口」—— 设计方案 §7.3 定时/事件触发）
         await sweepCalendarReminders();
+        // ICS 订阅同步（每小时一次，内部节流）
+        await sweepCalendarSources();
         // 孤儿任务恢复（租约过期 = worker 崩溃 —— 设计方案 §27.4 中断恢复）
         await sweepOrphanTasks();
       }

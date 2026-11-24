@@ -7,6 +7,28 @@
 @source "../node_modules/@streamdown/math/dist/*.js";
 @source "../node_modules/@streamdown/cjk/dist/*.js";
 
+/* 代码块宽度由消息列决定，长代码在代码块内部横向滚动，不能撑宽整个消息列。
+   content-visibility:auto 的代码块在滚入视口时会按内容计算宽度，必须显式隔离 inline-size。 */
+[data-streamdown="code-block"],
+[data-streamdown="raw-code-block"],
+[data-streamdown="code-block-body"],
+[data-streamdown="code-block-body"] pre {
+  contain: inline-size;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* 其他 Markdown 节点同样不能把消息列撑宽；行内长代码允许断行 */
+[data-streamdown] {
+  min-width: 0;
+  max-width: 100%;
+}
+
+[data-streamdown] :not(pre) > code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /* ==========================================================================

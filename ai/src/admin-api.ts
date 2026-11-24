@@ -4,6 +4,7 @@
  * 鉴权：Bearer 用户 token（经 im-core 内部 verify-token 校验），数据按 userId 隔离。
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import type {
   AgentTask,
   Approval,
@@ -31,12 +32,24 @@ import {
   capability,
   capabilityGrant,
   dailyReport,
+  inboundEmail,
   memoryItem,
   policy as policyTable,
   styleProfile,
   taskStep,
   usageDaily,
+  user,
 } from './db/schema';
+import {
+  fileSignature,
+  findFile,
+  getFileById,
+  listFiles,
+  readFileBytes,
+  removeFile,
+  saveFile,
+  signedFileUrl,
+} from './files';
 import { deleteMemory, forgetTopic, listMemories } from './memory';
 import { complete, recordUsage, todayCost } from './model-gateway';
 import { generateDailyReport } from './scheduler';
@@ -144,6 +157,78 @@ export function createAdminApp() {
   });
 
   app.get('/health', (c) => c.json({ ok: true, service: 'ai-platform-admin' }));
+
+  // 入站邮件 webhook（不经用户 Bearer 鉴权，使用共享密钥）
+  app.post('/webhooks/inbound-email', async (c) => {
+    if (!config.inboundEmailToken) {
+      return c.json(err('not_configured', 'INBOUND_EMAIL_TOKEN 未配置，拒绝入站邮件'), 503);
+    }
+    const token =
+      c.req.header('x-inbound-token') ??
+      (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
+    if (token !== config.inboundEmailToken) {
+      return c.json(err('unauthorized', '入站邮件密钥无效'), 401);
+    }
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const data = (body.data ?? body ?? {}) as Record<string, unknown>;
+    const pick = (...keys: string[]): unknown => keys.map((k) => data[k]).find((v) => v != null);
+    const emailOf = (v: unknown): string => {
+      const first = Array.isArray(v) ? v[0] : v;
+      const s = String(first ?? '');
+      const m = /<([^>]+)>/.exec(s);
+      return (m?.[1] ?? s).trim().toLowerCase();
+    };
+    const toAddr = emailOf(pick('to', 'recipient', 'To'));
+    if (!toAddr) return c.json(err('bad_request', '缺少收件人'), 400);
+
+    const ownerRows = await db
+      .select({ id: user.id })
+      .from(user)
+      .where(sql`lower(${user.email}) = ${toAddr}`)
+      .limit(1);
+    const ownerId = ownerRows[0]?.id;
+    if (!ownerId) return c.json({ ok: true, stored: false, reason: 'unknown_recipient' });
+
+    const html = String(pick('html', 'body-html') ?? '');
+    const rawText = String(pick('text', 'plain', 'body-plain') ?? '');
+    const textBody = (
+      rawText ||
+      html
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+    )
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n\s*\n+/g, '\n\n')
+      .trim()
+      .slice(0, 100_000);
+    const messageId = String(
+      pick('messageId', 'message_id', 'Message-Id', 'id') ?? newId('inm'),
+    ).slice(0, 500);
+    const receivedRaw = pick('receivedAt', 'received_at', 'date');
+    const receivedAt = receivedRaw ? new Date(String(receivedRaw)) : new Date();
+
+    const inserted = await db
+      .insert(inboundEmail)
+      .values({
+        id: newId('em'),
+        ownerId,
+        messageId,
+        fromAddr: emailOf(pick('from', 'sender', 'From')).slice(0, 500),
+        toAddr: toAddr.slice(0, 500),
+        subject: String(pick('subject', 'Subject') ?? '').slice(0, 500),
+        textBody,
+        receivedAt: Number.isNaN(receivedAt.getTime()) ? new Date() : receivedAt,
+      })
+      .onConflictDoNothing()
+      .returning({ id: inboundEmail.id });
+
+    return c.json({ ok: true, stored: inserted.length > 0, id: inserted[0]?.id ?? null });
+  });
 
   /** 统一取 avatar；未就绪时返回 409 avatar_not_ready（user.created 事件异步创建） */
   const requireAvatar = async (c: { get: (k: 'userId') => string }) => {
@@ -488,6 +573,95 @@ export function createAdminApp() {
       .orderBy(desc(approvalTable.createdAt))
       .limit(100);
     return c.json({ approvals: rows.map(approvalApi) });
+  });
+
+  // ---------------- 文件 ----------------
+
+  app.get('/admin/v1/files', async (c) => {
+    const files = await listFiles(c.get('userId'));
+    return c.json({
+      files: files.map((f) => ({
+        id: f.id,
+        name: f.name,
+        mime: f.mime,
+        size: f.size,
+        createdAt: dayjs(f.createdAt).toISOString(),
+      })),
+    });
+  });
+
+  app.post('/admin/v1/files', async (c) => {
+    const body = await c.req.parseBody();
+    const raw = body.file;
+    if (!(raw instanceof Blob)) {
+      return c.json(err('bad_request', '缺少 file 字段（multipart/form-data）'), 400);
+    }
+    if (raw.size > config.fileMaxBytes) {
+      return c.json(err('too_large', `文件超过 ${config.fileMaxBytes} 字节上限`), 413);
+    }
+    const name =
+      (typeof body.name === 'string' && body.name.trim()) ||
+      (raw instanceof File && raw.name) ||
+      'file';
+    const mime = (raw instanceof File && raw.type) || 'application/octet-stream';
+    const bytes = new Uint8Array(await raw.arrayBuffer());
+    const saved = await saveFile({ ownerId: c.get('userId'), name, mime, bytes });
+    return c.json({
+      file: {
+        id: saved.id,
+        name: saved.name,
+        mime: saved.mime,
+        size: saved.size,
+        createdAt: dayjs(saved.createdAt).toISOString(),
+      },
+      // 相对签名 URL：聊天消息里存这个，会话成员无需用户 token 即可访问
+      url: signedFileUrl(saved.id),
+    });
+  });
+
+  app.get('/admin/v1/files/:id', async (c) => {
+    const rec = await findFile(c.get('userId'), c.req.param('id'));
+    if (!rec) return c.json(err('not_found', '文件不存在'), 404);
+    const bytes = await readFileBytes(rec);
+    return new Response(bytes, {
+      headers: {
+        'content-type': rec.mime,
+        'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(rec.name)}`,
+        'cache-control': 'private, max-age=300',
+      },
+    });
+  });
+
+  app.delete('/admin/v1/files/:id', async (c) => {
+    const rec = await findFile(c.get('userId'), c.req.param('id'));
+    if (!rec) return c.json(err('not_found', '文件不存在'), 404);
+    await removeFile(c.get('userId'), rec.id);
+    return c.json({ ok: true });
+  });
+
+  // 附件公开下载（HMAC 签名；不要求用户 token，供聊天图片/文件加载）
+  app.get('/files/:id', async (c) => {
+    const id = c.req.param('id');
+    const sig = c.req.query('sig') ?? '';
+    const expected = fileSignature(id);
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      return c.json(err('forbidden', '附件链接无效'), 403);
+    }
+    const rec = await getFileById(id);
+    if (!rec) return c.json(err('not_found', '文件不存在'), 404);
+    const bytes = await readFileBytes(rec);
+    const inline = rec.mime.startsWith('image/') || rec.mime === 'application/pdf';
+    return new Response(bytes, {
+      headers: {
+        'content-type': rec.mime,
+        'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(
+          rec.name,
+        )}`,
+        'cache-control': 'private, max-age=86400',
+      },
+    });
   });
 
   // ---------------- 日程 / 待办 ----------------

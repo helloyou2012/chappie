@@ -78,6 +78,14 @@ export class ApiError extends Error {
   }
 }
 
+export interface FileInfo {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  createdAt: string;
+}
+
 export interface ApiConfig {
   serverUrl: string;
   adminUrl: string;
@@ -101,6 +109,14 @@ export function getApiConfig(): Readonly<ApiConfig> {
 
 export function wsUrlFromServerUrl(serverUrl: string): string {
   return `${serverUrl.replace(/\/$/, '').replace(/^http/, 'ws')}/ws`;
+}
+
+/** 附件 URL：服务端返回相对签名路径，客户端按 adminUrl 解析；绝对 URL 原样返回 */
+export function resolveAttachmentUrl(url: string): string {
+  if (!url) return '';
+  if (/^(https?:|data:|blob:)/i.test(url)) return url;
+  const root = config.adminUrl.replace(/\/$/, '');
+  return `${root}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
 async function request<T>(
@@ -322,6 +338,43 @@ export const adminApi = {
   updateTodoItem: (index: number, req: UpdateTodoItemRequest) =>
     a<{ ok: boolean }>('PATCH', `/admin/v1/todo/${index}`, req),
   deleteTodoItem: (index: number) => a<{ ok: boolean }>('DELETE', `/admin/v1/todo/${index}`),
+
+  // 文件（头像控制台 / 聊天上传）
+  listFiles: () => a<{ files: FileInfo[] }>('GET', '/admin/v1/files'),
+  uploadFile: async (file: Blob | { uri: string; name?: string; type?: string }, name?: string) => {
+    const form = new FormData();
+    const displayName =
+      name ?? (file as { name?: string }).name ?? (file as { uri?: string }).uri ?? 'file';
+    form.append('file', file as unknown as Blob, displayName);
+    const token = config.getToken();
+    const res = await fetch(`${config.adminUrl}/admin/v1/files`, {
+      method: 'POST',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) {
+      let code = 'error';
+      let message = res.statusText || `HTTP ${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: { code?: string; message?: string } };
+        code = body.error?.code ?? code;
+        message = body.error?.message ?? message;
+      } catch {
+        // 非 JSON 错误体
+      }
+      throw new ApiError(res.status, code, message);
+    }
+    return (await res.json()) as { file: FileInfo; url: string };
+  },
+  deleteFile: (id: string) => a<{ ok: boolean }>('DELETE', `/admin/v1/files/${id}`),
+  downloadFile: async (id: string) => {
+    const token = config.getToken();
+    const res = await fetch(`${config.adminUrl}/admin/v1/files/${id}`, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new ApiError(res.status, 'download_failed', res.statusText);
+    return res.blob();
+  },
 
   getUsage: (days = 14) =>
     a<{ usage: UsageDay[]; todayCostUsd: number; dailyBudgetUsd: number }>(

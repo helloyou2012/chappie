@@ -144,7 +144,7 @@ describeDb('prepareToolCall 授权与风险', () => {
       const d = await prepareToolCall({
         ...base,
         toolId: 'payment.send',
-        rawArgs: { amount: 300 },
+        rawArgs: { to: 'Bob', amount: 300 },
         maxRisk,
       });
       expect(d.status).toBe('need_approval');

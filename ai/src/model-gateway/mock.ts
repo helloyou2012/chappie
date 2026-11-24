@@ -184,9 +184,10 @@ async function respond(req: CompleteRequest): Promise<CompleteResult> {
   if (/转账|付款|打钱|红包|汇款|借钱|借款/.test(userText)) {
     if (allow.has('payment.send')) {
       const amount = Number(/(\d+(?:\.\d+)?)/.exec(userText)?.[1] ?? 500);
+      const to = /给\s*([^\s，,。]+)/.exec(userText)?.[1] ?? 'Bob';
       return toolResult(
         'payment.send',
-        { amount, currency: 'CNY', note: quote(userText, 40) },
+        { to, amount, currency: 'CNY', note: quote(userText, 40) },
         req,
       );
     }

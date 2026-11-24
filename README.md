@@ -144,8 +144,18 @@ pnpm mobile            # Expo Dev Server（按提示打开 iOS 模拟器/Expo Go
   标题/参数摘要/执行结果，逐条展开；同样**仅主人可见**。流式期间实时更新工具步骤。
 - **环境感知**：系统提示词注入当前时间、时区、今天/明天，并明确「以这里为准」，
   避免模型把历史消息里的旧日期当成现在（日程/进展类问题尤其明显）。
+- **工具能力**：日程/待办、真实网页搜索与抓取、邮件发送与收件箱、文件读写（S3/本地）、
+  ICS 日历订阅、联系人查找与代发消息、应用内演示账本转账；高风险工具（代发/转账/删文件/发邮件）走 L2 审批。
+- **聊天附件**：Web/移动端选图/文件后先在输入框上方暂存；Web 还支持**粘贴截图/文件**
+  和**拖拽文件**到聊天区。点发送后消息**立即上屏**（图片用本地预览并显示「上传中」，
+  文本同时进入发送中状态），异步上传完成后才提交 WS，服务端回执后替换 pending。
+  附件+文本一批发送只触发一次 AI 回复（`AI_ATTACHMENT_BURST_MS`，默认 1200ms）。
+  存储走 S3（当前 R2）或本地目录，会话成员通过 HMAC 签名 URL 加载；
+  `MODEL_MULTIMODAL=true` 时图片作为视觉输入交给模型。
+  最近的文本/PDF/DOCX/XLSX 附件会自动提取内容注入提示词（`AI_FILE_AUTO_READ`），
+  更早或更大的文件可用 `file.read` 按需读取。
 - **审批中心**：聚合 L2 待确认请求，超时自动拒绝。
-- **分身控制台**：人设与风格预览、策略引擎、能力授权、记忆治理、用量与预算。
+- **分身控制台**：人设与风格预览、策略引擎、能力授权、记忆治理、用量与预算、文件（上传/下载/删除）。
 - **分身日报**：每日 09:00 自动生成，也可手动触发。
 - **反馈闭环**：AI 消息支持点赞 / 纠正（写入偏好记忆）/ 举报。
 - **离线与多端**：断线时消息进入持久队列，重连 / 恢复联网 / 移动端回前台自动重放；
@@ -197,29 +207,38 @@ MODEL_NAME=gpt-4o-mini
 
 ### 端口与环境变量
 
-| 变量                           | 默认                                                 | 说明                                                    |
-| ------------------------------ | ---------------------------------------------------- | ------------------------------------------------------- |
-| `GATEWAY_PORT`                 | 7100                                                 | im-core 对外 HTTP/WS（避开 macOS AirPlay 占用的 7000）  |
-| `INTERNAL_PORT`                | 7001                                                 | im-core 内部 API（仅 127.0.0.1）                        |
-| `ADMIN_PORT`                   | 7002                                                 | ai-platform 控制台 API                                  |
-| `DATABASE_URL`                 | `postgres://chappie:chappie@127.0.0.1:15432/chappie` | compose 映射到 15432，避免与本机 PG 冲突                |
-| `REDIS_URL`                    | `redis://127.0.0.1:6379`                             |                                                         |
-| `AUTH_CODE_DEV_ECHO`           | `true`                                               | 开发模式验证码回显（生产请关闭并配置 `RESEND_API_KEY`） |
-| `RESEND_API_KEY`               | 空                                                   | Resend API key；配置后验证码通过邮件发送                |
-| `MAIL_FROM`                    | `Chappie <no-reply@chappie.run>`                     | 示例值；未配置时兜底为 Resend 测试发件人，域名需验证    |
-| `MAX_HOP_COUNT`                | 3                                                    | AI 对 AI 最大跳数                                       |
-| `MODEL_THINKING`               | `true`                                               | 扩展思考开关；思考内容仅主人可见，前端可折叠展示        |
-| `MODEL_THINKING_BUDGET_TOKENS` | 1024                                                 | 思考预算（Anthropic 要求 max_tokens > 该值）            |
-| `SERVER_EPOCH`                 | 空                                                   | 多节点部署必须统一；客户端据此判断服务端重启            |
-| `AI_CONTEXT_CHAR_BUDGET`       | 6000                                                 | 提示词历史区字符预算（有界上下文）                      |
-| `AI_SILENCE_MIN_CONFIDENCE`    | 0.6                                                  | 群聊自动档低置信度沉默阈值，0 = 关闭                    |
-| `AI_MAX_TOOL_ROUNDS`           | 10                                                   | 单段工具轮次预算；用尽后挂起为长程任务续跑              |
-| `AI_TASK_SEGMENT_MAX_S`        | 240                                                  | 单段执行时间预算（秒），超时挂起续跑                    |
-| `AI_CONTINUATION_DELAY_S`      | 5                                                    | 挂起任务的续驱扫描间隔                                  |
-| `AI_LONG_TASK_MAX_S`           | 1800                                                 | 长程任务整体时限（秒），超时转交主人                    |
-| `AI_LONG_TASK_MAX_SEGMENTS`    | 8                                                    | 长程任务最大执行段数（防空转）                          |
-| `EXPO_ACCESS_TOKEN`            | 空                                                   | Expo Push access token；配置后移动端离线推送生效        |
-| `EXPO_PUSH_URL`                | `https://exp.host/--/api/v2/push/send`               | 自建/代理推送服务地址                                   |
+| 变量                               | 默认                                                 | 说明                                                                         |
+| ---------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `GATEWAY_PORT`                     | 7100                                                 | im-core 对外 HTTP/WS（避开 macOS AirPlay 占用的 7000）                       |
+| `INTERNAL_PORT`                    | 7001                                                 | im-core 内部 API（仅 127.0.0.1）                                             |
+| `ADMIN_PORT`                       | 7002                                                 | ai-platform 控制台 API                                                       |
+| `DATABASE_URL`                     | `postgres://chappie:chappie@127.0.0.1:15432/chappie` | compose 映射到 15432，避免与本机 PG 冲突                                     |
+| `REDIS_URL`                        | `redis://127.0.0.1:6379`                             |                                                                              |
+| `AUTH_CODE_DEV_ECHO`               | `true`                                               | 开发模式验证码回显（生产请关闭并配置 `RESEND_API_KEY`）                      |
+| `RESEND_API_KEY`                   | 空                                                   | Resend API key；配置后验证码通过邮件发送                                     |
+| `MAIL_FROM`                        | `Chappie <no-reply@chappie.run>`                     | 示例值；未配置时兜底为 Resend 测试发件人，域名需验证                         |
+| `MAX_HOP_COUNT`                    | 3                                                    | AI 对 AI 最大跳数                                                            |
+| `WEB_SEARCH_PROVIDER`              | `bing`                                               | `tavily` / `brave` / `bing` / `duckduckgo`；默认 Bing                        |
+| `TAVILY_API_KEY` / `BRAVE_API_KEY` | 空                                                   | 配置后优先使用对应搜索 API                                                   |
+| `WALLET_INITIAL_BALANCE`           | 10000                                                | 应用内演示账本初始余额（非真实资金）                                         |
+| `INBOUND_EMAIL_TOKEN`              | 空                                                   | 入站邮件 webhook 共享密钥；空则拒绝                                          |
+| `S3_*` / `FILE_LOCAL_DIR`          | 空 / `.data/files`                                   | 配置 S3 则用对象存储，否则本地目录                                           |
+| `MODEL_MULTIMODAL`                 | `true`                                               | 视觉模型识图（DeepSeek Flash / gpt-4o / claude）；会话图片转 base64 传给模型 |
+| `AI_ATTACHMENT_BURST_MS`           | 1200                                                 | 附件+文本合并窗口；窗口内只由最后一条触发一次回复                            |
+| `AI_FILE_AUTO_READ`                | `true`                                               | 自动提取最近文本/PDF/DOCX/XLSX 附件内容注入提示词                            |
+| `AI_FILE_AUTO_READ_WINDOW_MINUTES` | 10                                                   | 只自动读取最近 N 分钟内的附件                                                |
+| `MODEL_THINKING`                   | `true`                                               | 扩展思考开关；思考内容仅主人可见，前端可折叠展示                             |
+| `MODEL_THINKING_BUDGET_TOKENS`     | 1024                                                 | 思考预算（Anthropic 要求 max_tokens > 该值）                                 |
+| `SERVER_EPOCH`                     | 空                                                   | 多节点部署必须统一；客户端据此判断服务端重启                                 |
+| `AI_CONTEXT_CHAR_BUDGET`           | 6000                                                 | 提示词历史区字符预算（有界上下文）                                           |
+| `AI_SILENCE_MIN_CONFIDENCE`        | 0.6                                                  | 群聊自动档低置信度沉默阈值，0 = 关闭                                         |
+| `AI_MAX_TOOL_ROUNDS`               | 10                                                   | 单段工具轮次预算；用尽后挂起为长程任务续跑                                   |
+| `AI_TASK_SEGMENT_MAX_S`            | 240                                                  | 单段执行时间预算（秒），超时挂起续跑                                         |
+| `AI_CONTINUATION_DELAY_S`          | 5                                                    | 挂起任务的续驱扫描间隔                                                       |
+| `AI_LONG_TASK_MAX_S`               | 1800                                                 | 长程任务整体时限（秒），超时转交主人                                         |
+| `AI_LONG_TASK_MAX_SEGMENTS`        | 8                                                    | 长程任务最大执行段数（防空转）                                               |
+| `EXPO_ACCESS_TOKEN`                | 空                                                   | Expo Push access token；配置后移动端离线推送生效                             |
+| `EXPO_PUSH_URL`                    | `https://exp.host/--/api/v2/push/send`               | 自建/代理推送服务地址                                                        |
 
 客户端构建期配置（不进入 `.env` 根文件）：
 

@@ -34,14 +34,14 @@
 
 ### 1.2 会话与消息
 
-| 能力                                   | 状态 | 说明                                                |
-| -------------------------------------- | ---- | --------------------------------------------------- |
-| 单聊 / 群聊 / 分身系统会话             | ✅   | 「我的分身」固定置顶；群聊预览带发送者              |
-| 消息可靠投递                           | ✅   | 单写者 + seq + outbox + WS 补洞；`clientMsgId` 幂等 |
-| 已读 / 未读 / 输入中 / 在线状态        | ✅   | 按成员维度；移动端 tab 显示未读角标                 |
-| 回复 / @ / 撤回 / 反馈（赞/纠正/举报） | ✅   | Web 悬浮操作、移动端长按菜单                        |
-| 图片 / 文件消息                        | ⬜   | 内容类型已注册，上传服务与对象存储未接              |
-| 消息搜索                               | ⬜   | 当前仅联系人搜索                                    |
+| 能力                                   | 状态 | 说明                                                                                             |
+| -------------------------------------- | ---- | ------------------------------------------------------------------------------------------------ |
+| 单聊 / 群聊 / 分身系统会话             | ✅   | 「我的分身」固定置顶；群聊预览带发送者                                                           |
+| 消息可靠投递                           | ✅   | 单写者 + seq + outbox + WS 补洞；`clientMsgId` 幂等                                              |
+| 已读 / 未读 / 输入中 / 在线状态        | ✅   | 按成员维度；移动端 tab 显示未读角标                                                              |
+| 回复 / @ / 撤回 / 反馈（赞/纠正/举报） | ✅   | Web 悬浮操作、移动端长按菜单                                                                     |
+| 图片 / 文件消息                        | ✅   | 选择/粘贴/拖拽暂存；发送立即上屏；S3(R2)/本地；签名 URL；多模态看图；文本/PDF/DOCX/XLSX 自动读取 |
+| 消息搜索                               | ⬜   | 当前仅联系人搜索                                                                                 |
 
 ### 1.3 AI 分身
 
@@ -70,7 +70,9 @@
 | 工具活动时间线                        | ✅   | `ai_meta.activity` 实时记录每次工具调用（标题/参数/结果/状态）；Web/Mobile 折叠面板；仅主人可见                    |
 | 定时/事件触发的其他主动任务           | 🚧   | 目前仅日报 + 日程提醒                                                                                              |
 | 群聊多人审批 / 委托审批               | ⬜   | 审批人固定为主人；群管理员/法定人数是后续能力                                                                      |
-| 真实外部工具（邮件/网页/支付）        | 🚧   | `web.search`、`payment.send` 为演示实现；日历/待办为内置能力，邮件未实现                                           |
+| 真实外部工具（邮件/网页/支付）        | ✅   | 网页搜索（Tavily/Brave/DDG）与抓取、Resend 发信 + 入站 webhook、文件 S3/本地、ICS 订阅、联系人代发、应用内账本     |
+| 外部日历 OAuth（Google/Outlook）      | ⬜   | 未接 OAuth；可用 ICS 订阅替代                                                                                      |
+| 支付网关（真实资金）                  | ⬜   | 当前为应用内演示账本，非真实资金                                                                                   |
 | 多分身（工作/生活）                   | ⬜   | 数据模型允许 0..N，产品与 UI 先按 1 个落地                                                                         |
 
 ### 1.4 端云与多端
@@ -121,7 +123,7 @@
 | 流式回复       | `ai/src/streamer.ts`、`ai/src/model-gateway/*`、`core/crates/chat/src/message.rs`、`packages/shared/src/store/chat.ts` |
 | 策略与档位     | `ai/src/policy.ts`、`ai/src/scheduler.ts`                                                                              |
 | 审批           | `ai/src/approval.ts`、`ai/src/turn-guard.ts`                                                                           |
-| 工具与授权     | `ai/src/tool-gateway.ts`                                                                                               |
+| 工具与授权     | `ai/src/tool-gateway.ts`、`ai/src/tools/{contacts,wallet,web,email,files,calendar-ics}.ts`、`ai/src/files-storage.ts`  |
 | 记忆           | `ai/src/memory.ts`                                                                                                     |
 | 推送           | `ai/src/common/push.ts`、`apps/mobile/src/push.ts`                                                                     |
 | 日程提醒台账   | `ai/src/scheduler.ts`、`ai/migrations/20260101000004_calendar_reminder.sql`                                            |
@@ -199,6 +201,29 @@
     中按 viewer 剥离；对端与其它 AI 任务都看不到。思考仍会占用上下文与 token，
     长任务续跑时随检查点保留（预算由 `MODEL_THINKING_BUDGET_TOKENS` 约束）。
 37. **OpenAI Responses 未接思考流**：Anthropic 与 OpenAI Chat（`reasoning_content`）已支持。
+
+### 3.7 外部工具
+
+38. **搜索默认 Bing，DDG 仅兜底**：Bing 无需 key（8 秒超时、失败重试一次、结果缓存 5 分钟）；
+    生产建议配置 `TAVILY_API_KEY` 或 `BRAVE_API_KEY`，会优先于 Bing。DDG 在部分网络不可达。
+39. **邮件发送依赖 Resend 验证域名**：`RESEND_API_KEY` 已有，但发件域名需在 Resend 验证；
+    入站邮件需邮件服务 POST 到 `/webhooks/inbound-email`（`INBOUND_EMAIL_TOKEN` 共享密钥）。
+40. **S3 适配未在真实桶验证**：未配置时自动落本地目录（`FILE_LOCAL_DIR`），接口一致。
+41. **文件上传入口**：Web/Mobile 聊天输入可发图片/文件，Web 分身控制台「文件」页可管理文件；
+    图片上传后仅展示，不做 OCR。
+42. **文件读取仅文本/PDF**：图片只返回元数据，不做 OCR；邮件附件未接入。
+43. **ICS 使用服务端时区**：支持单次事件、RRULE 基础展开与 EXDATE；复杂时区/例外规则为后续增强。
+44. **支付为应用内演示账本**：非真实资金，余额/流水/幂等/审批完整，可作为真实网关的替换点。
+45. **附件签名 URL 无过期**：`/files/:id?sig=HMAC` 供会话成员免登录加载，链接可长期访问；
+    生产如需撤销，应改为短时签名或带撤销表的鉴权下载。
+46. **多模态**：`MODEL_MULTIMODAL=true` 时最多传 3 张图片（单张 4MB、总计 8MB）；
+    DeepSeek Flash（Anthropic 兼容端点）已验证可识图。图片发送前做 PNG CRC/文件头校验，
+    供应商仍报 invalid image 时会自动去掉图片重试，避免整次任务失败。
+    PDF 仍走 `file.read` 文本提取，不做版式理解。
+47. **附件突发合并**：附件消息等待 `AI_ATTACHMENT_BURST_MS`（默认 1200ms），若同一发送者随后
+    还有文本/附件，则跳过本条触发，由最后一条统一回复一次；纯附件消息会增加约 1.2s 延迟。
+48. **文件自动读取**：默认读取最近 10 分钟内最多 2 个文本/PDF/DOCX/XLSX 附件，单文件 8MB、
+    注入 6000 字；超出范围仍可用 `file.read` 按需读取。旧 `.doc`、`.xls`、ZIP 等二进制格式不支持。
 
 ## 4. 路线图
 

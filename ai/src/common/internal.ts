@@ -163,4 +163,8 @@ export const internal = {
     title?: string | null;
     systemTag?: string | null;
   }) => call<{ convId: string }>('/internal/v1/create-conversation', req),
+
+  /** 幂等获取/创建两人单聊，并确保双方分身都是成员 */
+  ensureDirect: (userId: string, peerId: string) =>
+    call<{ convId: string }>('/internal/v1/ensure-direct', { userId, peerId }),
 };

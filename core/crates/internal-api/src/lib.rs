@@ -34,6 +34,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/internal/v1/update-avatar-name", post(update_avatar_name))
         .route("/internal/v1/create-avatar", post(create_avatar))
         .route("/internal/v1/create-conversation", post(create_conversation))
+        .route("/internal/v1/ensure-direct", post(ensure_direct))
         .layer(middleware::from_fn_with_state(state, require_internal_token))
 }
 
@@ -564,6 +565,23 @@ async fn create_avatar(
     .execute(&state.db.pg)
     .await?;
     Ok(Json(CreateAvatarResp { avatar_id }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EnsureDirectReq {
+    user_id: String,
+    peer_id: String,
+}
+
+/// 幂等获取/创建两人单聊，并确保双方分身都是成员（AI 工具代发前置）。
+async fn ensure_direct(
+    State(state): State<AppState>,
+    Json(req): Json<EnsureDirectReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    let conv_id = conversation::create_direct(&state.db, &state.events, &req.user_id, &req.peer_id)
+        .await?;
+    Ok(Json(json!({ "convId": conv_id })))
 }
 
 async fn create_conversation(

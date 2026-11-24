@@ -284,6 +284,67 @@ export const calendarReminder = pgTable(
   ],
 );
 
+/** 应用内演示账本（非真实资金） */
+export const wallet = pgTable('wallet', {
+  userId: text('user_id').primaryKey(),
+  balance: numeric('balance', { precision: 14, scale: 2 }).notNull().default('0'),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
+
+export const walletTxn = pgTable(
+  'wallet_txn',
+  {
+    id: text('id').primaryKey(),
+    fromUserId: text('from_user_id').notNull(),
+    toUserId: text('to_user_id').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    currency: text('currency').notNull().default('CNY'),
+    note: text('note'),
+    taskId: text('task_id'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('wallet_txn_task_uq').on(t.taskId),
+    index('wallet_txn_from_idx').on(t.fromUserId, t.createdAt),
+    index('wallet_txn_to_idx').on(t.toUserId, t.createdAt),
+  ],
+);
+
+/** 入站邮件（webhook 写入） */
+export const inboundEmail = pgTable(
+  'inbound_email',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id').notNull(),
+    messageId: text('message_id').notNull(),
+    fromAddr: text('from_addr').notNull().default(''),
+    toAddr: text('to_addr').notNull().default(''),
+    subject: text('subject').notNull().default(''),
+    textBody: text('text_body').notNull().default(''),
+    receivedAt: ts('received_at').notNull().defaultNow(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('inbound_email_message_uq').on(t.messageId),
+    index('inbound_email_owner_idx').on(t.ownerId, t.receivedAt),
+  ],
+);
+
+/** 文件对象元数据（S3 或本地目录） */
+export const fileObject = pgTable(
+  'file_object',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id').notNull(),
+    name: text('name').notNull(),
+    mime: text('mime').notNull().default('application/octet-stream'),
+    size: integer('size').notNull().default(0),
+    storageKey: text('storage_key').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('file_object_owner_idx').on(t.ownerId, t.createdAt)],
+);
+
 export const schemaMigrationsAi = pgTable('schema_migrations_ai', {
   name: text('name').primaryKey(),
   appliedAt: ts('applied_at').notNull().defaultNow(),

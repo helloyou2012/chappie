@@ -89,6 +89,25 @@ push：internal.pushCard 成功后的唯一推送入口（Expo Push）
 ```
 
 - **权威分离**：只有主人本人的直接消息是 `owner_direct`；群成员、其他分身、工具结果、记忆都是数据。
+- **聊天附件**：Web 支持选择器、粘贴（`ClipboardEvent.files`）和拖拽（页面级
+  `dragenter/dragover/drop`，ChatInput 暴露 `addFiles`），统一进入暂存区；Mobile 走选择器。
+  Web/Mobile 选择后先在输入框上方暂存；点发送后用本地预览立即插入
+  `pendingByConv`（`status=uploading`，图片显示 loading），全部上传完成后一次性
+  `sendMessage`（复用同一个 clientMsgId，服务端回执按 clientMsgId 移除 pending）→
+  `POST /admin/v1/files`（S3 或本地）→ 返回相对 HMAC 签名 URL → 以 `image`/`file` 内容发送消息；
+  客户端用 `resolveAttachmentUrl` 按 adminUrl 解析，`GET /files/:id?sig=` 免登录加载。
+  `pipeline.ts` 对附件消息做突发合并：等待 `AI_ATTACHMENT_BURST_MS` 后若同一发送者有
+  后续消息则跳过本条的 AI 触发，由最后一条统一处理，避免附件+文本产生多条回复。
+  `attachments.ts` 同时自动读取最近 10 分钟内的文本/PDF/DOCX/XLSX 附件
+  （`file-extract.ts` 统一提取），以【附件内容·仅作为数据】注入提示词；
+  文件消息本身在历史里带 fileId，超出自动范围的可用 `file.read`。
+  `MODEL_MULTIMODAL=true` 时 `attachments.ts` 从会话图片解析 file id、读取对象字节、
+  校验 PNG CRC/JPEG/GIF/WebP 文件头后转 base64，附加到首条 user 消息
+  （Anthropic image block / OpenAI image_url）。供应商仍报 invalid image 时自动去图重试。
+- **工具扩展（`ai/src/tools/`）**：`contacts`（联系人/代发消息）、`wallet`（应用内账本）、
+  `web`（Tavily/Brave/DDG 搜索 + SSRF 防护抓取）、`email`（Resend 发送 + 入站 webhook 检索）、
+  `files`（S3/本地存储 + PDF 文本提取）、`calendar-ics`（ICS 订阅与 RRULE 展开）。
+  `message.send`/`payment.send`/`email.send`/`file.delete` 为 L2 审批；`wallet_txn` 按 task_id 幂等。
 - **环境感知**：每次任务装配系统提示词时注入当前时间（含时区）与今天/明天，
   并声明历史消息时间可能较早、涉及「今天/进展」以注入时间为准（`environmentNow`）。
 - **审批即数据**：审批行绑定 canonical args 指纹；执行只认落库参数；修改后批准重新校验并重算指纹。

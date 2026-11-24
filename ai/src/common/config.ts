@@ -50,6 +50,42 @@ export interface AiConfig {
   modelThinking: boolean;
   /** 扩展思考预算（tokens） */
   thinkingBudgetTokens: number;
+  /** 应用内账本初始余额（演示用，非真实资金） */
+  walletInitialBalance: number;
+  /** 邮件发送（Resend） */
+  resendApiKey: string;
+  mailFrom: string;
+  /** 入站邮件 webhook 共享密钥；未配置时拒绝所有入站请求 */
+  inboundEmailToken: string;
+  /** 网页搜索：tavily | brave | bing | duckduckgo（默认无需 key 的 Bing） */
+  webSearchProvider: 'tavily' | 'brave' | 'bing' | 'duckduckgo';
+  tavilyApiKey: string;
+  braveApiKey: string;
+  /** 文件对象存储：配置 S3 则用 S3，否则落本地目录 */
+  s3Endpoint: string;
+  s3Region: string;
+  s3Bucket: string;
+  s3AccessKeyId: string;
+  s3SecretAccessKey: string;
+  s3ForcePathStyle: boolean;
+  fileLocalDir: string;
+  fileMaxBytes: number;
+  /** 附件签名 URL 的 HMAC 密钥（默认复用 INTERNAL_TOKEN） */
+  fileUrlSecret: string;
+  /** 当前模型是否支持图片输入（多模态）；开启后会把会话图片附件传给模型 */
+  modelMultimodal: boolean;
+  multimodalMaxImages: number;
+  multimodalMaxImageBytes: number;
+  multimodalMaxTotalBytes: number;
+  /** 附件消息合并窗口（毫秒）：附件后紧跟同一发送者的文本时，只由最后一条触发一次回复 */
+  attachmentBurstMs: number;
+  /** 自动把最近文本/PDF 附件内容注入提示词（无需模型先调 file.read） */
+  fileAutoRead: boolean;
+  fileAutoReadMaxFiles: number;
+  fileAutoReadMaxChars: number;
+  fileAutoReadMaxBytes: number;
+  /** 只自动读取距当前任务这段时间内的附件，避免旧文件混入上下文 */
+  fileAutoReadWindowMs: number;
   /** 合理沉默阈值：低于该置信度且满足其他条件时沉默；0 = 关闭 */
   silenceMinConfidence: number;
   /** Expo Push access token（未配置则推送降级跳过，功能不报错） */
@@ -97,6 +133,37 @@ export function loadConfig(): AiConfig {
     longTaskMaxSegments: Number(env('AI_LONG_TASK_MAX_SEGMENTS', '8')),
     modelThinking: env('MODEL_THINKING', 'true') !== 'false',
     thinkingBudgetTokens: Number(env('MODEL_THINKING_BUDGET_TOKENS', '1024')),
+    walletInitialBalance: Number(env('WALLET_INITIAL_BALANCE', '10000')),
+    resendApiKey: env('RESEND_API_KEY'),
+    mailFrom: env('MAIL_FROM', 'Chappie <no-reply@chappie.run>'),
+    inboundEmailToken: env('INBOUND_EMAIL_TOKEN'),
+    webSearchProvider: (env('WEB_SEARCH_PROVIDER', 'bing') ||
+      'bing') as AiConfig['webSearchProvider'],
+    tavilyApiKey: env('TAVILY_API_KEY'),
+    braveApiKey: env('BRAVE_API_KEY'),
+    s3Endpoint: env('S3_ENDPOINT'),
+    s3Region: env('S3_REGION', 'us-east-1'),
+    s3Bucket: env('S3_BUCKET'),
+    s3AccessKeyId: env('S3_ACCESS_KEY_ID'),
+    s3SecretAccessKey: env('S3_SECRET_ACCESS_KEY'),
+    s3ForcePathStyle: env('S3_FORCE_PATH_STYLE', 'true') !== 'false',
+    fileLocalDir: env('FILE_LOCAL_DIR', '.data/files'),
+    fileMaxBytes: Number(env('FILE_MAX_BYTES', String(20 * 1024 * 1024))),
+    fileUrlSecret: env('FILE_URL_SECRET', env('INTERNAL_TOKEN', 'dev-internal-token-change-me')),
+    modelMultimodal: env('MODEL_MULTIMODAL', 'false') === 'true',
+    multimodalMaxImages: Number(env('MODEL_MULTIMODAL_MAX_IMAGES', '3')),
+    multimodalMaxImageBytes: Number(
+      env('MODEL_MULTIMODAL_MAX_IMAGE_BYTES', String(4 * 1024 * 1024)),
+    ),
+    multimodalMaxTotalBytes: Number(
+      env('MODEL_MULTIMODAL_MAX_TOTAL_BYTES', String(8 * 1024 * 1024)),
+    ),
+    attachmentBurstMs: Number(env('AI_ATTACHMENT_BURST_MS', '1200')),
+    fileAutoRead: env('AI_FILE_AUTO_READ', 'true') === 'true',
+    fileAutoReadMaxFiles: Number(env('AI_FILE_AUTO_READ_MAX_FILES', '2')),
+    fileAutoReadMaxChars: Number(env('AI_FILE_AUTO_READ_MAX_CHARS', '6000')),
+    fileAutoReadMaxBytes: Number(env('AI_FILE_AUTO_READ_MAX_BYTES', String(8 * 1024 * 1024))),
+    fileAutoReadWindowMs: Number(env('AI_FILE_AUTO_READ_WINDOW_MINUTES', '10')) * 60 * 1000,
     silenceMinConfidence: Number(env('AI_SILENCE_MIN_CONFIDENCE', '0.6')),
     expoPushToken: env('EXPO_ACCESS_TOKEN'),
     expoPushUrl: env('EXPO_PUSH_URL', 'https://exp.host/--/api/v2/push/send'),

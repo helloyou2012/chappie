@@ -24,6 +24,8 @@ export interface PendingMessage {
   mentions: string[];
   replyTo: string | null;
   createdAt: string;
+  /** 附件先上屏：uploading=本地预览上传中，sending=已交给 WS 等回执 */
+  status?: 'uploading' | 'sending' | 'failed';
 }
 
 let pullHandler: ((convId: string, fromSeq: number) => void) | null = null;
@@ -66,6 +68,11 @@ interface ChatState {
   appendMessage: (msg: Message, fromPull?: boolean) => void;
   applyServerFrame: (frame: ServerFrame) => void;
   addPending: (p: PendingMessage) => void;
+  updatePending: (
+    convId: string,
+    clientMsgId: string,
+    patch: Partial<Pick<PendingMessage, 'content' | 'status'>>,
+  ) => void;
   removePending: (convId: string, clientMsgId: string) => void;
   clearPendingByConv: (convId: string) => void;
   removeMessage: (convId: string, msgId: string) => void;
@@ -329,6 +336,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       pendingByConv: {
         ...s.pendingByConv,
         [p.convId]: [...(s.pendingByConv[p.convId] ?? []), p].slice(-RECONNECT_HISTORY_GUARD),
+      },
+    })),
+
+  updatePending: (convId, clientMsgId, patch) =>
+    set((s) => ({
+      pendingByConv: {
+        ...s.pendingByConv,
+        [convId]: (s.pendingByConv[convId] ?? []).map((p) =>
+          p.clientMsgId === clientMsgId ? { ...p, ...patch } : p,
+        ),
       },
     })),
 

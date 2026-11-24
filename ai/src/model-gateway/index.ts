@@ -56,12 +56,30 @@ export async function complete(
     : req;
 
   let lastError: unknown;
+  // 供应商若报图片损坏，去掉图片立即重试（图片是增强上下文，不应让整次任务失败）
+  let effectiveReq: CompleteRequest = streamingReq;
+  let imagesDropped = false;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      return await provider.complete(streamingReq, ctx);
+      return await provider.complete(effectiveReq, ctx);
     } catch (e) {
       lastError = e;
-      log.warn('model call failed', { provider: provider.name, attempt, error: String(e) });
+      const message = String(e);
+      log.warn('model call failed', { provider: provider.name, attempt, error: message });
+      if (
+        !emitted &&
+        !imagesDropped &&
+        effectiveReq.images?.length &&
+        /invalid image|corrupt|truncated|decode/i.test(message)
+      ) {
+        imagesDropped = true;
+        effectiveReq = { ...effectiveReq, images: undefined };
+        log.warn('model rejected image input, retry without images', {
+          provider: provider.name,
+          error: message.slice(0, 200),
+        });
+        continue;
+      }
       if (emitted) break;
       if (attempt < 3) await sleep(300 * 2 ** (attempt - 1));
     }
@@ -71,7 +89,7 @@ export async function complete(
   // 已吐字时不再降级（否则 mock 会把整段话再重复一遍）
   if (provider.name !== 'mock' && !emitted) {
     log.warn('fallback to mock provider', { provider: provider.name, error: String(lastError) });
-    return mockProvider.complete(streamingReq, { ...ctx, model: 'mock-1' });
+    return mockProvider.complete(effectiveReq, { ...ctx, model: 'mock-1' });
   }
   throw lastError;
 }

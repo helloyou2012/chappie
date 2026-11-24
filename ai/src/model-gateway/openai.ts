@@ -6,14 +6,25 @@
  */
 
 import { assertStreamOk, readSse } from './sse';
-import type { ChatMessage, CompleteRequest, CompleteResult, Provider, ToolCall } from './types';
+import type {
+  ChatMessage,
+  CompleteRequest,
+  CompleteResult,
+  PromptImage,
+  Provider,
+  ToolCall,
+} from './types';
 import { createToolNameMap, estimateCost, safeJsonParse } from './types';
 
 // ---------------------------------------------------------------------------
 // Chat Completions
 // ---------------------------------------------------------------------------
 
-function toChatMessage(m: ChatMessage, toWire: (name: string) => string): Record<string, unknown> {
+function toChatMessage(
+  m: ChatMessage,
+  toWire: (name: string) => string,
+  images?: PromptImage[],
+): Record<string, unknown> {
   if (m.role === 'tool') {
     return { role: 'tool', tool_call_id: m.toolCallId ?? '', content: m.content };
   }
@@ -28,6 +39,18 @@ function toChatMessage(m: ChatMessage, toWire: (name: string) => string): Record
       })),
     };
   }
+  if (m.role === 'user' && images?.length) {
+    return {
+      role: 'user',
+      content: [
+        ...(m.content ? [{ type: 'text', text: m.content }] : []),
+        ...images.map((img) => ({
+          type: 'image_url',
+          image_url: { url: `data:${img.mime};base64,${img.data}` },
+        })),
+      ],
+    };
+  }
   return { role: m.role, content: m.content };
 }
 
@@ -40,7 +63,9 @@ export const openaiChatProvider: Provider = {
       model: ctx.model,
       messages: [
         { role: 'system', content: req.system },
-        ...req.messages.map((m) => toChatMessage(m, names.toWire)),
+        ...req.messages.map((m, i) =>
+          toChatMessage(m, names.toWire, i === 0 ? req.images : undefined),
+        ),
       ],
       temperature: req.temperature ?? 0.6,
     };
@@ -112,7 +137,9 @@ async function streamOpenaiChat(
     model: ctx.model,
     messages: [
       { role: 'system', content: req.system },
-      ...req.messages.map((m) => toChatMessage(m, names.toWire)),
+      ...req.messages.map((m, i) =>
+        toChatMessage(m, names.toWire, i === 0 ? req.images : undefined),
+      ),
     ],
     temperature: req.temperature ?? 0.6,
     stream: true,
@@ -214,11 +241,21 @@ async function streamOpenaiChat(
 // ---------------------------------------------------------------------------
 
 type ResponsesInputItem =
-  | { role: 'user' | 'assistant'; content: { type: 'input_text' | 'output_text'; text: string }[] }
+  | {
+      role: 'user' | 'assistant';
+      content: (
+        | { type: 'input_text' | 'output_text'; text: string }
+        | { type: 'input_image'; image_url: string }
+      )[];
+    }
   | { type: 'function_call'; call_id: string; name: string; arguments: string }
   | { type: 'function_call_output'; call_id: string; output: string };
 
-function toResponsesInput(m: ChatMessage, toWire: (name: string) => string): ResponsesInputItem[] {
+function toResponsesInput(
+  m: ChatMessage,
+  toWire: (name: string) => string,
+  images?: PromptImage[],
+): ResponsesInputItem[] {
   if (m.role === 'tool') {
     return [{ type: 'function_call_output', call_id: m.toolCallId ?? '', output: m.content }];
   }
@@ -229,6 +266,20 @@ function toResponsesInput(m: ChatMessage, toWire: (name: string) => string): Res
       name: toWire(tc.name),
       arguments: JSON.stringify(tc.args),
     }));
+  }
+  if (m.role === 'user' && images?.length) {
+    return [
+      {
+        role: 'user',
+        content: [
+          ...(m.content ? [{ type: 'input_text' as const, text: m.content }] : []),
+          ...images.map((img) => ({
+            type: 'input_image' as const,
+            image_url: `data:${img.mime};base64,${img.data}`,
+          })),
+        ],
+      },
+    ];
   }
   return [
     {
@@ -246,7 +297,9 @@ export const openaiResponsesProvider: Provider = {
     const body: Record<string, unknown> = {
       model: ctx.model,
       instructions: req.system,
-      input: req.messages.flatMap((m) => toResponsesInput(m, names.toWire)),
+      input: req.messages.flatMap((m, i) =>
+        toResponsesInput(m, names.toWire, i === 0 ? req.images : undefined),
+      ),
       temperature: req.temperature ?? 0.6,
     };
     if (req.tools?.length) {
@@ -318,7 +371,9 @@ async function streamOpenaiResponses(
   const body: Record<string, unknown> = {
     model: ctx.model,
     instructions: req.system,
-    input: req.messages.flatMap((m) => toResponsesInput(m, names.toWire)),
+    input: req.messages.flatMap((m, i) =>
+      toResponsesInput(m, names.toWire, i === 0 ? req.images : undefined),
+    ),
     temperature: req.temperature ?? 0.6,
     stream: true,
   };

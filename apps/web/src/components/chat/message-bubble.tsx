@@ -4,12 +4,15 @@ import {
   formatTime,
   type MemberView,
   type Message,
+  resolveAttachmentUrl,
   stripToolCallMarkup,
   useAuthStore,
 } from '@chappie/shared';
 import { ChevronDownIcon, ChevronUpIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import {
   RiArrowGoBackLine,
+  RiDownloadLine,
+  RiFileTextLine,
   RiFlagLine,
   RiMagicLine,
   RiMoreFill,
@@ -166,10 +169,54 @@ export function MessageBubble({
           streaming={streaming}
         />
 
-        {text ? (
+        {!message.recalled && message.content.type === 'image' ? (
+          <a
+            href={resolveAttachmentUrl(message.content.url)}
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              'inline-block max-w-md overflow-hidden rounded-xl',
+              mine && 'bg-bubble-user',
+              !mine && !isAvatar && 'bg-bubble-other',
+            )}
+          >
+            <img
+              src={resolveAttachmentUrl(message.content.url)}
+              alt={message.content.name ?? '图片'}
+              loading="lazy"
+              className="max-h-80 max-w-full rounded-xl object-contain"
+            />
+          </a>
+        ) : !message.recalled && message.content.type === 'file' ? (
+          <a
+            href={resolveAttachmentUrl(message.content.url)}
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              'flex max-w-md items-center gap-2.5 rounded-xl px-3 py-2.5 transition-colors',
+              mine
+                ? 'bg-bubble-user text-bubble-user-ink'
+                : 'bg-surface-raised text-ink hover:bg-surface-hover',
+            )}
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-veil">
+              <RiFileTextLine className="size-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium">{message.content.name}</span>
+              {typeof message.content.size === 'number' ? (
+                <span className="text-[11px] opacity-60">{formatBytes(message.content.size)}</span>
+              ) : null}
+            </span>
+            <RiDownloadLine className="size-4 shrink-0 opacity-60" />
+          </a>
+        ) : text ? (
           isAvatar && !message.recalled ? (
             // AI 消息：扁平、去气泡、占满宽度，与思考/工具行同级
-            <div className="w-full break-words text-[14px] leading-[1.65] tracking-[-0.15px] text-ink">
+            <div
+              className="w-full min-w-0 max-w-full break-words text-[14px] leading-[1.65] tracking-[-0.15px] text-ink"
+              style={{ contain: 'inline-size' }}
+            >
               <Streamdown
                 animated={streaming}
                 isAnimating={streaming}
@@ -178,7 +225,7 @@ export function MessageBubble({
                 plugins={{ code, mermaid, math, cjk }}
                 shikiTheme={['github-light', 'github-dark']}
                 mermaid={{ config: { theme: 'neutral' } }}
-                className="[&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_img]:max-w-full [&_img]:rounded-lg"
+                className="min-w-0 max-w-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_[data-streamdown=code-block]]:min-w-0 [&_[data-streamdown=code-block]]:max-w-full [&_[data-streamdown=code-block-body]]:max-w-full [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_img]:max-w-full [&_img]:rounded-lg"
               >
                 {text}
               </Streamdown>
@@ -336,4 +383,10 @@ function StreamCursor({ reduceMotion }: { reduceMotion: boolean }) {
       ▍
     </motion.span>
   );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }

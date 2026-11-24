@@ -14,3 +14,6 @@ packages/contract/fixtures.json
 .turbo/
 coverage/
 build/
+
+# 本地文件工具落盘目录
+ai/.data/

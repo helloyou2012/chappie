@@ -154,6 +154,15 @@ pub async fn create_direct(db: &Db, events: &EventTx, user_id: &str, peer_user_i
     .fetch_optional(&db.pg)
     .await?;
     if let Some((id,)) = existing {
+        // 复用旧单聊时补上双方分身，保证 AI 代发也满足成员校验
+        let mut tx = db.pg.begin().await?;
+        ensure_avatars(
+            &mut tx,
+            &id,
+            &[user_id.to_string(), peer_user_id.to_string()],
+        )
+        .await?;
+        tx.commit().await?;
         return Ok(id);
     }
 
@@ -245,21 +254,12 @@ pub async fn create_avatar_self_conversation(db: &Db, user_id: &str, avatar_id: 
 }
 
 /// human 成员 + 各自的 avatar 分身一起入会（分身是会话一等成员 —— 设计方案 §1）
-async fn insert_members_with_avatars(
+/// 确保这些用户的 AI 分身都在会话成员里（幂等）。
+async fn ensure_avatars(
     tx: &mut Transaction<'_, Postgres>,
     conv_id: &str,
     user_ids: &[String],
-    owner_id: Option<&str>,
 ) -> AppResult<()> {
-    for uid in user_ids {
-        let role = if Some(uid) == owner_id.map(|s| s.to_string()).as_ref() { "owner" } else { "member" };
-        sqlx::query("INSERT INTO member (conv_id, principal_id, role) VALUES ($1, $2, $3)")
-            .bind(conv_id)
-            .bind(uid)
-            .bind(role)
-            .execute(&mut **tx)
-            .await?;
-    }
     let avatars: Vec<(String,)> = sqlx::query_as(
         "SELECT id FROM principal WHERE type = 'avatar' AND owner_id = ANY($1)",
     )
@@ -276,6 +276,25 @@ async fn insert_members_with_avatars(
         .execute(&mut **tx)
         .await?;
     }
+    Ok(())
+}
+
+async fn insert_members_with_avatars(
+    tx: &mut Transaction<'_, Postgres>,
+    conv_id: &str,
+    user_ids: &[String],
+    owner_id: Option<&str>,
+) -> AppResult<()> {
+    for uid in user_ids {
+        let role = if Some(uid) == owner_id.map(|s| s.to_string()).as_ref() { "owner" } else { "member" };
+        sqlx::query("INSERT INTO member (conv_id, principal_id, role) VALUES ($1, $2, $3)")
+            .bind(conv_id)
+            .bind(uid)
+            .bind(role)
+            .execute(&mut **tx)
+            .await?;
+    }
+    ensure_avatars(tx, conv_id, user_ids).await?;
     Ok(())
 }
 
