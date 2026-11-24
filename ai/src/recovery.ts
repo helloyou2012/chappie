@@ -18,6 +18,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   addStep,
   appendAudit,
+  finalizeStreamOwnerOnly,
   loadTriggerMessage,
   type ResumeCheckpoint,
   runAfterApproval,
@@ -142,6 +143,7 @@ async function recoverTask(task: OrphanRow): Promise<void> {
         reason: '恢复时效过期',
       })
       .catch(() => undefined);
+    await finalizeStreamOwnerOnly(task.id, '恢复时效过期');
     await appendAudit(
       task.id,
       task.avatarId,
@@ -708,6 +710,7 @@ async function handoverUncertain(task: OrphanRow, summary: string): Promise<void
       reason: '恢复时无法确认工具执行结果',
     })
     .catch(() => undefined);
+  await finalizeStreamOwnerOnly(task.id, '恢复时无法确认工具执行结果');
   await appendAudit(
     task.id,
     task.avatarId,
@@ -744,6 +747,7 @@ async function handoverRevoked(task: OrphanRow, reason: string): Promise<void> {
       reason: '回合撤销',
     })
     .catch(() => undefined);
+  await finalizeStreamOwnerOnly(task.id, '回合撤销');
   await appendAudit(task.id, task.avatarId, 'turn.revoked', { reason: safe }, { ok: false }, null);
   log.warn('orphan task revoked during recovery', { taskId: task.id, reason: safe });
 }
@@ -755,6 +759,7 @@ async function failRecovered(task: OrphanRow, error: string): Promise<void> {
     .set({ status: 'failed', error: safe, lockedBy: null, leaseUntil: null, updatedAt: sql`now()` })
     .where(eq(agentTask.id, task.id))
     .catch(() => undefined);
+  await finalizeStreamOwnerOnly(task.id, '恢复失败');
   log.warn('orphan task failed during recovery', { taskId: task.id, error: safe });
 }
 

@@ -132,6 +132,8 @@ export const fixtureAvatarMessage: Message = {
       toolsUsed: ['calendar.read'],
       memoriesUsed: [],
     },
+    streaming: false,
+    ownerOnly: false,
   },
   recalled: false,
   createdAt: '2026-11-11T02:00:01.500Z',

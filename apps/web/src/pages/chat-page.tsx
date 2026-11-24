@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/toast';
 import { getRealtimeClient } from '@/lib/realtime';
+import { cn } from '@/lib/utils';
 
 function useNow(intervalMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -52,7 +53,8 @@ export function ChatPage() {
     convId?: string;
     lastMsgId: string | null;
     lastPendingId: string | null;
-  }>({ lastMsgId: null, lastPendingId: null });
+    sig: string;
+  }>({ lastMsgId: null, lastPendingId: null, sig: '' });
   const now = useNow(1000);
 
   const view = conversations.find((c) => c.conversation.id === convId);
@@ -97,26 +99,43 @@ export function ChatPage() {
   const lastMsgSenderId = lastMsg?.senderId;
   const lastPendingId =
     pending.length > 0 ? (pending[pending.length - 1]?.clientMsgId ?? null) : null;
+  // 流式更新不会改变 msgId：用正文/思考/工具活动的变化签名触发跟随滚动
+  const lastMsgSig = lastMsg
+    ? [
+        lastMsg.content.type === 'text' ? lastMsg.content.text.length : 0,
+        lastMsg.aiMeta?.thinking?.length ?? 0,
+        (lastMsg.aiMeta?.activity ?? []).map((a) => `${a.status}:${a.content.length}`).join(','),
+        lastMsg.aiMeta?.streaming ? 1 : 0,
+      ].join('|')
+    : '';
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const prev = lastScrollKeyRef.current;
-    lastScrollKeyRef.current = { convId, lastMsgId, lastPendingId };
+    lastScrollKeyRef.current = { convId, lastMsgId, lastPendingId, sig: lastMsgSig };
 
     if (prev.convId !== convId) {
       atBottomRef.current = true;
       el.scrollTo({ top: el.scrollHeight });
       return;
     }
-    // 最后一条没变（如加载更早消息只是前插）时不滚动
-    if (prev.lastMsgId === lastMsgId && prev.lastPendingId === lastPendingId) return;
-    const own = lastPendingId !== prev.lastPendingId || lastMsgSenderId === myId;
+    const messageChanged = prev.lastMsgId !== lastMsgId;
+    const pendingChanged = prev.lastPendingId !== lastPendingId;
+    const contentChanged = prev.sig !== lastMsgSig;
+    // 最后一条没变（如加载更早消息只是前插，且流式内容无变化）时不滚动
+    if (!messageChanged && !pendingChanged && !contentChanged) return;
+    const own = pendingChanged || lastMsgSenderId === myId;
     if (own || atBottomRef.current) {
       atBottomRef.current = true;
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      if (contentChanged && !messageChanged && !pendingChanged) {
+        // 流式增量/定稿：即时贴底，避免 smooth 滚动排队
+        el.scrollTop = el.scrollHeight;
+      } else {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      }
     }
-  }, [convId, lastMsgId, lastMsgSenderId, lastPendingId, myId]);
+  }, [convId, lastMsgId, lastMsgSenderId, lastPendingId, myId, lastMsgSig]);
 
   if (!convId || !view) {
     return (
@@ -271,16 +290,27 @@ export function ChatPage() {
             />
           ))}
 
-          {typingMembers.length > 0 ? (
-            <div className="flex items-center gap-2 px-4 py-1 text-[11px] text-muted-foreground">
-              <span className="ml-10 flex items-center gap-1 rounded-full bg-muted px-2 py-1">
-                <span className="typing-dot size-1 rounded-full bg-current" />
-                <span className="typing-dot size-1 rounded-full bg-current" />
-                <span className="typing-dot size-1 rounded-full bg-current" />
-              </span>
-              {avatarTyping ? '分身正在处理…' : `${typingMembers.join('、')} 正在输入…`}
-            </div>
-          ) : null}
+          {/* 固定高度占位：loading 消失时高度不变，避免贴底视图向上弹一下 */}
+          <div
+            className={cn(
+              'flex h-7 items-center gap-2 px-4 text-[11px] text-muted-foreground transition-opacity duration-150',
+              typingMembers.length > 0 ? 'opacity-100' : 'pointer-events-none opacity-0',
+            )}
+            aria-hidden={typingMembers.length === 0}
+          >
+            <span className="ml-10 flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-1">
+              <span className="typing-dot size-1 rounded-full bg-current" />
+              <span className="typing-dot size-1 rounded-full bg-current" />
+              <span className="typing-dot size-1 rounded-full bg-current" />
+            </span>
+            <span className="truncate">
+              {typingMembers.length > 0
+                ? avatarTyping
+                  ? '分身正在处理…'
+                  : `${typingMembers.join('、')} 正在输入…`
+                : ' '}
+            </span>
+          </div>
         </div>
 
         <ChatInput

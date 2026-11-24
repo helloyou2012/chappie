@@ -1,5 +1,12 @@
 import { contentText } from '@chappie/contract';
-import { api, formatTime, type MemberView, type Message, useAuthStore } from '@chappie/shared';
+import {
+  api,
+  formatTime,
+  type MemberView,
+  type Message,
+  stripToolCallMarkup,
+  useAuthStore,
+} from '@chappie/shared';
 import { ChevronDownIcon, ChevronUpIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import {
   RiArrowGoBackLine,
@@ -9,7 +16,14 @@ import {
   RiReplyLine,
   RiThumbUpLine,
 } from '@remixicon/react';
+import { cjk } from '@streamdown/cjk';
+import { code } from '@streamdown/code';
+import { math } from '@streamdown/math';
+import { mermaid } from '@streamdown/mermaid';
+import { motion, useReducedMotion } from 'motion/react';
 import { useState } from 'react';
+import remarkBreaks from 'remark-breaks';
+import { Streamdown } from 'streamdown';
 import { UserAvatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,6 +44,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast';
 import { getRealtimeClient } from '@/lib/realtime';
 import { cn } from '@/lib/utils';
+import { AgentActivity } from './agent-activity';
 import { CardView } from './cards';
 
 interface MessageBubbleProps {
@@ -59,6 +74,8 @@ export function MessageBubble({
   const [showExplain, setShowExplain] = useState(false);
   const [correctOpen, setCorrectOpen] = useState(false);
   const [correctText, setCorrectText] = useState('');
+  const reduceMotion = Boolean(useReducedMotion());
+  const streaming = Boolean(message.aiMeta?.streaming) && !message.recalled;
 
   if (message.content.type === 'card') {
     return (
@@ -70,11 +87,13 @@ export function MessageBubble({
     );
   }
 
-  const text = message.recalled
+  const rawText = message.recalled
     ? '消息已撤回'
     : message.content.type === 'text'
       ? message.content.text
       : contentText(message.content);
+  // 历史消息可能已把文本形式的 <tool_call> 落库：渲染时兜底剥离
+  const text = isAvatar ? stripToolCallMarkup(rawText) : rawText;
 
   const feedback = (type: 'like' | 'report') => {
     void api
@@ -94,15 +113,25 @@ export function MessageBubble({
         <UserAvatar
           name={avatarName}
           variant={isAvatar ? 'avatar' : 'human'}
-          className="mt-4 size-8"
+          className="mt-0.5 size-8"
         />
       ) : (
         <div className="w-8 shrink-0" />
       )}
 
-      <div className={cn('flex max-w-[72%] flex-col gap-1', mine ? 'items-end' : 'items-start')}>
+      <div
+        className={cn(
+          'flex min-w-0 flex-col gap-1',
+          mine ? 'max-w-[72%] items-end' : 'flex-1 items-stretch',
+        )}
+      >
         {showSender ? (
-          <div className="flex items-center gap-1.5 px-1 text-[11px] text-ink-quaternary">
+          <div
+            className={cn(
+              'flex items-center gap-1.5 text-[11px] text-ink-quaternary',
+              mine && 'px-1',
+            )}
+          >
             <span>{senderName}</span>
             {isAvatar ? (
               <button
@@ -131,20 +160,46 @@ export function MessageBubble({
           </div>
         ) : null}
 
-        <div
-          className={cn(
-            'rounded-2xl px-3.5 py-2 text-[14px] leading-[1.45] tracking-[-0.15px] break-words whitespace-pre-wrap',
-            message.recalled
-              ? 'border border-dashed border-line bg-transparent text-ink-tertiary italic'
-              : mine
-                ? 'bg-bubble-user text-bubble-user-ink'
-                : isAvatar
-                  ? 'bg-ai text-ai-foreground'
-                  : 'bg-bubble-other text-ink',
-          )}
-        >
-          {text}
-        </div>
+        <AgentActivity
+          thinking={message.recalled ? '' : (message.aiMeta?.thinking ?? '')}
+          activity={message.aiMeta?.activity ?? []}
+          streaming={streaming}
+        />
+
+        {text ? (
+          isAvatar && !message.recalled ? (
+            // AI 消息：扁平、去气泡、占满宽度，与思考/工具行同级
+            <div className="w-full break-words text-[14px] leading-[1.65] tracking-[-0.15px] text-ink">
+              <Streamdown
+                animated={streaming}
+                isAnimating={streaming}
+                parseIncompleteMarkdown
+                remarkPlugins={[remarkBreaks]}
+                plugins={{ code, mermaid, math, cjk }}
+                shikiTheme={['github-light', 'github-dark']}
+                mermaid={{ config: { theme: 'neutral' } }}
+                className="[&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_img]:max-w-full [&_img]:rounded-lg"
+              >
+                {text}
+              </Streamdown>
+              {streaming ? <StreamCursor reduceMotion={reduceMotion} /> : null}
+            </div>
+          ) : (
+            <div
+              className={cn(
+                'rounded-2xl px-3.5 py-2 text-[14px] leading-[1.45] tracking-[-0.15px] break-words whitespace-pre-wrap',
+                message.recalled
+                  ? 'border border-dashed border-line bg-transparent text-ink-tertiary italic'
+                  : mine
+                    ? 'bg-bubble-user text-bubble-user-ink'
+                    : 'bg-bubble-other text-ink',
+              )}
+            >
+              {text}
+              {streaming ? <StreamCursor reduceMotion={reduceMotion} /> : null}
+            </div>
+          )
+        ) : null}
 
         {isAvatar && showExplain && message.aiMeta?.explanation ? (
           <div className="w-full rounded-md border border-line bg-panel p-2.5 text-[12px] backdrop-blur">
@@ -266,5 +321,19 @@ export function MessageBubble({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** 流式光标：motion 呼吸；减少动态偏好时退化为静态字符 */
+function StreamCursor({ reduceMotion }: { reduceMotion: boolean }) {
+  if (reduceMotion) return <span className="ml-0.5 inline-block text-brand">▍</span>;
+  return (
+    <motion.span
+      className="ml-0.5 inline-block text-brand"
+      animate={{ opacity: [1, 0.15, 1] }}
+      transition={{ duration: 0.9, repeat: Number.POSITIVE_INFINITY, ease: 'easeInOut' }}
+    >
+      ▍
+    </motion.span>
   );
 }

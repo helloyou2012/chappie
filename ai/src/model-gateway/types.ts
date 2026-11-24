@@ -13,6 +13,10 @@ export interface ChatMessage {
   toolCallId?: string;
   /** role=assistant 时：发起的工具调用 */
   toolCalls?: ToolCall[];
+  /** role=assistant 时：思考内容（thinking 开启时多轮必须回传给 API） */
+  thinking?: string;
+  /** 思考块签名（部分网关要求回传时携带） */
+  thinkingSignature?: string;
 }
 
 export interface ToolCall {
@@ -34,6 +38,14 @@ export interface CompleteRequest {
   tools?: ToolDef[];
   temperature?: number;
   maxTokens?: number;
+  /** 启用供应商 SSE 流式（工具调用仍等流结束后一次性返回） */
+  stream?: boolean;
+  /** 开启扩展思考（provider 支持 thinking 时生效） */
+  thinking?: boolean;
+  /** 文本增量回调；没有该回调时 stream 无意义 */
+  onTextDelta?: (delta: string) => void;
+  /** 思考增量回调（thinking 开启时） */
+  onThinkingDelta?: (delta: string) => void;
   /** Mock provider 专用提示（真实 provider 忽略） */
   mockHints?: {
     ownerName?: string;
@@ -51,6 +63,10 @@ export interface Usage {
 
 export interface CompleteResult {
   text: string;
+  /** 扩展思考内容（thinking 开启时） */
+  thinking?: string;
+  /** 思考块签名：多轮回传时需附带 */
+  thinkingSignature?: string;
   toolCalls: ToolCall[];
   usage: Usage;
   provider: string;

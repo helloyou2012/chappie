@@ -1,13 +1,14 @@
 import { contentText } from '@chappie/contract';
 import type { CardPayload, MemberView, Message } from '@chappie/shared';
-import { api, formatTime } from '@chappie/shared';
+import { api, formatTime, stripToolCallMarkup } from '@chappie/shared';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Pressable, View } from 'react-native';
 import Icon from 'react-native-remix-icon';
 import { useTheme } from '@/hooks/use-theme';
 import { realtime } from '@/realtime';
 import { Avatar, Badge, BottomSheet, Button, Card, Dialog, Input, MenuRow, Text } from '@/ui';
+import { AgentActivityPanel } from './agent-activity';
 
 export type CardAction =
   | 'send'
@@ -57,11 +58,13 @@ export function MessageBubble({
     );
   }
 
-  const text = message.recalled
+  const rawText = message.recalled
     ? '消息已撤回'
     : message.content.type === 'text'
       ? message.content.text
       : contentText(message.content);
+  // 历史消息可能已把文本形式的 <tool_call> 落库：渲染时兜底剥离
+  const text = isAvatar ? stripToolCallMarkup(rawText) : rawText;
   const canRecall = !message.recalled && (mine || message.onBehalfOf === myId);
 
   const feedback = (type: 'like' | 'report') => {
@@ -73,7 +76,7 @@ export function MessageBubble({
 
   return (
     <>
-      <MessageRow mine={mine}>
+      <MessageRow mine={mine} wide={isAvatar}>
         <MessageIdentity
           mine={mine}
           senderName={sender?.name}
@@ -82,17 +85,25 @@ export function MessageBubble({
           onBehalfOfMe={isAvatar && message.onBehalfOf === myId}
           createdAt={message.createdAt}
         />
-        <MessageSurface
-          mine={mine}
-          isAvatar={isAvatar}
-          recalled={message.recalled}
-          text={text}
-          onPress={
-            isAvatar && message.aiMeta?.explanation ? () => setShowExplain((v) => !v) : undefined
-          }
-          onLongPress={message.recalled ? undefined : () => setSheetOpen(true)}
-          accessibilityLabel={`${mine ? '我' : (sender?.name ?? '成员')}：${text}`}
+        <AgentActivityPanel
+          thinking={message.recalled ? '' : (message.aiMeta?.thinking ?? '')}
+          activity={message.aiMeta?.activity ?? []}
+          streaming={Boolean(message.aiMeta?.streaming) && !message.recalled}
         />
+        {text ? (
+          <MessageSurface
+            mine={mine}
+            isAvatar={isAvatar}
+            recalled={message.recalled}
+            text={text}
+            streaming={Boolean(message.aiMeta?.streaming) && !message.recalled}
+            onPress={
+              isAvatar && message.aiMeta?.explanation ? () => setShowExplain((v) => !v) : undefined
+            }
+            onLongPress={message.recalled ? undefined : () => setSheetOpen(true)}
+            accessibilityLabel={`${mine ? '我' : (sender?.name ?? '成员')}：${text}`}
+          />
+        ) : null}
         {notice ? (
           <Text variant="micro" tone="success" style={{ marginTop: 2 }}>
             {notice}
@@ -229,7 +240,15 @@ export function MessageBubble({
 // 参考 beUI：气泡只负责阅读形状，不承担身份与滚动语义。
 // ---------------------------------------------------------------------------
 
-function MessageRow({ mine, children }: { mine: boolean; children: React.ReactNode }) {
+function MessageRow({
+  mine,
+  wide,
+  children,
+}: {
+  mine: boolean;
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <View
       style={{
@@ -238,7 +257,7 @@ function MessageRow({ mine, children }: { mine: boolean; children: React.ReactNo
         alignItems: mine ? 'flex-end' : 'flex-start',
       }}
     >
-      <View style={{ maxWidth: '82%' }}>{children}</View>
+      <View style={wide ? { width: '100%' } : { maxWidth: '82%' }}>{children}</View>
     </View>
   );
 }
@@ -278,6 +297,7 @@ function MessageSurface({
   isAvatar,
   recalled,
   text,
+  streaming = false,
   onPress,
   onLongPress,
   accessibilityLabel,
@@ -286,6 +306,7 @@ function MessageSurface({
   isAvatar: boolean;
   recalled: boolean;
   text: string;
+  streaming?: boolean;
   onPress?: () => void;
   onLongPress?: () => void;
   accessibilityLabel: string;
@@ -301,17 +322,17 @@ function MessageSurface({
     >
       <View
         style={{
-          borderRadius: 16,
-          paddingHorizontal: 13,
-          paddingVertical: 9,
-          backgroundColor: recalled
+          borderRadius: isAvatar ? 0 : 16,
+          paddingHorizontal: isAvatar ? 0 : 13,
+          paddingVertical: isAvatar ? 0 : 9,
+          backgroundColor: isAvatar
             ? 'transparent'
-            : mine
-              ? t.bubbleUser
-              : isAvatar
-                ? t.aiBubble
+            : recalled
+              ? 'transparent'
+              : mine
+                ? t.bubbleUser
                 : t.bubble,
-          borderWidth: recalled ? 1 : 0,
+          borderWidth: recalled && !isAvatar ? 1 : 0,
           borderColor: t.border,
           borderStyle: recalled ? 'dashed' : 'solid',
         }}
@@ -319,11 +340,12 @@ function MessageSurface({
         <Text
           style={{
             fontSize: 15,
-            lineHeight: 21,
-            color: recalled ? t.textMuted : mine ? t.bubbleUserText : isAvatar ? t.aiText : t.text,
+            lineHeight: isAvatar ? 24 : 21,
+            color: recalled ? t.textMuted : mine ? t.bubbleUserText : t.text,
           }}
         >
           {text}
+          {streaming ? <BlinkingCursor color={t.primary} /> : null}
         </Text>
       </View>
     </Pressable>
@@ -680,4 +702,30 @@ function CardView({
       </Text>
     </Card>
   );
+}
+
+/** 流式光标：内置 Animated 呼吸，避免引入额外动画库 */
+function BlinkingCursor({ color }: { color?: string }) {
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 0.15,
+          duration: 450,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 450,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return <Animated.Text style={{ color, opacity }}>▍</Animated.Text>;
 }

@@ -2,7 +2,14 @@
 import { describe, expect, test } from 'bun:test';
 import { wsUrlFromServerUrl } from '../src/api';
 import { dayjs } from '../src/datetime';
-import { formatRelative, formatTime, initials, truncate, uuid } from '../src/format';
+import {
+  formatRelative,
+  formatTime,
+  initials,
+  stripToolCallMarkup,
+  truncate,
+  uuid,
+} from '../src/format';
 
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -110,5 +117,14 @@ describe('wsUrlFromServerUrl', () => {
 
   test('去掉末尾斜杠，避免双斜杠', () => {
     expect(wsUrlFromServerUrl('http://localhost:7100/')).toBe('ws://localhost:7100/ws');
+  });
+});
+
+describe('stripToolCallMarkup', () => {
+  test('渲染历史消息时剥离文本形式的工具调用', () => {
+    expect(
+      stripToolCallMarkup('好的<tool_call>{"name":"calendar.create"}</tool_call>，已处理'),
+    ).toBe('好的，已处理');
+    expect(stripToolCallMarkup('<tool_call>{"name":"x"}')).toBe('');
   });
 });

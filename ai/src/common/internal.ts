@@ -50,6 +50,8 @@ export interface SendMessageInternalReq {
   aiMeta?: Record<string, unknown> | null;
   authorityVersion?: number;
   via?: string | null;
+  /** 流式消息：先只对主人可见，通过 updateStreamText / finalizeStreamMessage 推进 */
+  streaming?: boolean;
 }
 
 export interface PresenceInfo {
@@ -129,6 +131,22 @@ export const internal = {
 
   updateCard: (msgId: string, card: CardPayload) =>
     call<Message>('/internal/v1/update-card', { msgId, card }),
+
+  /** 流式增量：用累积的完整文本/思考/工具活动替换内容（仅主人可见，持久化） */
+  updateStreamText: (
+    msgId: string,
+    text: string,
+    thinking?: string,
+    activity?: Record<string, unknown>[],
+  ) => call<Message>('/internal/v1/update-stream-text', { msgId, text, thinking, activity }),
+
+  /** 流式定稿：visible=true 才对外广播并进入 AI 事件链路；text 缺省 = 保留当前内容 */
+  finalizeStreamMessage: (req: {
+    msgId: string;
+    text?: string | null;
+    aiMeta?: Record<string, unknown> | null;
+    visible: boolean;
+  }) => call<Message>('/internal/v1/finalize-stream-message', req),
 
   freezeAvatar: (avatarId: string, frozen: boolean) =>
     call<{ ok: boolean; status: string }>('/internal/v1/freeze-avatar', { avatarId, frozen }),

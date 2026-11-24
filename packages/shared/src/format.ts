@@ -42,3 +42,16 @@ export function initials(name: string): string {
   if (!trimmed) return '?';
   return (Array.from(trimmed)[0] ?? '?').toUpperCase();
 }
+
+/**
+ * 模型有时会把工具调用以文本形式输出（<tool_call>...</tool_call>）。
+ * 这类标记不应出现在消息、预览或历史里；客户端渲染时再兜底剥离一次。
+ */
+export function stripToolCallMarkup(text: string): string {
+  let out = text;
+  for (const name of ['tool_call', 'tool_calls', 'function_call']) {
+    out = out.replace(new RegExp(`<${name}>[\\s\\S]*?(?:</${name}>|$)`, 'gi'), '');
+  }
+  out = out.replace(/<\|tool_call\|>[\s\S]*?(?:<\|\/tool_call\|>|$)/gi, '');
+  return out.replace(/\n{3,}/g, '\n\n').trim();
+}

@@ -11,6 +11,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { parseJsonSafe } from '../common/json';
+import { emitTextChunks } from './sse';
 import type { ChatMessage, CompleteRequest, CompleteResult, Provider, ToolCall } from './types';
 
 function lastUserText(messages: ChatMessage[]): string {
@@ -146,120 +147,129 @@ function parseTime(text: string): string {
   return `${day}${period ? ` ${period}` : ''} ${hour}:${minute}`.trim();
 }
 
+async function respond(req: CompleteRequest): Promise<CompleteResult> {
+  // 关键词规则只作用于触发消息，避免历史文本误触发工具
+  const userText = req.mockHints?.triggerText ?? lastUserText(req.messages);
+  const ownerName = ownerNameOf(req);
+  const allow = new Set((req.tools ?? []).map((t) => t.name));
+
+  // 审批通过后的续跑：基于已执行结果生成回复（不再发起工具调用）
+  const resumeMsg = [...req.messages]
+    .reverse()
+    .find((m) => m.role === 'user' && m.content.includes('【系统事件】'));
+  if (resumeMsg) {
+    const resultText = resumeMsg.content.split('执行结果：')[1]?.split('\n')[0] ?? '';
+    return textResult(summarizeToolOutput(resultText || '{}'), req, 0.95);
+  }
+
+  // 工具结果已回填 → 生成自然语言总结（ReAct 第二轮）
+  const toolMsg = lastToolMessage(req.messages);
+  if (toolMsg) {
+    // 链式多轮演示：同一指令要「日程 + 待办」时，查完日程继续查待办（长任务多步执行）
+    const hasQueriedTodo = req.messages.some(
+      (m) => m.role === 'assistant' && m.toolCalls?.some((tc) => tc.name === 'todo.list'),
+    );
+    if (
+      allow.has('todo.list') &&
+      /待办/.test(userText) &&
+      /日程|安排/.test(userText) &&
+      !hasQueriedTodo
+    ) {
+      return toolResult('todo.list', {}, req, 0.9);
+    }
+    return textResult(summarizeToolOutput(toolMsg.content), req, 0.9);
+  }
+
+  // 高风险与转人规则（先于工具匹配）
+  if (/转账|付款|打钱|红包|汇款|借钱|借款/.test(userText)) {
+    if (allow.has('payment.send')) {
+      const amount = Number(/(\d+(?:\.\d+)?)/.exec(userText)?.[1] ?? 500);
+      return toolResult(
+        'payment.send',
+        { amount, currency: 'CNY', note: quote(userText, 40) },
+        req,
+      );
+    }
+    return handover('涉及资金操作，需要主人本人确认', req);
+  }
+  if (/合同|法律|起诉|律师|签署|承诺书/.test(userText)) {
+    return handover('涉及法律事务，建议转交主人本人处理', req);
+  }
+  if (/报价|多少钱|价格|折扣|优惠/.test(userText)) {
+    // 商务承诺：低置信度 → auto 档会按 escalate 规则转交
+    return {
+      ...composeLowConfidenceReply(userText, ownerName),
+      usage: mockUsage(req),
+      provider: 'mock',
+      model: 'mock-1',
+      costUsd: 0,
+      toolCalls: [],
+      confidence: 0.5,
+    };
+  }
+
+  // 工具触发
+  if (allow.has('calendar.read') && /日程|安排|会议|几点|有空|预约/.test(userText)) {
+    return toolResult('calendar.read', { day: 'today' }, req);
+  }
+  if (
+    allow.has('calendar.create') &&
+    /(帮我约|订个|创建日程|添加日程|安排一个|安排一下|提醒我)/.test(userText)
+  ) {
+    return toolResult(
+      'calendar.create',
+      { title: quote(userText, 40), time: parseTime(userText) },
+      req,
+    );
+  }
+  if (
+    allow.has('todo.add') &&
+    /(记个?待办|记一下待办|加个待办|添加待办|加入待办|待办加)/.test(userText)
+  ) {
+    return toolResult(
+      'todo.add',
+      {
+        text:
+          userText
+            .replace(/^.*?(?:记个?待办|加个待办|添加待办|加入待办)[:：]?\s*/, '')
+            .slice(0, 120) || quote(userText, 120),
+      },
+      req,
+    );
+  }
+  if (allow.has('todo.list') && /待办|todo|清单|任务列表/i.test(userText)) {
+    return toolResult('todo.list', {}, req);
+  }
+  if (allow.has('translate') && /翻译/.test(userText)) {
+    return toolResult('translate', { text: quote(userText, 200), targetLang: 'en' }, req);
+  }
+  if (allow.has('summarize') && /总结|纪要|归纳|概括/.test(userText)) {
+    return toolResult('summarize', { text: quote(userText, 400) }, req);
+  }
+  if (allow.has('web.search') && /搜索|查一下|搜一下|网上/.test(userText)) {
+    return toolResult('web.search', { query: quote(userText, 60) }, req);
+  }
+
+  // 通用文本回复
+  const intent = /[?？]|吗|呢|怎么|什么|何时|为什么|能不能/.test(userText)
+    ? 'question'
+    : /^(你好|hi|hello|在吗|在不在)/i.test(userText)
+      ? 'greeting'
+      : /帮我|请|麻烦|需要你/.test(userText)
+        ? 'task'
+        : 'chat';
+  return textResult(composeReply(userText, ownerName, intent), req);
+}
+
 export const mockProvider: Provider = {
   name: 'mock',
   async complete(req) {
-    // 关键词规则只作用于触发消息，避免历史文本误触发工具
-    const userText = req.mockHints?.triggerText ?? lastUserText(req.messages);
-    const ownerName = ownerNameOf(req);
-    const allow = new Set((req.tools ?? []).map((t) => t.name));
-
-    // 审批通过后的续跑：基于已执行结果生成回复（不再发起工具调用）
-    const resumeMsg = [...req.messages]
-      .reverse()
-      .find((m) => m.role === 'user' && m.content.includes('【系统事件】'));
-    if (resumeMsg) {
-      const resultText = resumeMsg.content.split('执行结果：')[1]?.split('\n')[0] ?? '';
-      return textResult(summarizeToolOutput(resultText || '{}'), req, 0.95);
+    const result = await respond(req);
+    // 模拟流式：只有请求要求时按小块、带节奏回调（工具轮通常无文本，不产生增量）
+    if (req.stream && req.onTextDelta && result.text) {
+      await emitTextChunks(result.text, req.onTextDelta);
     }
-
-    // 工具结果已回填 → 生成自然语言总结（ReAct 第二轮）
-    const toolMsg = lastToolMessage(req.messages);
-    if (toolMsg) {
-      // 链式多轮演示：同一指令要「日程 + 待办」时，查完日程继续查待办（长任务多步执行）
-      const hasQueriedTodo = req.messages.some(
-        (m) => m.role === 'assistant' && m.toolCalls?.some((tc) => tc.name === 'todo.list'),
-      );
-      if (
-        allow.has('todo.list') &&
-        /待办/.test(userText) &&
-        /日程|安排/.test(userText) &&
-        !hasQueriedTodo
-      ) {
-        return toolResult('todo.list', {}, req, 0.9);
-      }
-      return textResult(summarizeToolOutput(toolMsg.content), req, 0.9);
-    }
-
-    // 高风险与转人规则（先于工具匹配）
-    if (/转账|付款|打钱|红包|汇款|借钱|借款/.test(userText)) {
-      if (allow.has('payment.send')) {
-        const amount = Number(/(\d+(?:\.\d+)?)/.exec(userText)?.[1] ?? 500);
-        return toolResult(
-          'payment.send',
-          { amount, currency: 'CNY', note: quote(userText, 40) },
-          req,
-        );
-      }
-      return handover('涉及资金操作，需要主人本人确认', req);
-    }
-    if (/合同|法律|起诉|律师|签署|承诺书/.test(userText)) {
-      return handover('涉及法律事务，建议转交主人本人处理', req);
-    }
-    if (/报价|多少钱|价格|折扣|优惠/.test(userText)) {
-      // 商务承诺：低置信度 → auto 档会按 escalate 规则转交
-      return {
-        ...composeLowConfidenceReply(userText, ownerName),
-        usage: mockUsage(req),
-        provider: 'mock',
-        model: 'mock-1',
-        costUsd: 0,
-        toolCalls: [],
-        confidence: 0.5,
-      };
-    }
-
-    // 工具触发
-    if (allow.has('calendar.read') && /日程|安排|会议|几点|有空|预约/.test(userText)) {
-      return toolResult('calendar.read', { day: 'today' }, req);
-    }
-    if (
-      allow.has('calendar.create') &&
-      /(帮我约|订个|创建日程|添加日程|安排一个|安排一下|提醒我)/.test(userText)
-    ) {
-      return toolResult(
-        'calendar.create',
-        { title: quote(userText, 40), time: parseTime(userText) },
-        req,
-      );
-    }
-    if (
-      allow.has('todo.add') &&
-      /(记个?待办|记一下待办|加个待办|添加待办|加入待办|待办加)/.test(userText)
-    ) {
-      return toolResult(
-        'todo.add',
-        {
-          text:
-            userText
-              .replace(/^.*?(?:记个?待办|加个待办|添加待办|加入待办)[:：]?\s*/, '')
-              .slice(0, 120) || quote(userText, 120),
-        },
-        req,
-      );
-    }
-    if (allow.has('todo.list') && /待办|todo|清单|任务列表/i.test(userText)) {
-      return toolResult('todo.list', {}, req);
-    }
-    if (allow.has('translate') && /翻译/.test(userText)) {
-      return toolResult('translate', { text: quote(userText, 200), targetLang: 'en' }, req);
-    }
-    if (allow.has('summarize') && /总结|纪要|归纳|概括/.test(userText)) {
-      return toolResult('summarize', { text: quote(userText, 400) }, req);
-    }
-    if (allow.has('web.search') && /搜索|查一下|搜一下|网上/.test(userText)) {
-      return toolResult('web.search', { query: quote(userText, 60) }, req);
-    }
-
-    // 通用文本回复
-    const intent = /[?？]|吗|呢|怎么|什么|何时|为什么|能不能/.test(userText)
-      ? 'question'
-      : /^(你好|hi|hello|在吗|在不在)/i.test(userText)
-        ? 'greeting'
-        : /帮我|请|麻烦|需要你/.test(userText)
-          ? 'task'
-          : 'chat';
-    return textResult(composeReply(userText, ownerName, intent), req);
+    return result;
   },
 };
 

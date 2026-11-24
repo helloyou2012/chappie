@@ -43,7 +43,9 @@ pub async fn list_conversations(db: &Db, user_id: &str) -> AppResult<Vec<Convers
                   m.role, m.ai_mode, m.ai_mode_source, m.ai_mode_until, m.last_read_seq,
                   (SELECT count(*) FROM message mm
                      WHERE mm.conv_id = c.id AND mm.seq > m.last_read_seq
-                       AND mm.sender_id <> m.principal_id) AS unread,
+                       AND mm.sender_id <> m.principal_id
+                       AND (COALESCE((mm.ai_meta->>'ownerOnly')::boolean, false) = false
+                            OR mm.on_behalf_of = m.principal_id)) AS unread,
                   (SELECT p.name FROM member m2
                      JOIN principal p ON p.id = m2.principal_id
                      WHERE m2.conv_id = c.id AND m2.principal_id <> m.principal_id
@@ -60,7 +62,10 @@ pub async fn list_conversations(db: &Db, user_id: &str) -> AppResult<Vec<Convers
            FROM member m
            JOIN conversation c ON c.id = m.conv_id
            LEFT JOIN LATERAL
-             (SELECT * FROM message WHERE conv_id = c.id ORDER BY seq DESC LIMIT 1) lm ON TRUE
+             (SELECT * FROM message WHERE conv_id = c.id
+                AND (COALESCE((ai_meta->>'ownerOnly')::boolean, false) = false
+                     OR on_behalf_of = $1)
+              ORDER BY seq DESC LIMIT 1) lm ON TRUE
            LEFT JOIN principal sp ON sp.id = lm.sender_id
            WHERE m.principal_id = $1
            -- 「我的分身」系统会话固定置顶，其余按最近消息排序

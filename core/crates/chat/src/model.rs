@@ -159,6 +159,9 @@ pub enum CardPayload {
         status: String,
         #[serde(default)]
         steps: Vec<TaskCardStep>,
+        /// 进度摘要（长程任务每段执行后更新）
+        #[serde(default)]
+        summary: String,
     },
     Handover {
         task_id: String,
@@ -259,6 +262,22 @@ pub struct Explanation {
     pub memories_used: Vec<String>,
 }
 
+/// Agent 活动时间线条目：思考 / 工具调用 / 中间消息（仅主人可见）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityItem {
+    pub kind: String,
+    pub title: String,
+    #[serde(default)]
+    pub detail: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AiMeta {
@@ -282,6 +301,18 @@ pub struct AiMeta {
     pub via: Option<String>,
     #[serde(default)]
     pub explanation: Option<Explanation>,
+    /// 流式生成中：内容会持续更新，客户端可显示打字光标
+    #[serde(default)]
+    pub streaming: bool,
+    /// 仅主人可见：流式中的消息，或最终未对外发送（转草稿/护栏/转交）的消息
+    #[serde(default)]
+    pub owner_only: bool,
+    /// 扩展思考内容：仅主人可见（读路径按 viewer 剥离）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
+    /// 工具调用活动时间线：仅主人可见（与 thinking 同视角剥离）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<Vec<ActivityItem>>,
 }
 
 // ---------------------------------------------------------------------------

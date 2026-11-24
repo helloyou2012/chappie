@@ -76,6 +76,8 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList>(null);
   const atBottomRef = useRef(true);
   const prevPendingRef = useRef(0);
+  const prevCountRef = useRef(0);
+  const prevSigRef = useRef('');
 
   // typing 事件带截止时间：定时重渲染以便过期的「正在输入」自动消失
   useEffect(() => {
@@ -101,19 +103,40 @@ export default function ChatScreen() {
     }
   }, [convId, messages.length, view?.myLastReadSeq, messages]);
 
-  // live-edge 滚动：只有读者位于底部附近才跟随新内容；自己发消息总是跟随
+  // live-edge 滚动：只有读者位于底部附近才跟随新内容；自己发消息总是跟随。
+  // 流式更新不会改变消息数量，用正文/思考/工具活动的签名触发。
+  const lastForScroll = messages[messages.length - 1];
+  const lastSig = lastForScroll
+    ? [
+        lastForScroll.content.type === 'text' ? lastForScroll.content.text.length : 0,
+        lastForScroll.aiMeta?.thinking?.length ?? 0,
+        (lastForScroll.aiMeta?.activity ?? [])
+          .map((a) => `${a.status}:${a.content.length}`)
+          .join(','),
+        lastForScroll.aiMeta?.streaming ? 1 : 0,
+      ].join('|')
+    : '';
   useEffect(() => {
     if (messages.length + pending.length === 0) return;
     const mineJustSent = pending.length > prevPendingRef.current;
     prevPendingRef.current = pending.length;
+    const count = messages.length + pending.length;
+    const grew = count > prevCountRef.current;
+    prevCountRef.current = count;
+    const contentChanged = lastSig !== prevSigRef.current;
+    prevSigRef.current = lastSig;
     if (!atBottomRef.current && !mineJustSent) {
-      setShowJump(true);
+      if (contentChanged) setShowJump(true);
       return;
     }
     atBottomRef.current = true;
     setShowJump(false);
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
-  }, [messages.length, pending.length]);
+    // 新消息平滑；流式增量即时贴底，避免动画排队
+    setTimeout(
+      () => listRef.current?.scrollToEnd({ animated: grew || mineJustSent }),
+      grew || mineJustSent ? 80 : 30,
+    );
+  }, [messages.length, pending.length, lastSig]);
 
   const send = () => {
     const value = text.trim();
@@ -320,6 +343,10 @@ export default function ChatScreen() {
           );
         }}
         contentContainerStyle={{ paddingVertical: 10 }}
+        onContentSizeChange={() => {
+          // 流式正文/工具活动/思考收起都会改变内容高度：在底部时持续贴底
+          if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false });
+        }}
         onScroll={({ nativeEvent }) => {
           const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
           if (contentOffset.y < 40) void loadMore();
@@ -389,14 +416,24 @@ export default function ChatScreen() {
         </View>
       ) : null}
 
-      {/* 正在输入 / 分身处理中 */}
-      {typingNames.length > 0 ? (
-        <View style={{ paddingHorizontal: 16, paddingVertical: 4 }}>
-          <Text variant="micro" tone="muted">
-            {avatarTyping ? '分身正在处理…' : `${typingNames.join('、')} 正在输入…`}
-          </Text>
-        </View>
-      ) : null}
+      {/* 正在输入 / 分身处理中：固定高度占位，消失时高度不变 */}
+      <View
+        style={{
+          height: 24,
+          paddingHorizontal: 16,
+          justifyContent: 'center',
+          opacity: typingNames.length > 0 ? 1 : 0,
+        }}
+        pointerEvents={typingNames.length > 0 ? 'auto' : 'none'}
+      >
+        <Text variant="micro" tone="muted" numberOfLines={1}>
+          {typingNames.length > 0
+            ? avatarTyping
+              ? '分身正在处理…'
+              : `${typingNames.join('、')} 正在输入…`
+            : ' '}
+        </Text>
+      </View>
 
       {/* 输入栏 */}
       <View

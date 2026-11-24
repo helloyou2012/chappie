@@ -110,6 +110,20 @@ export const Explanation = z.object({
 });
 export type Explanation = z.infer<typeof Explanation>;
 
+/** Agent 活动时间线条目：思考 / 工具调用 / 中间消息（仅主人可见） */
+export const AgentActivityItem = z.object({
+  kind: z.enum(['thinking', 'tool', 'message']),
+  title: z.string(),
+  /** 一行摘要，展示在标题右侧（命令、文件名、参数等） */
+  detail: z.string().default(''),
+  status: z.enum(['running', 'done', 'failed']).default('done'),
+  /** 展开后的内容（工具参数/结果、命令输出等） */
+  content: z.string().default(''),
+  /** 工具 id（用于前端选图标） */
+  toolId: z.string().optional(),
+});
+export type AgentActivityItem = z.infer<typeof AgentActivityItem>;
+
 export const AiMeta = z.object({
   taskId: z.string().nullable().default(null),
   mode: AvatarMode.nullable().default(null),
@@ -123,6 +137,14 @@ export const AiMeta = z.object({
   /** 本次发送的触发来源（mention/self_chat/direct/auto/reply/continuation/owner_approved） */
   via: z.string().nullable().default(null),
   explanation: Explanation.nullable().default(null),
+  /** 流式生成中：内容会持续更新，客户端可显示打字光标 */
+  streaming: z.boolean().default(false),
+  /** 仅主人可见：流式中的消息，或最终未对外发送（转草稿/护栏/转交）的消息 */
+  ownerOnly: z.boolean().default(false),
+  /** 扩展思考内容：仅主人可见（读路径按 viewer 剥离），前端可折叠展示 */
+  thinking: z.string().optional(),
+  /** 工具调用活动时间线：仅主人可见（与 thinking 同视角剥离） */
+  activity: z.array(AgentActivityItem).optional(),
 });
 export type AiMeta = z.infer<typeof AiMeta>;
 

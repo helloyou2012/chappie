@@ -45,30 +45,33 @@
 
 ### 1.3 AI 分身
 
-| 能力                                  | 状态 | 说明                                                                                                         |
-| ------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------ |
-| 分身名称与 AI 标识                    | ✅   | 名称固定跟随主人用户名，不可单独改名；头像带 AI 角标                                                         |
-| 接待权（Delegation / Reception）      | ✅   | 全局/分组/联系人/会话四级；core 同步写权威 + 版本围栏                                                        |
-| 接待策略                              | ✅   | summon/assist/full/screen/decline/escalate/silent/off                                                        |
-| 一键接管 / 交还分身                   | ✅   | 接管 2 秒交接窗口 + 15 分钟冷却；交还恢复分身接待                                                            |
-| 对端请求真人                          | ✅   | 30 分钟限流；主人批准/拒绝；自动作废审批                                                                     |
-| 交接摘要（Reception Digest）          | ✅   | 确定性统计 + 待确认项；接管时投递到分身会话                                                                  |
-| 冷启动放权（L0–L3）                   | ✅   | 观察/草稿/低风险自动/全权；可被举报/纠正降级                                                                 |
-| 档位（手动/草稿/自动/静默）+ 临时模式 | ✅   | 会话级 + 联系人级 + 策略兜底；作为接待策略的兼容预设                                                         |
-| 策略引擎                              | ✅   | 会话 > 联系人 > 分组 > 场景/日程 > 全局；风险上限/禁区/频率                                                  |
-| L2 审批                               | ✅   | 参数指纹、操作者、过期、严格 JSON、修改后批准                                                                |
-| 草稿与转交                            | ✅   | 草稿可修改后发送；低置信度/敏感场景转人工                                                                    |
-| 能力授权（L0–L3）                     | ✅   | 分身 × 能力 × 约束；L3 永不自动                                                                              |
-| 记忆与治理                            | ✅   | 按联系人隔离；查看/删除/忘记主题；敏感记忆不对外                                                             |
-| 分身日报                              | ✅   | 每日 09:00 + 手动生成                                                                                        |
-| 日程创建确认                          | ✅   | `calendar.create` 先写入「待批准」条目并生成确认卡片；批准后改「已确认」；页面可改标题/日期/时间/相关人/状态 |
-| 日程提醒                              | ✅   | 提前 10 分钟；台账唯一键去重；15 分钟时效线                                                                  |
-| 会话延续（P1）                        | ✅   | 回复分身消息 / 被 @ 后 10 分钟内同发送者后续；最多 5 次                                                      |
-| 长程任务（分段执行 + 定时续驱）       | ✅   | 单段轮次/时间预算用尽挂起 `waiting_continuation`，scheduler 续跑；进度卡片可取消；时限/段数/预算护栏         |
-| 定时/事件触发的其他主动任务           | 🚧   | 目前仅日报 + 日程提醒                                                                                        |
-| 群聊多人审批 / 委托审批               | ⬜   | 审批人固定为主人；群管理员/法定人数是后续能力                                                                |
-| 真实外部工具（邮件/网页/支付）        | 🚧   | `web.search`、`payment.send` 为演示实现；日历/待办为内置能力，邮件未实现                                     |
-| 多分身（工作/生活）                   | ⬜   | 数据模型允许 0..N，产品与 UI 先按 1 个落地                                                                   |
+| 能力                                  | 状态 | 说明                                                                                                               |
+| ------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------ |
+| 分身名称与 AI 标识                    | ✅   | 名称固定跟随主人用户名，不可单独改名；头像带 AI 角标                                                               |
+| 接待权（Delegation / Reception）      | ✅   | 全局/分组/联系人/会话四级；core 同步写权威 + 版本围栏                                                              |
+| 接待策略                              | ✅   | summon/assist/full/screen/decline/escalate/silent/off                                                              |
+| 一键接管 / 交还分身                   | ✅   | 接管 2 秒交接窗口 + 15 分钟冷却；交还恢复分身接待                                                                  |
+| 对端请求真人                          | ✅   | 30 分钟限流；主人批准/拒绝；自动作废审批                                                                           |
+| 交接摘要（Reception Digest）          | ✅   | 确定性统计 + 待确认项；接管时投递到分身会话                                                                        |
+| 冷启动放权（L0–L3）                   | ✅   | 观察/草稿/低风险自动/全权；可被举报/纠正降级                                                                       |
+| 档位（手动/草稿/自动/静默）+ 临时模式 | ✅   | 会话级 + 联系人级 + 策略兜底；作为接待策略的兼容预设                                                               |
+| 策略引擎                              | ✅   | 会话 > 联系人 > 分组 > 场景/日程 > 全局；风险上限/禁区/频率                                                        |
+| L2 审批                               | ✅   | 参数指纹、操作者、过期、严格 JSON、修改后批准                                                                      |
+| 草稿与转交                            | ✅   | 草稿可修改后发送；低置信度/敏感场景转人工                                                                          |
+| 能力授权（L0–L3）                     | ✅   | 分身 × 能力 × 约束；L3 永不自动                                                                                    |
+| 记忆与治理                            | ✅   | 按联系人隔离；查看/删除/忘记主题；敏感记忆不对外                                                                   |
+| 分身日报                              | ✅   | 每日 09:00 + 手动生成                                                                                              |
+| 日程创建确认                          | ✅   | `calendar.create` 先写入「待批准」条目并生成确认卡片；批准后改「已确认」；页面可改标题/日期/时间/相关人/状态       |
+| 日程提醒                              | ✅   | 提前 10 分钟；台账唯一键去重；15 分钟时效线                                                                        |
+| 会话延续（P1）                        | ✅   | 回复分身消息 / 被 @ 后 10 分钟内同发送者后续；最多 5 次                                                            |
+| 长程任务（分段执行 + 定时续驱）       | ✅   | 单段轮次/时间预算用尽挂起 `waiting_continuation`，scheduler 续跑；进度卡片可取消；时限/段数/预算护栏               |
+| 流式回复（真实增量 + 持久化）         | ✅   | 供应商 SSE；流式中仅主人可见并落库，定稿才对外；刷新/重连可恢复；草稿/护栏不泄露                                   |
+| 扩展思考（Thinking）                  | ✅   | `MODEL_THINKING` 开关；思考流式展示、仅主人可见；Anthropic 多轮回传 thinking 块；OpenAI 兼容解析 reasoning_content |
+| 工具活动时间线                        | ✅   | `ai_meta.activity` 实时记录每次工具调用（标题/参数/结果/状态）；Web/Mobile 折叠面板；仅主人可见                    |
+| 定时/事件触发的其他主动任务           | 🚧   | 目前仅日报 + 日程提醒                                                                                              |
+| 群聊多人审批 / 委托审批               | ⬜   | 审批人固定为主人；群管理员/法定人数是后续能力                                                                      |
+| 真实外部工具（邮件/网页/支付）        | 🚧   | `web.search`、`payment.send` 为演示实现；日历/待办为内置能力，邮件未实现                                           |
+| 多分身（工作/生活）                   | ⬜   | 数据模型允许 0..N，产品与 UI 先按 1 个落地                                                                         |
 
 ### 1.4 端云与多端
 
@@ -101,32 +104,33 @@
 
 按领域定位关键实现（细节见 [implementation.md](implementation.md)）：
 
-| 领域           | 关键位置                                                                                                       |
-| -------------- | -------------------------------------------------------------------------------------------------------------- |
-| 契约唯一真相   | `packages/contract`（zod + fixtures 往返）                                                                     |
-| 消息单写者     | `core/crates/chat/src/message.rs`                                                                              |
-| WS 网关/补洞   | `core/crates/gateway/src/ws.rs`、`packages/shared/src/ws.ts`                                                   |
-| 会话列表派生   | `core/crates/chat/src/conversation.rs`（置顶、`lastMsgSenderName`）                                            |
-| 设备与多端     | `core/crates/chat/src/auth.rs`、`GET /api/v1/devices`、Web/Mobile 会话页                                       |
-| 联系人         | `core/crates/chat/src/conversation.rs`、`apps/web/src/pages/contacts-page.tsx`、`apps/mobile/app/contacts.tsx` |
-| 好友申请       | `core/crates/chat/src/friend.rs`、`core/migrations/20260101000006_friend_requests.sql`                         |
-| 群主转让/解散  | `core/crates/chat/src/conversation.rs`、`apps/web/src/components/chat/member-panel.tsx`                        |
-| 接待权         | `core/crates/chat/src/reception.rs`、`chat/src/message.rs`、`gateway/src/rest.rs`                              |
-| 接待摘要       | `ai/src/reception.ts`、`ai/src/outbox-worker.ts`、`packages/contract/src/cards.ts`                             |
-| AI 流水线      | `ai/src/outbox-worker.ts`、`ai/src/pipeline.ts`、`ai/src/agent-runtime.ts`                                     |
-| 长程任务续驱   | `ai/src/continuation.ts`、`ai/src/agent-runtime.ts`（parkForContinuation）、`ai/src/scheduler.ts`（快 tick）   |
-| 策略与档位     | `ai/src/policy.ts`、`ai/src/scheduler.ts`                                                                      |
-| 审批           | `ai/src/approval.ts`、`ai/src/turn-guard.ts`                                                                   |
-| 工具与授权     | `ai/src/tool-gateway.ts`                                                                                       |
-| 记忆           | `ai/src/memory.ts`                                                                                             |
-| 推送           | `ai/src/common/push.ts`、`apps/mobile/src/push.ts`                                                             |
-| 日程提醒台账   | `ai/src/scheduler.ts`、`ai/migrations/20260101000004_calendar_reminder.sql`                                    |
-| 会话延续       | `ai/src/engagement.ts`、`ai/src/router.ts`、`ai/src/pipeline.ts`                                               |
-| 任务恢复       | `ai/src/recovery.ts`、`ai/src/common/task-lease.ts`                                                            |
-| 端云离线       | `packages/shared/src/outbox.ts`、`packages/shared/src/store/chat.ts`                                           |
-| 归属隔离       | `ai/src/admin-api.ts`、`ai/src/outbox-worker.ts`、见 system-design §26.4                                       |
-| 构建期配置     | `apps/web/src/main.tsx`、`apps/mobile/src/config.ts`、`packages/shared/src/store/auth.ts`                      |
-| 移动端设计系统 | `apps/mobile/src/ui`、`docs/ui-guidelines.md §9`                                                               |
+| 领域           | 关键位置                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 契约唯一真相   | `packages/contract`（zod + fixtures 往返）                                                                             |
+| 消息单写者     | `core/crates/chat/src/message.rs`                                                                                      |
+| WS 网关/补洞   | `core/crates/gateway/src/ws.rs`、`packages/shared/src/ws.ts`                                                           |
+| 会话列表派生   | `core/crates/chat/src/conversation.rs`（置顶、`lastMsgSenderName`）                                                    |
+| 设备与多端     | `core/crates/chat/src/auth.rs`、`GET /api/v1/devices`、Web/Mobile 会话页                                               |
+| 联系人         | `core/crates/chat/src/conversation.rs`、`apps/web/src/pages/contacts-page.tsx`、`apps/mobile/app/contacts.tsx`         |
+| 好友申请       | `core/crates/chat/src/friend.rs`、`core/migrations/20260101000006_friend_requests.sql`                                 |
+| 群主转让/解散  | `core/crates/chat/src/conversation.rs`、`apps/web/src/components/chat/member-panel.tsx`                                |
+| 接待权         | `core/crates/chat/src/reception.rs`、`chat/src/message.rs`、`gateway/src/rest.rs`                                      |
+| 接待摘要       | `ai/src/reception.ts`、`ai/src/outbox-worker.ts`、`packages/contract/src/cards.ts`                                     |
+| AI 流水线      | `ai/src/outbox-worker.ts`、`ai/src/pipeline.ts`、`ai/src/agent-runtime.ts`                                             |
+| 长程任务续驱   | `ai/src/continuation.ts`、`ai/src/agent-runtime.ts`（parkForContinuation）、`ai/src/scheduler.ts`（快 tick）           |
+| 流式回复       | `ai/src/streamer.ts`、`ai/src/model-gateway/*`、`core/crates/chat/src/message.rs`、`packages/shared/src/store/chat.ts` |
+| 策略与档位     | `ai/src/policy.ts`、`ai/src/scheduler.ts`                                                                              |
+| 审批           | `ai/src/approval.ts`、`ai/src/turn-guard.ts`                                                                           |
+| 工具与授权     | `ai/src/tool-gateway.ts`                                                                                               |
+| 记忆           | `ai/src/memory.ts`                                                                                                     |
+| 推送           | `ai/src/common/push.ts`、`apps/mobile/src/push.ts`                                                                     |
+| 日程提醒台账   | `ai/src/scheduler.ts`、`ai/migrations/20260101000004_calendar_reminder.sql`                                            |
+| 会话延续       | `ai/src/engagement.ts`、`ai/src/router.ts`、`ai/src/pipeline.ts`                                                       |
+| 任务恢复       | `ai/src/recovery.ts`、`ai/src/common/task-lease.ts`                                                                    |
+| 端云离线       | `packages/shared/src/outbox.ts`、`packages/shared/src/store/chat.ts`                                                   |
+| 归属隔离       | `ai/src/admin-api.ts`、`ai/src/outbox-worker.ts`、见 system-design §26.4                                               |
+| 构建期配置     | `apps/web/src/main.tsx`、`apps/mobile/src/config.ts`、`packages/shared/src/store/auth.ts`                              |
+| 移动端设计系统 | `apps/mobile/src/ui`、`docs/ui-guidelines.md §9`                                                                       |
 
 ## 3. 已知限制
 
@@ -150,6 +154,7 @@
 10. **审批修改后的参数不在卡片上回显**：目前只写审计与执行。
 11. **上下文预算是字符近似**，不是模型 token 精确计数。
 12. **接待时段按服务器本地时区解释**：`delegation.timezone` 已落库，但 core 解析仍用服务端时间；多时区需接入 IANA 时区库。
+    系统提示词的「当前环境」同样使用服务端时区，跨时区用户需后续接入用户时区。
 13. **接待版本围栏依赖 core 与 AI 的版本同步**：core 不可用时 AI 走策略兜底；生产部署需保证两进程同版本发布。
 14. **冻结接口跨库写入不是原子的**：先冻结核心主体、再更新 AI 侧状态，失败需补偿。
 15. **legacy 审批行没有参数指纹**：允许执行并写审计告警，新审批全部强校验。
@@ -178,6 +183,22 @@
     续跑前只校验配额、撤权、审批与预算（与崩溃恢复一致，见限制 18）。
 30. **外部会话的中途汇报克制**：仅首次挂起发一句「处理中」，后续只更新主人的进度卡片；
     不向对方逐段同步，避免刷屏。
+
+### 3.6 流式回复
+
+31. **工具调用不逐字执行**：流式只用于文本；工具参数要等本轮流结束、JSON 完整后解析执行。
+32. **流式中的消息仅主人可见**：`ownerOnly` 在读路径（REST 历史 / WS 补洞 / 会话列表 /
+    AI 上下文）按 viewer 过滤；定稿才写入 `message.created` 对外广播。
+33. **已吐字后不重试/降级**：供应商在中途失败时会保留已生成内容并转交/收尾，
+    避免重试造成重复文本（正常降级仍只在未吐字时发生）。
+34. **草稿/护栏/转交不撤回已完成的内容**：流式内容对端从未可见，定稿为 ownerOnly 即可；
+    主人仍可在会话中看到生成过程与最终草稿卡片。
+35. **客户端按 `message_updated` upsert**：定稿广播依赖客户端插入本地不存在的消息；
+    旧客户端只做替换会导致对端看不到最终消息（本仓库内三端已统一）。
+36. **思考内容仅主人可见**：`ai_meta.thinking` 在 history / WS 补洞 / 定稿广播 / outbox
+    中按 viewer 剥离；对端与其它 AI 任务都看不到。思考仍会占用上下文与 token，
+    长任务续跑时随检查点保留（预算由 `MODEL_THINKING_BUDGET_TOKENS` 约束）。
+37. **OpenAI Responses 未接思考流**：Anthropic 与 OpenAI Chat（`reasoning_content`）已支持。
 
 ## 4. 路线图
 

@@ -80,6 +80,8 @@ outbox-worker ──► pipeline ──┬─► router（候选分身）
                                    ├─ 护栏（注入残留 / 敏感信息脱敏）
                                    ├─ 长程任务：单段轮次/时间预算用尽 → 挂起 waiting_continuation
                                    │    （进度卡片 + 外部会话一次性中间回复）
+                                   ├─ streamer：SSE 增量 → ownerOnly 消息（update-stream-text）
+                                   │    → 定稿 visible / 草稿·护栏·转交保持 ownerOnly
                                    └─ 交付：直接发送 / 草稿卡片 / 转交卡片
 scheduler：日报（每日 09:00）· 审批超时清理 · 日程提醒 · 孤儿任务恢复
             · continuation sweep（快 tick：挂起任务时限/段数/预算护栏 → 从检查点续跑）
@@ -87,6 +89,8 @@ push：internal.pushCard 成功后的唯一推送入口（Expo Push）
 ```
 
 - **权威分离**：只有主人本人的直接消息是 `owner_direct`；群成员、其他分身、工具结果、记忆都是数据。
+- **环境感知**：每次任务装配系统提示词时注入当前时间（含时区）与今天/明天，
+  并声明历史消息时间可能较早、涉及「今天/进展」以注入时间为准（`environmentNow`）。
 - **审批即数据**：审批行绑定 canonical args 指纹；执行只认落库参数；修改后批准重新校验并重算指纹。
 - **回合级撤权**：冻结、静默、临时档到期、任务被接管后，后续模型调用/工具执行/发送立即中止。
 - **有界上下文**：历史按字符预算装载，单条截断并写入 `task_step` 可回放。
@@ -101,6 +105,20 @@ push：internal.pushCard 成功后的唯一推送入口（Expo Push）
   纯寒暄（“好的”“嗯”等）不延续。
 - **工作态信号**：`agent-runtime` 在任务开始/结束时调用内部接口 `/internal/v1/typing`，
   客户端据此把发送按钮切换为停止/接管（Web `chat-input`、Mobile `chat/[id]`）。
+- **流式回复（真实增量 + 持久化）**：`ai/src/model-gateway` 的 provider 支持 SSE
+  （Anthropic `content_block_delta` / OpenAI `delta` / Responses `output_text.delta`，
+  工具参数在流结束后一次性解析）；`ai/src/streamer.ts` 首个文本增量时创建消息
+  （`ai_meta.streaming=true, ownerOnly=true`），按 ~80ms 批量调用内部接口
+  `update-stream-text`（core 原子更新并推 `message_updated`），定稿时调用
+  `finalize-stream-message`：对外可见才写入 `message.created` 并广播全成员，
+  否则保持仅主人可见（草稿/护栏/转交）。读路径按 viewer 过滤 ownerOnly，
+  客户端 `updateMessage` 做 upsert，刷新/重连可恢复已生成内容。
+  **扩展思考**：`MODEL_THINKING` 控制；Anthropic 流式解析 `thinking_delta`/`signature_delta`，
+  工具多轮把 thinking 块回传给网关；思考内容写入 `ai_meta.thinking`，随流式一起更新，
+  但只在主人视角可见（history/pull/对外广播按 viewer 剥离），前端折叠展示。
+  **活动时间线**：每次工具执行写入 `ai_meta.activity`（kind/title/detail/status/content/toolId），
+  随 `update-stream-text` 实时更新；审批等待条目在批准后续跑时更新为完成。
+  前端 Web/Mobile 渲染「N 次工具调用」折叠面板，activity 同样按 viewer 剥离。
 - **长程任务（分段执行）**：`ai/src/agent-runtime.ts` 单段 ReAct 预算
   （`AI_MAX_TOOL_ROUNDS` 轮 / `AI_TASK_SEGMENT_MAX_S` 秒）用尽且工作未完成时，
   保存检查点挂起为 `waiting_continuation`（`ai/src/continuation.ts`），进度经 TaskCard

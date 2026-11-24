@@ -46,6 +46,10 @@ export interface AiConfig {
   longTaskMaxSeconds: number;
   /** 长程任务最大执行段数：防止快速空转刷段 */
   longTaskMaxSegments: number;
+  /** 开启扩展思考（provider 支持时；思考内容仅主人可见） */
+  modelThinking: boolean;
+  /** 扩展思考预算（tokens） */
+  thinkingBudgetTokens: number;
   /** 合理沉默阈值：低于该置信度且满足其他条件时沉默；0 = 关闭 */
   silenceMinConfidence: number;
   /** Expo Push access token（未配置则推送降级跳过，功能不报错） */
@@ -91,6 +95,8 @@ export function loadConfig(): AiConfig {
     continuationBatch: Number(env('AI_CONTINUATION_BATCH', '3')),
     longTaskMaxSeconds: Number(env('AI_LONG_TASK_MAX_S', '1800')),
     longTaskMaxSegments: Number(env('AI_LONG_TASK_MAX_SEGMENTS', '8')),
+    modelThinking: env('MODEL_THINKING', 'true') !== 'false',
+    thinkingBudgetTokens: Number(env('MODEL_THINKING_BUDGET_TOKENS', '1024')),
     silenceMinConfidence: Number(env('AI_SILENCE_MIN_CONFIDENCE', '0.6')),
     expoPushToken: env('EXPO_ACCESS_TOKEN'),
     expoPushUrl: env('EXPO_PUSH_URL', 'https://exp.host/--/api/v2/push/send'),

@@ -14,6 +14,7 @@ import type {
 import { contentText } from '@chappie/contract';
 import { create } from 'zustand';
 import { api } from '../api';
+import { stripToolCallMarkup } from '../format';
 import { useAuthStore } from './auth';
 
 export interface PendingMessage {
@@ -32,7 +33,7 @@ export function setPullHandler(fn: ((convId: string, fromSeq: number) => void) |
 
 export function previewOf(msg: Message): string {
   if (msg.recalled) return '消息已撤回';
-  return contentText(msg.content);
+  return stripToolCallMarkup(contentText(msg.content));
 }
 
 export function displaySenderName(
@@ -350,15 +351,50 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
     })),
 
-  updateMessage: (msg) =>
-    set((s) => ({
-      messagesByConv: {
-        ...s.messagesByConv,
-        [msg.convId]: (s.messagesByConv[msg.convId] ?? []).map((m) =>
-          m.msgId === msg.msgId ? msg : m,
-        ),
-      },
-    })),
+  // 流式消息可能先于本客户端可见（ownerOnly / 定稿广播）：按 msgId upsert，
+  // 并同步会话预览；否则对端收到定稿更新时会因为本地没有该消息而丢弃。
+  updateMessage: (msg) => {
+    const myId = useAuthStore.getState().user?.id ?? '';
+    set((s) => {
+      const prev = s.messagesByConv[msg.convId] ?? [];
+      const exists = prev.some((m) => m.msgId === msg.msgId);
+      const next = exists
+        ? prev.map((m) => (m.msgId === msg.msgId ? msg : m))
+        : [...prev, msg].sort((a, b) => a.seq - b.seq);
+
+      const convs = [...s.conversations];
+      const idx = convs.findIndex((c) => c.conversation.id === msg.convId);
+      if (idx >= 0) {
+        const current = convs[idx]!;
+        const isLatest = next.length > 0 && next[next.length - 1]!.msgId === msg.msgId;
+        const isActive = s.activeConvId === msg.convId;
+        const fromMe = msg.senderId === myId;
+        convs[idx] = {
+          ...current,
+          conversation: {
+            ...current.conversation,
+            lastSeq: Math.max(current.conversation.lastSeq, msg.seq),
+          },
+          ...(isLatest
+            ? {
+                lastMsgPreview: previewOf(msg),
+                lastMsgAt: msg.createdAt,
+                lastMsgSenderId: msg.senderId,
+              }
+            : {}),
+          myLastReadSeq:
+            isActive && isLatest ? Math.max(current.myLastReadSeq, msg.seq) : current.myLastReadSeq,
+          unreadCount:
+            !exists && !fromMe && !isActive ? current.unreadCount + 1 : current.unreadCount,
+        };
+      }
+
+      return {
+        messagesByConv: { ...s.messagesByConv, [msg.convId]: next },
+        conversations: convs,
+      };
+    });
+  },
 
   updateConversationMode: async (convId, aiMode, tempHours) => {
     await api.updateSettings(convId, { aiMode, tempHours });

@@ -1,6 +1,7 @@
 /** 护栏与「修改后批准」解析（纯函数）—— 设计方案 §7.1 输出护栏。 */
 import { describe, expect, test } from 'bun:test';
-import { guardOutput, parseEditedArgs } from '../src/agent-runtime';
+import dayjs from 'dayjs';
+import { environmentNow, guardOutput, parseEditedArgs } from '../src/agent-runtime';
 
 describe('guardOutput 输出护栏', () => {
   test('正常文本放行且不变', () => {
@@ -62,5 +63,15 @@ describe('parseEditedArgs 修改后批准（严格 JSON）', () => {
     expect(parseEditedArgs(original, '[1,2,3]')).toBeNull();
     expect(parseEditedArgs(original, '{}')).toBeNull();
     expect(parseEditedArgs(original, 'null')).toBeNull();
+  });
+});
+
+describe('environmentNow 当前环境时间', () => {
+  test('给出今天/明天与时区，供系统提示词锚定「现在」', () => {
+    const env = environmentNow(dayjs('2026-11-24T10:19:00'));
+    expect(env.today).toBe('2026-11-24');
+    expect(env.tomorrow).toBe('2026-11-25');
+    expect(env.timeZone.length).toBeGreaterThan(0);
+    expect(env.text).toContain('2026');
   });
 });

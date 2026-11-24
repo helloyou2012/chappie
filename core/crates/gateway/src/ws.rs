@@ -185,6 +185,7 @@ async fn handle_client_frame(
                     ai_meta: None,
                     authority_version: 0,
                     via: None,
+                    streaming: false,
                 },
             )
             .await?;
@@ -228,7 +229,14 @@ async fn handle_client_frame(
         ClientFrame::PullMessages { conv_id, from_seq, limit } => {
             message::ensure_member(&state.db.pg, &conv_id, user_id).await?;
             let messages =
-                message::pull_range(&state.db.pg, &conv_id, from_seq, limit.clamp(1, 200)).await?;
+                message::pull_range(
+                    &state.db.pg,
+                    &conv_id,
+                    from_seq,
+                    limit.clamp(1, 200),
+                    Some(user_id),
+                )
+                .await?;
             send_frame(
                 sender,
                 &ServerFrame::MessagesBatch { conv_id, messages, has_more: false },

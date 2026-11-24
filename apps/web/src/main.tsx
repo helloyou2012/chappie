@@ -6,6 +6,8 @@ import {
 } from '@chappie/shared';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import 'streamdown/styles.css';
+import 'katex/dist/katex.min.css';
 import App from './App';
 import './index.css';
 

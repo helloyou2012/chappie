@@ -28,6 +28,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/internal/v1/typing", post(typing))
         .route("/internal/v1/push-card", post(push_card))
         .route("/internal/v1/update-card", post(update_card))
+        .route("/internal/v1/update-stream-text", post(update_stream_text))
+        .route("/internal/v1/finalize-stream-message", post(finalize_stream_message))
         .route("/internal/v1/freeze-avatar", post(freeze_avatar))
         .route("/internal/v1/update-avatar-name", post(update_avatar_name))
         .route("/internal/v1/create-avatar", post(create_avatar))
@@ -93,6 +95,36 @@ struct SendMessageReq {
     authority_version: i64,
     #[serde(default)]
     via: Option<String>,
+    /// 流式消息：先只对主人可见，通过 update-stream-text / finalize-stream-message 推进
+    #[serde(default)]
+    streaming: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateStreamTextReq {
+    msg_id: String,
+    text: String,
+    /// 思考内容（可选；仅主人可见）
+    #[serde(default)]
+    thinking: Option<String>,
+    /// 工具活动时间线（可选；仅主人可见）
+    #[serde(default)]
+    activity: Option<Vec<im_core_chat::ActivityItem>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FinalizeStreamMessageReq {
+    msg_id: String,
+    /// 缺省 = 保留当前流式内容（取消/中断等场景）
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    ai_meta: Option<im_core_chat::AiMeta>,
+    /// true = 对外可见（写入 message.created 并广播所有成员）；false = 保留 ownerOnly
+    #[serde(default)]
+    visible: bool,
 }
 
 #[derive(Deserialize)]
@@ -251,6 +283,7 @@ async fn send_message(
             ai_meta: req.ai_meta,
             authority_version: req.authority_version,
             via: req.via,
+            streaming: req.streaming,
         },
     )
     .await?;
@@ -270,7 +303,16 @@ async fn get_context(
     State(state): State<AppState>,
     Json(req): Json<GetContextReq>,
 ) -> AppResult<Json<GetContextResp>> {
-    let (messages, _) = message::history(&state.db.pg, &req.conv_id, None, req.limit).await?;
+    // AI 内部读上下文：以主人为视角，只返回该主人自己的 ownerOnly（流式/草稿）消息，
+    // 不把群里其他分身尚未发送的内容暴露给本分身。
+    let (messages, _) = message::history(
+        &state.db.pg,
+        &req.conv_id,
+        None,
+        req.limit,
+        req.owner_id.as_deref(),
+    )
+    .await?;
     let members = conversation::get_members(&state.db, &req.conv_id).await?;
     let reception = match req.owner_id.as_deref() {
         Some(owner) => Some(
@@ -429,6 +471,7 @@ async fn push_card(
             ai_meta: None,
             authority_version: 0,
             via: Some("internal_card".into()),
+            streaming: false,
         },
     )
     .await?;
@@ -441,6 +484,40 @@ async fn update_card(
     Json(req): Json<UpdateCardReq>,
 ) -> AppResult<Json<im_core_chat::Message>> {
     let msg = message::update_card_content(&state.db, &state.events, &req.msg_id, req.card).await?;
+    Ok(Json(msg))
+}
+
+/// 流式增量：用 AI 累积的完整文本替换内容，仅推给主人（持久化，重连可恢复）。
+async fn update_stream_text(
+    State(state): State<AppState>,
+    Json(req): Json<UpdateStreamTextReq>,
+) -> AppResult<Json<im_core_chat::Message>> {
+    let msg = message::update_stream_text(
+        &state.db,
+        &state.events,
+        &req.msg_id,
+        &req.text,
+        req.thinking.as_deref(),
+        req.activity,
+    )
+    .await?;
+    Ok(Json(msg))
+}
+
+/// 流式定稿：visible=true 才对外可见并进入 AI 事件链路；否则保留 ownerOnly。
+async fn finalize_stream_message(
+    State(state): State<AppState>,
+    Json(req): Json<FinalizeStreamMessageReq>,
+) -> AppResult<Json<im_core_chat::Message>> {
+    let msg = message::finalize_stream_message(
+        &state.db,
+        &state.events,
+        &req.msg_id,
+        req.text.as_deref(),
+        req.ai_meta,
+        req.visible,
+    )
+    .await?;
     Ok(Json(msg))
 }
 

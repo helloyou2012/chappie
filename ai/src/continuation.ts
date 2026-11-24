@@ -12,7 +12,12 @@
 
 import { and, eq, or, sql } from 'drizzle-orm';
 import type { ResumeCheckpoint } from './agent-runtime';
-import { finishContinuationCard, loadTriggerMessage, runAgent } from './agent-runtime';
+import {
+  finalizeStreamOwnerOnly,
+  finishContinuationCard,
+  loadTriggerMessage,
+  runAgent,
+} from './agent-runtime';
 import { classify } from './classifier';
 import { appendAudit } from './common/audit';
 import { config } from './common/config';
@@ -297,6 +302,8 @@ async function finishLongTask(
   if (typeof cardMsgId === 'string' && cardMsgId) {
     await finishContinuationCard(row.id, 'failed', reason);
   }
+  // 流式内容保留为仅主人可见，不能一直停留在 streaming 状态
+  await finalizeStreamOwnerOnly(row.id, reason);
   await internal
     .pushCard(row.ownerId, {
       kind: 'handover',
@@ -392,5 +399,6 @@ async function failContinued(taskId: string, error: string): Promise<void> {
       ),
     )
     .catch(() => undefined);
+  await finalizeStreamOwnerOnly(taskId, '续跑失败');
   log.warn('continuation task failed', { taskId, error });
 }

@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Streamdown：让 Tailwind 生成其内置组件的工具类（pnpm 下位于 apps/web/node_modules） */
+@source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+@source "../node_modules/@streamdown/mermaid/dist/*.js";
+@source "../node_modules/@streamdown/math/dist/*.js";
+@source "../node_modules/@streamdown/cjk/dist/*.js";
+
 @custom-variant dark (&:is(.dark *));
 
 /* ==========================================================================

@@ -340,7 +340,8 @@ async fn list_messages(
 ) -> AppResult<Json<serde_json::Value>> {
     message::ensure_member(&state.db.pg, &id, &user.0).await?;
     let limit = q.limit.unwrap_or(50).clamp(1, 100);
-    let (messages, has_more) = message::history(&state.db.pg, &id, q.before_seq, limit).await?;
+    let (messages, has_more) =
+        message::history(&state.db.pg, &id, q.before_seq, limit, Some(&user.0)).await?;
     Ok(Json(json!({ "messages": messages, "hasMore": has_more })))
 }
 

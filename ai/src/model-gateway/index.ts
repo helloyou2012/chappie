@@ -43,21 +43,35 @@ export async function complete(
     apiKey: override?.apiKey || config.modelApiKey,
   };
 
+  // 流式一旦向客户端吐过字，重试/降级会造成重复内容，只能抛错由上层收尾
+  let emitted = false;
+  const streamingReq: CompleteRequest = req.onTextDelta
+    ? {
+        ...req,
+        onTextDelta: (delta) => {
+          if (delta) emitted = true;
+          req.onTextDelta?.(delta);
+        },
+      }
+    : req;
+
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      return await provider.complete(req, ctx);
+      return await provider.complete(streamingReq, ctx);
     } catch (e) {
       lastError = e;
       log.warn('model call failed', { provider: provider.name, attempt, error: String(e) });
+      if (emitted) break;
       if (attempt < 3) await sleep(300 * 2 ** (attempt - 1));
     }
   }
 
-  // 降级：模型供应商故障不影响聊天（设计方案 §23 边界约定 6）
-  if (provider.name !== 'mock') {
+  // 降级：模型供应商故障不影响聊天（设计方案 §23 边界约定 6）；
+  // 已吐字时不再降级（否则 mock 会把整段话再重复一遍）
+  if (provider.name !== 'mock' && !emitted) {
     log.warn('fallback to mock provider', { provider: provider.name, error: String(lastError) });
-    return mockProvider.complete(req, { ...ctx, model: 'mock-1' });
+    return mockProvider.complete(streamingReq, { ...ctx, model: 'mock-1' });
   }
   throw lastError;
 }

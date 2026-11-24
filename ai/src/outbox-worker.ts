@@ -8,7 +8,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { CardPayload, MemberSnapshot, Message } from '@chappie/contract';
 import { and, asc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { finishContinuationCard, resumeFromApproval } from './agent-runtime';
+import {
+  finalizeStreamOwnerOnly,
+  finishContinuationCard,
+  resumeFromApproval,
+} from './agent-runtime';
 import { appendAudit } from './common/audit';
 import { client, db } from './common/db';
 import { internal } from './common/internal';
@@ -71,9 +75,10 @@ async function cancelPendingApprovals(
   }
 }
 
-/** 任务取消后把长程任务的进度卡片收尾为 cancelled；无卡片或失败则静默跳过。 */
+/** 任务取消后收尾进度卡片与流式消息；无卡片/消息或失败则静默跳过。 */
 async function updateContinuationCardCancelled(taskId: string): Promise<void> {
   await finishContinuationCard(taskId, 'cancelled', '任务已被主人取消。');
+  await finalizeStreamOwnerOnly(taskId, '任务已被主人取消。');
 }
 
 interface OutboxRow {
