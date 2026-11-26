@@ -3,7 +3,16 @@ name: build-and-deploy
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'training/**'
+      - 'classifier/**'
+      - 'model/**'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: chappie-production
@@ -13,6 +22,7 @@ jobs:
   build:
     name: Build artifacts
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
 
@@ -31,15 +41,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: |
+          pnpm --filter @chappie/ai typecheck
+          pnpm --filter @chappie/web typecheck
+          pnpm --filter @chappie/mobile exec tsc --noEmit
+
       - name: Unit tests
         run: |
           pnpm test:contract
           pnpm test:shared
           cd ai && bun test
-
-      # 移动端不参与部署产物，但需在 CI 保证类型与路由不回归
-      - name: Typecheck mobile
-        run: pnpm --filter @chappie/mobile exec tsc --noEmit
 
       - name: Build web
         # 自建部署可配置 vars.VITE_SERVER_URL / VITE_ADMIN_URL；
@@ -52,6 +67,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Rust format
+        run: cargo fmt --manifest-path core/Cargo.toml --all -- --check
+
+      - name: Rust tests
+        run: cargo test --manifest-path core/Cargo.toml -p im-core-common -p im-core-chat
 
       - name: Build im-core (release)
         run: cargo build --release --manifest-path core/Cargo.toml -p im-core
@@ -82,6 +107,7 @@ jobs:
     name: Deploy to production
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     # 注意：environment 级 secrets/vars 只在 job 启动后解析，不能在 job 级 if 中引用。
     # 这里用 step 级 env 引用，并在预检步骤给出明确错误。
     environment: deploy
@@ -118,4 +144,6 @@ jobs:
             'rm -rf /tmp/chappie-deploy && mkdir -p /tmp/chappie-deploy && tar -xzf /tmp/chappie-deploy.tar.gz -C /tmp/chappie-deploy && bash /tmp/chappie-deploy/remote-deploy.sh'
 
       - name: Smoke test
-        run: curl -fsS --retry 10 --retry-delay 2 -o /dev/null https://chappie.run/
+        env:
+          DEPLOY_URL: ${{ vars.DEPLOY_URL || 'https://chappie.run/' }}
+        run: curl -fsS --retry 10 --retry-delay 2 -o /dev/null "$DEPLOY_URL"

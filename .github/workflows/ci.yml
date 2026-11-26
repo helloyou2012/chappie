@@ -1,0 +1,76 @@
+name: ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  js:
+    name: JS lint / typecheck / tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: |
+          pnpm --filter @chappie/ai typecheck
+          pnpm --filter @chappie/web typecheck
+          pnpm --filter @chappie/mobile exec tsc --noEmit
+
+      - name: Unit tests
+        run: |
+          pnpm test:contract
+          pnpm test:shared
+          cd ai && bun test
+
+      - name: Build web
+        run: pnpm web:build
+
+  rust:
+    name: Rust fmt / test / check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Format
+        run: cargo fmt --manifest-path core/Cargo.toml --all -- --check
+
+      - name: Test
+        run: cargo test --manifest-path core/Cargo.toml -p im-core-common -p im-core-chat
+
+      - name: Check workspace
+        run: cargo check --manifest-path core/Cargo.toml --workspace
