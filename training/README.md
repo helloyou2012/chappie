@@ -177,3 +177,14 @@ CLASSIFIER_RANK_MIN_MARGIN=-5.691539  # 以 classifier/model/margin.json 为准
 
 `AI_ROLE_MODEL=mmbert` 平时跳过线性模型和角色关键词规则，直接使用 `/rank` pairwise 结果；
 `/rank` 超时/不可用时回退角色规则。纯通知/公告仍先由回应线索门控静默。
+
+## 4. 发布模型制品到 GitHub Release
+
+```bash
+bash scripts/release-model.sh --tag model-YYYY-MM-DD
+```
+
+脚本只打包部署制品（ONNX/tokenizer/labels/margin + linear + MODEL_CARD），
+不包含训练权重和训练数据；自动生成 SHA256、创建 Release 并上传 asset。
+凭据优先用 `GITHUB_TOKEN`/`GH_TOKEN`，其次 `gh auth token`，最后本机 git credential。
+`--dry-run` 只打包不发布；`--repo owner/repo` 可覆盖仓库。
