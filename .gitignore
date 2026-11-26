@@ -17,3 +17,11 @@ build/
 
 # 本地文件工具落盘目录
 ai/.data/
+
+# Python 缓存/虚拟环境
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

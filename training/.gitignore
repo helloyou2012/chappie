@@ -9,3 +9,8 @@
 !/data/llm_role/llm_role_val.jsonl
 !/data/llm_role/llm_role_test.jsonl
 !/data/llm_role/MANIFEST.json
+
+# Python 缓存/虚拟环境
+__pycache__/
+*.py[cod]
+.venv/
