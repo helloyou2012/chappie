@@ -10,7 +10,6 @@ apps/mobile/.expo/
 apps/mobile/ios/
 apps/mobile/android/
 apps/desktop/src-tauri/gen/
-packages/contract/fixtures.json
 .turbo/
 coverage/
 build/
