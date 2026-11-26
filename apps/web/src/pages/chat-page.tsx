@@ -38,6 +38,7 @@ export function ChatPage() {
   const navigate = useNavigate();
   const conversations = useChatStore((s) => s.conversations);
   const messagesByConv = useChatStore((s) => s.messagesByConv);
+  const hasMoreBeforeByConv = useChatStore((s) => s.hasMoreBeforeByConv);
   const pendingByConv = useChatStore((s) => s.pendingByConv);
   const membersByConv = useChatStore((s) => s.membersByConv);
   const typingByConv = useChatStore((s) => s.typingByConv);
@@ -89,6 +90,7 @@ export function ChatPage() {
 
   const view = conversations.find((c) => c.conversation.id === convId);
   const messages = convId ? (messagesByConv[convId] ?? []) : [];
+  const hasMoreBefore = convId ? hasMoreBeforeByConv[convId] : undefined;
   const pending = convId ? (pendingByConv[convId] ?? []) : [];
   const members = convId ? (membersByConv[convId] ?? []) : [];
 
@@ -194,6 +196,7 @@ export function ChatPage() {
   );
 
   const loadMore = async () => {
+    if (hasMoreBefore === false) return;
     setLoadingMore(true);
     try {
       await loadMessages(convId, { before: true });
@@ -291,7 +294,12 @@ export function ChatPage() {
           }}
           className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto py-3"
         >
-          {messages.length > 0 ? (
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-16 text-center text-[12px] text-ink-tertiary">
+              <RiInformationLine className="size-5" />
+              还没有消息，打个招呼吧
+            </div>
+          ) : hasMoreBefore !== false ? (
             <div className="mb-2 flex justify-center">
               <Button
                 variant="ghost"
@@ -303,12 +311,7 @@ export function ChatPage() {
                 加载更早消息
               </Button>
             </div>
-          ) : (
-            <div className="flex flex-col items-center gap-2 py-16 text-center text-[12px] text-ink-tertiary">
-              <RiInformationLine className="size-5" />
-              还没有消息，打个招呼吧
-            </div>
-          )}
+          ) : null}
 
           {messages.map((m) => (
             <MessageBubble
@@ -350,6 +353,7 @@ export function ChatPage() {
           ref={chatInputRef}
           convId={convId}
           members={members}
+          isGroup={view?.conversation.type === 'group'}
           avatarTyping={avatarTyping}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}

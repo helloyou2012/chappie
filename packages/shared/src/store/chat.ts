@@ -51,6 +51,8 @@ export function displaySenderName(
 interface ChatState {
   conversations: ConversationView[];
   messagesByConv: Record<string, Message[]>;
+  /** 每个会话是否还有更早的消息可翻（由服务端 hasMore 决定） */
+  hasMoreBeforeByConv: Record<string, boolean>;
   membersByConv: Record<string, MemberView[]>;
   pendingByConv: Record<string, PendingMessage[]>;
   typingByConv: Record<string, Record<string, number>>;
@@ -87,6 +89,7 @@ const RECONNECT_HISTORY_GUARD = 200;
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   messagesByConv: {},
+  hasMoreBeforeByConv: {},
   membersByConv: {},
   pendingByConv: {},
   typingByConv: {},
@@ -121,6 +124,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const merged = [...map.values()].sort((a, b) => a.seq - b.seq);
       return {
         messagesByConv: { ...s.messagesByConv, [convId]: merged },
+        hasMoreBeforeByConv: { ...s.hasMoreBeforeByConv, [convId]: res.hasMore },
         loadedConvIds: new Set([...s.loadedConvIds, convId]),
       };
     });
@@ -448,6 +452,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       conversations: [],
       messagesByConv: {},
+      hasMoreBeforeByConv: {},
       membersByConv: {},
       pendingByConv: {},
       typingByConv: {},
