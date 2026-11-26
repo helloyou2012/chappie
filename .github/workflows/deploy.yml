@@ -7,7 +7,6 @@ on:
       - 'docs/**'
       - '**/*.md'
       - 'training/**'
-      - 'classifier/**'
       - 'model/**'
   workflow_dispatch:
 
@@ -70,16 +69,40 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: core -> target
+          workspaces: |
+            core -> target
+            classifier -> target
 
       - name: Rust format
-        run: cargo fmt --manifest-path core/Cargo.toml --all -- --check
+        run: |
+          cargo fmt --manifest-path core/Cargo.toml --all -- --check
+          cargo fmt --manifest-path classifier/Cargo.toml -- --check
 
       - name: Rust tests
         run: cargo test --manifest-path core/Cargo.toml -p im-core-common -p im-core-chat
 
       - name: Build im-core (release)
         run: cargo build --release --manifest-path core/Cargo.toml -p im-core
+
+      - name: Build classifier (release)
+        run: cargo build --release --manifest-path classifier/Cargo.toml
+
+      - name: Download classifier model artifacts
+        env:
+          MODEL_ARTIFACTS_URL: ${{ secrets.MODEL_ARTIFACTS_URL }}
+        run: |
+          test -n "$MODEL_ARTIFACTS_URL" || { echo "::error::MODEL_ARTIFACTS_URL 未配置：请上传 classifier-model.tar.gz 并设置 secret"; exit 1; }
+          mkdir -p build/classifier/model
+          curl -fL --retry 3 --retry-delay 3 "$MODEL_ARTIFACTS_URL" -o /tmp/classifier-model.tar.gz
+          tar -xzf /tmp/classifier-model.tar.gz -C build/classifier/model
+          if [ ! -f build/classifier/model/model.onnx ]; then
+            found=$(find build/classifier/model -name model.onnx -type f | head -n 1)
+            if [ -n "$found" ]; then cp -a "$(dirname "$found")"/. build/classifier/model/; fi
+          fi
+          test -f build/classifier/model/model.onnx
+          test -f build/classifier/model/tokenizer.json
+          test -f build/classifier/model/labels.json
+          test -f build/classifier/model/margin.json
 
       - name: Bundle ai-platform
         run: |
@@ -91,10 +114,12 @@ jobs:
 
       - name: Package deploy artifact
         run: |
-          mkdir -p build/bin build/web
+          mkdir -p build/bin build/web build/classifier
           cp core/target/release/im-core build/bin/im-core
+          cp classifier/target/release/chappie-classifier build/bin/chappie-classifier
           cp -r apps/web/dist/. build/web/
           cp deploy/remote-deploy.sh build/remote-deploy.sh
+          cp deploy/chappie-classifier.service build/chappie-classifier.service
           tar -C build -czf chappie-deploy.tar.gz .
 
       - uses: actions/upload-artifact@v7

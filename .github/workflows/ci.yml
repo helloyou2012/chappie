@@ -64,13 +64,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: core -> target
+          workspaces: |
+            core -> target
+            classifier -> target
 
       - name: Format
-        run: cargo fmt --manifest-path core/Cargo.toml --all -- --check
+        run: |
+          cargo fmt --manifest-path core/Cargo.toml --all -- --check
+          cargo fmt --manifest-path classifier/Cargo.toml -- --check
 
       - name: Test
         run: cargo test --manifest-path core/Cargo.toml -p im-core-common -p im-core-chat
 
       - name: Check workspace
-        run: cargo check --manifest-path core/Cargo.toml --workspace
+        run: |
+          cargo check --manifest-path core/Cargo.toml --workspace
+          cargo check --manifest-path classifier/Cargo.toml

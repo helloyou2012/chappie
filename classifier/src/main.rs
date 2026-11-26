@@ -83,7 +83,9 @@ fn softmax(logits: &[f32]) -> Vec<f32> {
     let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let exps: Vec<f32> = logits.iter().map(|v| (v - max).exp()).collect();
     let sum: f32 = exps.iter().sum();
-    exps.into_iter().map(|v| v / sum.max(f32::EPSILON)).collect()
+    exps.into_iter()
+        .map(|v| v / sum.max(f32::EPSILON))
+        .collect()
 }
 
 async fn run_batch(
@@ -193,7 +195,12 @@ async fn rank(
         .labels
         .iter()
         .position(|l| l.label == "reply")
-        .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "missing reply label".into()))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "missing reply label".into(),
+            )
+        })?;
     let mut scores = Vec::with_capacity(rows.len());
     let mut probs = Vec::with_capacity(rows.len());
     for row in rows {
@@ -235,8 +242,8 @@ async fn main() -> Result<()> {
     if labels.is_empty() {
         return Err(anyhow!("labels must not be empty"));
     }
-    let mut tokenizer = Tokenizer::from_file(&tokenizer_path)
-        .map_err(|e| anyhow!("load tokenizer: {e}"))?;
+    let mut tokenizer =
+        Tokenizer::from_file(&tokenizer_path).map_err(|e| anyhow!("load tokenizer: {e}"))?;
     tokenizer
         .with_truncation(Some(TruncationParams {
             max_length: max_len,

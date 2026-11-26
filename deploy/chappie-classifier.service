@@ -1,0 +1,20 @@
+[Unit]
+Description=Chappie mmBERT role classifier (/rank)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/chappie/classifier
+Environment=CLASSIFIER_MODEL_PATH=/opt/chappie/classifier/model/model.onnx
+Environment=CLASSIFIER_TOKENIZER_PATH=/opt/chappie/classifier/model/tokenizer.json
+Environment=CLASSIFIER_LABELS_PATH=/opt/chappie/classifier/model/labels.json
+Environment=CLASSIFIER_MAX_LEN=576
+Environment=RUST_LOG=info
+ExecStart=/opt/chappie/bin/chappie-classifier
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

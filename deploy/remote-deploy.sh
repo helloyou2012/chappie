@@ -7,6 +7,9 @@
 #   ai/dist/index.js     ai-platform Bun bundle（CI 打包，自包含，无需 node_modules）
 #   ai/dist/migrate.js   AI 数据库迁移 bundle
 #   ai/migrations/*.sql  迁移 SQL
+#   bin/chappie-classifier       mmBERT ONNX 服务
+#   classifier/model/*           int8 ONNX + tokenizer + labels + margin
+#   chappie-classifier.service   systemd unit
 set -euo pipefail
 
 ROOT=/opt/chappie
@@ -16,25 +19,52 @@ BUN=/home/ubuntu/.bun/bin/bun
 echo "==> deploy start $(date -u +%FT%TZ)"
 test -x "$SRC/bin/im-core" || { echo "缺少 bin/im-core"; exit 1; }
 test -f "$SRC/ai/dist/index.js" || { echo "缺少 ai/dist/index.js"; exit 1; }
+test -x "$SRC/bin/chappie-classifier" || { echo "缺少 bin/chappie-classifier"; exit 1; }
+test -f "$SRC/classifier/model/model.onnx" || { echo "缺少 classifier/model/model.onnx"; exit 1; }
+test -f "$SRC/classifier/model/tokenizer.json" || { echo "缺少 classifier/model/tokenizer.json"; exit 1; }
 
-sudo mkdir -p "$ROOT/bin" "$ROOT/web" "$ROOT/ai/dist" "$ROOT/ai/migrations"
+sudo mkdir -p "$ROOT/bin" "$ROOT/web" "$ROOT/ai/dist" "$ROOT/ai/migrations" "$ROOT/classifier/model"
 sudo install -m 755 "$SRC/bin/im-core" "$ROOT/bin/im-core"
+sudo install -m 755 "$SRC/bin/chappie-classifier" "$ROOT/bin/chappie-classifier"
 sudo rsync -a --delete "$SRC/web/" "$ROOT/web/"
 sudo rsync -a --delete "$SRC/ai/dist/" "$ROOT/ai/dist/"
 sudo rsync -a --delete "$SRC/ai/migrations/" "$ROOT/ai/migrations/"
-sudo chown -R ubuntu:ubuntu "$ROOT/bin" "$ROOT/web" "$ROOT/ai"
+sudo rsync -a --delete "$SRC/classifier/model/" "$ROOT/classifier/model/"
+sudo install -m 644 "$SRC/chappie-classifier.service" /etc/systemd/system/chappie-classifier.service
+sudo chown -R ubuntu:ubuntu "$ROOT/bin" "$ROOT/web" "$ROOT/ai" "$ROOT/classifier"
 
 # 数据库迁移（幂等；新增迁移随产物发布，先迁移后重启）
 "$BUN" --env-file="$ROOT/.env" "$ROOT/ai/dist/migrate.js"
 
-sudo systemctl restart chappie-core chappie-ai
+sudo systemctl daemon-reload
+sudo systemctl enable --now chappie-classifier
+sudo systemctl restart chappie-classifier
+for _ in $(seq 1 20); do
+  if curl -fsS --max-time 2 http://127.0.0.1:7010/health >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if ! curl -fsS --max-time 5 http://127.0.0.1:7010/health; then
+  echo "classifier health check failed; recent logs:"
+  sudo journalctl -u chappie-classifier -n 40 --no-pager || true
+  exit 1
+fi
 
-for _ in $(seq 1 15); do
+sudo systemctl restart chappie-core chappie-ai
+for _ in $(seq 1 20); do
   if systemctl is-active --quiet chappie-core && systemctl is-active --quiet chappie-ai; then
     break
   fi
   sleep 1
 done
-systemctl is-active chappie-core chappie-ai
+systemctl is-active chappie-core chappie-ai chappie-classifier
+
+if ! grep -q '^AI_ROLE_MODEL=mmbert' "$ROOT/.env" 2>/dev/null; then
+  echo "WARN: $ROOT/.env 未设置 AI_ROLE_MODEL=mmbert，classifier 已启动但 AI 不会使用"
+fi
+if ! grep -q '^CLASSIFIER_BASE_URL=http://127.0.0.1:7010' "$ROOT/.env" 2>/dev/null; then
+  echo "WARN: $ROOT/.env 未设置 CLASSIFIER_BASE_URL=http://127.0.0.1:7010"
+fi
 
 echo "==> deploy done $(date -u +%FT%TZ)"
