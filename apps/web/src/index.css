@@ -360,11 +360,11 @@
 }
 
 /* ==========================================================================
-   TipTap 聊天输入框
+   MentionEditor（TipTap 纯文本输入 + 行内 @ 标签）
    ========================================================================== */
 
 /* ProseMirror 基础样式（等价于 style/prosemirror.css 的关键部分） */
-.chat-composer-editor {
+.mention-editor {
   position: relative;
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -373,12 +373,12 @@
 }
 
 /* 单段纯文本：段落之间不额外留白，Shift+Enter 的换行由 hardBreak 承担 */
-.chat-composer-editor p {
+.mention-editor p {
   margin: 0;
 }
 
 /* 占位符：Placeholder 扩展在空段落上挂 data-placeholder */
-.chat-composer-editor p.is-editor-empty:first-child::before {
+.mention-editor p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
   height: 0;
@@ -387,7 +387,7 @@
 }
 
 /* @ 提及标签：整体作为一个 inline 原子节点展示 */
-.chat-mention {
+.mention-chip {
   display: inline-flex;
   align-items: center;
   max-width: 12rem;
@@ -402,18 +402,18 @@
   vertical-align: baseline;
 }
 
-.chat-mention[data-kind='avatar'] {
+.mention-chip[data-kind='avatar'] {
   background: color-mix(in srgb, var(--agent-accent) 16%, transparent);
   color: var(--bubble-agent-ink);
 }
 
-.chat-mention[data-kind='all'] {
+.mention-chip[data-kind='all'] {
   background: var(--warning-soft);
   color: var(--warning);
 }
 
 /* 标签被选中（方向键/退格）时给出明确状态 */
-.chat-mention.ProseMirror-selectednode {
+.mention-chip.ProseMirror-selectednode {
   outline: 2px solid color-mix(in srgb, var(--brand) 55%, transparent);
   outline-offset: 1px;
 }

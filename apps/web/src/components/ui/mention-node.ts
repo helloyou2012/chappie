@@ -1,8 +1,8 @@
 import { Node } from '@tiptap/core';
 
 /**
- * 聊天输入框的行内 @ 提及节点：以标签（chip）整体展示与删除。
- * 序列化为 `@昵称` 文本，保证服务端与 AI 侧拿到的仍是一条普通文本消息。
+ * 行内 @ 提及节点：以标签（chip）整体展示与删除。
+ * 序列化为 `@昵称` 文本，保证消费端拿到的仍是普通文本。
  */
 export const MentionNode = Node.create({
   name: 'mention',
@@ -39,7 +39,7 @@ export const MentionNode = Node.create({
   renderHTML({ node }) {
     return [
       'span',
-      { 'data-type': 'mention', class: 'chat-mention' },
+      { 'data-type': 'mention', class: 'mention-chip' },
       `@${String(node.attrs.label ?? '')}`,
     ];
   },
