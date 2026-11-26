@@ -1,6 +1,6 @@
 /** 触发路由（纯函数）—— 设计方案 §4.4 第 1 步、§29.6 防 AI 互聊死循环。 */
 import { describe, expect, test } from 'bun:test';
-import type { Message } from '@chappie/contract';
+import { ALL_MENTION_ID, type Message } from '@chappie/contract';
 import { findCandidates, type MemberSnapshot } from '../src/router';
 
 const MEMBERS: MemberSnapshot[] = [
@@ -83,6 +83,20 @@ describe('findCandidates 普通会话', () => {
   test('群聊 @ 某人后其他分身不响应', () => {
     const list = findCandidates(msg({ senderId: 'u_alice', mentions: ['a_bob'] }), MEMBERS, group);
     expect(list.map((c) => c.avatarId)).toEqual(['a_bob']);
+  });
+
+  test('群聊 @所有人（广播）→ 各成员分身照常代答，且不唤醒自己的分身', () => {
+    const list = findCandidates(
+      msg({ senderId: 'u_alice', mentions: [ALL_MENTION_ID, 'u_bob'] }),
+      MEMBERS,
+      group,
+    );
+    expect(list).toEqual([{ avatarId: 'a_bob', ownerId: 'u_bob', mentioned: false, via: 'auto' }]);
+  });
+
+  test('群聊普通 @ 真人（无广播标记）仍保持排他寻址', () => {
+    const list = findCandidates(msg({ senderId: 'u_alice', mentions: ['u_bob'] }), MEMBERS, group);
+    expect(list).toEqual([]);
   });
 
   test('私聊显式 @ 自己的分身时，对方分身不插话', () => {

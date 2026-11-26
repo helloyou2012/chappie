@@ -7,7 +7,7 @@
  */
 
 import { setTimeout as sleep } from 'node:timers/promises';
-import { contentText, type MemberSnapshot, type Message } from '@chappie/contract';
+import { ALL_MENTION_ID, contentText, type MemberSnapshot, type Message } from '@chappie/contract';
 import { and, asc, desc, eq, gt, gte, inArray, ne, sql } from 'drizzle-orm';
 import { runAgent } from './agent-runtime';
 import { type Classification, classify } from './classifier';
@@ -562,6 +562,8 @@ export async function driveTask(
   if (!conv) return;
 
   const mentioned = trigger.mentions?.includes(task.avatarId) ?? false;
+  /** @所有人（广播）：自动档分身也要按「被点名」处理，强制产生回复 */
+  const broadcast = trigger.mentions?.includes(ALL_MENTION_ID) ?? false;
   const explicitReply = task.triggerKind === 'reply';
   const continuation = task.triggerKind === 'continuation';
 
@@ -608,13 +610,21 @@ export async function driveTask(
     return;
   }
 
+  // @所有人：自动档分身视作被点名，即使意图分类判定「无需回应」也要出回复
+  const broadcastAuto = broadcast && policy.mode === 'auto';
+
   // Pairwise 已在 processMessageCreated 完成角色匹配；这里只放行被选中的观察者。
-  const effectiveClassification: Classification = opts?.modelApproved
+  const forced = opts?.modelApproved
+    ? 'pairwise role match'
+    : broadcastAuto
+      ? 'broadcast @all'
+      : null;
+  const effectiveClassification: Classification = forced
     ? {
         ...classification,
         needReply: true,
         confidence: Math.max(classification.confidence, 0.9),
-        summary: `${classification.summary} | pairwise role match`,
+        summary: `${classification.summary} | ${forced}`,
       }
     : classification;
 

@@ -18,6 +18,15 @@ import {
 // 消息内容（可扩展注册表）
 // ---------------------------------------------------------------------------
 
+/**
+ * 群聊「@所有人」的广播标记。
+ *
+ * 不是真实 principal（不会出现在成员表里）：客户端把它放进 mentions 数组，
+ * 路由层据此识别「广播提及」——只对人类成员生效的通知语义，
+ * 但不按普通 @ 的排他规则压制各成员分身代答。
+ */
+export const ALL_MENTION_ID = '__all__';
+
 const SchemaVersion = z.number().int().default(1);
 
 export const TextPayload = z.object({

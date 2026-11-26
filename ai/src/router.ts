@@ -11,7 +11,7 @@
  *     （设计方案 §29.6 防互聊死循环）。
  */
 
-import type { Message } from '@chappie/contract';
+import { ALL_MENTION_ID, type Message } from '@chappie/contract';
 import type { EngagementContext } from './engagement';
 
 export interface MemberSnapshot {
@@ -34,6 +34,8 @@ export function findCandidates(
   engagement?: EngagementContext,
 ): Candidate[] {
   const mentionSet = new Set(message.mentions);
+  /** @所有人：真人 id 只为通知语义，不按普通 @ 的排他规则压制各成员分身代答 */
+  const broadcast = mentionSet.has(ALL_MENTION_ID);
   const avatars = members.filter((m) => m.principalType === 'avatar' && m.ownerId);
   const ownerOfSender = members.find((m) => m.principalId === message.senderId)?.ownerId ?? null;
 
@@ -86,7 +88,8 @@ export function findCandidates(
 
   // 显式 @ 是排他寻址：人类消息一旦带 mention，只允许被 @ 的分身响应，
   // 不再叠加 direct / auto / reply / continuation，避免“@ 了甲，乙的分身也插话”。
-  if (message.senderType === 'human' && message.mentions.length > 0) {
+  // 「@所有人」例外：它是广播，各成员的分身仍按 direct/auto 参与代答。
+  if (message.senderType === 'human' && message.mentions.length > 0 && !broadcast) {
     return [...byId.values()];
   }
 

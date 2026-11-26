@@ -1,4 +1,4 @@
-import type { Content } from '@chappie/contract';
+import { ALL_MENTION_ID, type Content } from '@chappie/contract';
 import { adminApi, api, dayjs, type MemberView, useAuthStore, useChatStore } from '@chappie/shared';
 import { SparklesIcon } from '@heroicons/react/24/outline';
 import {
@@ -10,13 +10,19 @@ import {
   RiLoader4Line,
   RiSendPlaneFill,
   RiStopCircleLine,
+  RiTeamLine,
 } from '@remixicon/react';
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import Placeholder from '@tiptap/extension-placeholder';
+import { type Editor, EditorContent, useEditor } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { UserAvatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/toast';
 import { getRealtimeClient } from '@/lib/realtime';
+import { cn } from '@/lib/utils';
+import { MentionNode } from './mention-node';
 
 function newClientId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -25,9 +31,75 @@ function newClientId(): string {
   return `cm_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
+/** 纯文本输入：保留换行与 @ 提及标签，不支持富文本格式 */
+const composerExtensions = [
+  StarterKit.configure({
+    blockquote: false,
+    bold: false,
+    bulletList: false,
+    code: false,
+    codeBlock: false,
+    dropcursor: false,
+    gapcursor: false,
+    heading: false,
+    horizontalRule: false,
+    italic: false,
+    link: false,
+    listItem: false,
+    listKeymap: false,
+    orderedList: false,
+    strike: false,
+    trailingNode: false,
+    underline: false,
+  }),
+  Placeholder.configure({ placeholder: '发消息，或 @ 提及成员…' }),
+  MentionNode,
+];
+
+/** 「所有人」不是真实 principal：发送时展开为会话内全部真人成员 + 广播标记 */
+const ALL_OPTION: MentionOption = { id: ALL_MENTION_ID, name: '所有人', kind: 'all' };
+
+interface MentionOption {
+  id: string;
+  name: string;
+  kind: 'human' | 'avatar' | 'all';
+}
+
+interface MentionPopup {
+  query: string;
+  /** 待替换的 @query 在文档中的区间 */
+  from: number;
+  to: number;
+  items: MentionOption[];
+  index: number;
+}
+
+function collectMentionIds(editor: Editor): string[] {
+  const ids: string[] = [];
+  editor.state.doc.descendants((node) => {
+    if (node.type.name !== 'mention') return true;
+    const id = node.attrs.id;
+    if (typeof id === 'string' && id && id !== ALL_MENTION_ID && !ids.includes(id)) ids.push(id);
+    return false;
+  });
+  return ids;
+}
+
+function hasAllMention(editor: Editor): boolean {
+  let found = false;
+  editor.state.doc.descendants((node) => {
+    if (found) return false;
+    if (node.type.name === 'mention' && node.attrs.id === ALL_MENTION_ID) found = true;
+    return !found;
+  });
+  return found;
+}
+
 interface ChatInputProps {
   convId: string;
   members?: MemberView[];
+  /** 群聊：@ 候选里额外提供「所有人」 */
+  isGroup?: boolean;
   /** 分身正在处理：把发送按钮切换为停止/接管 */
   avatarTyping?: boolean;
   replyTo?: { msgId: string; preview: string } | null;
@@ -45,78 +117,165 @@ export interface ChatInputHandle {
  * 内部无分隔线，通过底色与间距组织层级。
  */
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
-  { convId, members, avatarTyping = false, replyTo, onCancelReply },
+  { convId, members, isGroup = false, avatarTyping = false, replyTo, onCancelReply },
   ref,
 ) {
   const myId = useAuthStore((s) => s.user?.id ?? '');
-  const [text, setText] = useState('');
-  const [mentions, setMentions] = useState<string[]>([]);
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [docText, setDocText] = useState('');
+  const [mention, setMention] = useState<MentionPopup | null>(null);
   const [uploading, setUploading] = useState(false);
   const [attachments, setAttachments] = useState<{ file: File; preview: string | null }[]>([]);
   /** 同步发送锁：state 更新前拦住连点/连续回车 */
   const sendingRef = useRef(false);
   const lastSentAtRef = useRef(0);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastTypingRef = useRef(0);
+  /** 提及候选：members 变化频繁（每次消息刷新），用 ref 避免重建编辑器/重订阅 */
+  const candidatesRef = useRef<MentionOption[]>([]);
+  candidatesRef.current = (members ?? [])
+    .filter((m) => m.principalId !== myId)
+    .map((m) => ({
+      id: m.principalId,
+      name: m.name,
+      kind: m.principalType === 'avatar' ? 'avatar' : 'human',
+    }));
+  /** ProseMirror 事件处理器只注册一次，通过 ref 拿到最新的 React 闭包 */
+  const keyHandlerRef = useRef<(event: KeyboardEvent) => boolean>(() => false);
+  const pasteHandlerRef = useRef<(event: ClipboardEvent) => boolean>(() => false);
 
-  const candidates = (members ?? []).filter((m) => m.principalId !== myId);
-  const filtered =
-    mentionQuery === null
-      ? []
-      : candidates
-          .filter((c) => c.name.toLowerCase().includes(mentionQuery.toLowerCase()))
-          .sort(
-            (a, b) => Number(b.principalType === 'avatar') - Number(a.principalType === 'avatar'),
-          );
+  const editor = useEditor({
+    extensions: composerExtensions,
+    content: '',
+    editorProps: {
+      attributes: {
+        class:
+          'chat-composer-editor scrollbar-thin max-h-40 min-h-[48px] w-full overflow-y-auto px-4 pb-1 pt-3.5 text-[14px] leading-[1.5] text-ink focus:outline-none',
+      },
+      handleKeyDown: (_view, event) => keyHandlerRef.current(event),
+      handlePaste: (_view, event) => pasteHandlerRef.current(event),
+    },
+  });
 
-  const emitTyping = () => {
-    const now = Date.now();
-    if (now - lastTypingRef.current > 1500) {
-      lastTypingRef.current = now;
-      getRealtimeClient()?.typing(convId);
-    }
-  };
+  // 文档变化 → 同步发送按钮状态 / 输入中提示 / @ 候选弹层
+  useEffect(() => {
+    if (!editor) return;
+    const refreshMention = () => {
+      // 中文输入法组合中不做检测，避免把拼音当作查询词
+      if (editor.view.composing) return;
+      const { $from } = editor.state.selection;
+      if (!$from.parent.isTextblock) {
+        setMention(null);
+        return;
+      }
+      const before = $from.parent.textBetween(0, $from.parentOffset, undefined, '￼');
+      const match = /@([^\s@]{0,20})$/.exec(before);
+      if (!match) {
+        setMention(null);
+        return;
+      }
+      const query = match[1] ?? '';
+      const needle = query.toLowerCase();
+      // 「所有人」仅在群聊出现；支持输入「所」或 all 过滤
+      const showAll =
+        isGroup && (query === '' || '所有人'.includes(query) || 'all'.startsWith(needle));
+      const items: MentionOption[] = [
+        ...(showAll ? [ALL_OPTION] : []),
+        ...candidatesRef.current
+          .filter((c) => c.name.toLowerCase().includes(needle))
+          .sort((a, b) => Number(b.kind === 'avatar') - Number(a.kind === 'avatar'))
+          .slice(0, 8),
+      ];
+      if (items.length === 0) {
+        setMention(null);
+        return;
+      }
+      setMention((prev) => ({
+        query,
+        from: $from.pos - query.length - 1,
+        to: $from.pos,
+        items,
+        index: prev && prev.query === query ? Math.min(prev.index, items.length - 1) : 0,
+      }));
+    };
+    const handleUpdate = () => {
+      setDocText(editor.getText({ blockSeparator: '\n' }));
+      const now = Date.now();
+      if (now - lastTypingRef.current > 1500) {
+        lastTypingRef.current = now;
+        getRealtimeClient()?.typing(convId);
+      }
+      refreshMention();
+    };
+    const handleSelection = () => refreshMention();
+    const handleBlur = () => setMention(null);
+    editor.on('update', handleUpdate);
+    editor.on('selectionUpdate', handleSelection);
+    editor.on('blur', handleBlur);
+    return () => {
+      editor.off('update', handleUpdate);
+      editor.off('selectionUpdate', handleSelection);
+      editor.off('blur', handleBlur);
+    };
+  }, [editor, convId, isGroup]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    setText(value);
-    const cursor = e.target.selectionStart ?? value.length;
-    const before = value.slice(0, cursor);
-    const match = /@([^\s@]{0,20})$/.exec(before);
-    setMentionQuery(match ? match[1] : null);
-    emitTyping();
-  };
-
-  const pickMention = (c: MemberView) => {
-    const el = textareaRef.current;
-    const cursor = el?.selectionStart ?? text.length;
-    const before = text.slice(0, cursor).replace(/@([^\s@]{0,20})$/, `@${c.name} `);
-    const after = text.slice(cursor);
-    setText(before + after);
-    setMentions((prev) => (prev.includes(c.principalId) ? prev : [...prev, c.principalId]));
-    setMentionQuery(null);
-    requestAnimationFrame(() => {
-      el?.focus();
-      const pos = before.length;
-      el?.setSelectionRange(pos, pos);
-    });
+  /** 用选中的成员标签替换正在输入的 @query */
+  const pickMention = (option: MentionOption) => {
+    if (!editor || !mention) return;
+    editor
+      .chain()
+      .focus()
+      .deleteRange({ from: mention.from, to: mention.to })
+      .insertContent([
+        {
+          type: 'mention',
+          attrs: { id: option.id, label: option.name, kind: option.kind },
+        },
+        { type: 'text', text: ' ' },
+      ])
+      .run();
+    setMention(null);
   };
 
   /** 工具行 @ 按钮：在光标处插入 @ 并唤起候选 */
   const insertMentionTrigger = () => {
-    const el = textareaRef.current;
-    const cursor = el?.selectionStart ?? text.length;
-    const next = `${text.slice(0, cursor)}@${text.slice(cursor)}`;
-    setText(next);
-    setMentionQuery('');
-    requestAnimationFrame(() => {
-      el?.focus();
-      const pos = cursor + 1;
-      el?.setSelectionRange(pos, pos);
-    });
+    editor?.chain().focus().insertContent('@').run();
+  };
+
+  const handleComposerKeyDown = (e: KeyboardEvent): boolean => {
+    // 输入法组合期间（Enter 确认候选词）不拦截按键
+    if (e.isComposing || e.keyCode === 229) return false;
+    if (mention) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMention((m) => (m ? { ...m, index: (m.index + 1) % m.items.length } : m));
+        return true;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMention((m) =>
+          m ? { ...m, index: (m.index - 1 + m.items.length) % m.items.length } : m,
+        );
+        return true;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const target = mention.items[mention.index];
+        if (target) pickMention(target);
+        return true;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMention(null);
+        return true;
+      }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void send();
+      return true;
+    }
+    return false;
   };
 
   const takeover = () => {
@@ -137,18 +296,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const send = async () => {
     // 同步锁 + 短冷却：拦截连点、连续回车等重复提交
     if (sendingRef.current || Date.now() - lastSentAtRef.current < 600) return;
-    const value = text.trim();
+    const value = (editor?.getText({ blockSeparator: '\n' }) ?? '').trim();
     if (!value && attachments.length === 0) return;
     const ws = getRealtimeClient();
     if (!ws?.isOpen) {
       toast.error('连接未就绪', '正在重新连接，请稍候再试');
       return;
     }
-    // 删掉 @昵称文本后，不应继续带上旧的 mention id
-    const activeMentions = mentions.filter((id) => {
-      const member = members?.find((m) => m.principalId === id);
-      return !member || value.toLowerCase().includes(`@${member.name.toLowerCase()}`);
-    });
+    // 提及 id 直接取自文档里的标签节点：删掉标签即不会带上对应 id
+    const activeMentions = editor ? collectMentionIds(editor) : [];
+    // @所有人：带上广播标记 + 会话内全部真人（不含发送者）。
+    // 不展开成分身 id —— AI 路由会把广播视为「非排他提及」，让各成员分身照常代答。
+    if (editor && hasAllMention(editor)) {
+      if (!activeMentions.includes(ALL_MENTION_ID)) activeMentions.push(ALL_MENTION_ID);
+      for (const m of members ?? []) {
+        if (m.principalType !== 'human' || m.principalId === myId) continue;
+        if (!activeMentions.includes(m.principalId)) activeMentions.push(m.principalId);
+      }
+    }
     sendingRef.current = true;
     lastSentAtRef.current = Date.now();
     setUploading(true);
@@ -186,9 +351,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         status: 'sending',
       });
     }
-    setText('');
-    setMentions([]);
-    setMentionQuery(null);
+    editor?.commands.clearContent(true);
+    setDocText('');
+    setMention(null);
     setAttachments([]);
     onCancelReply?.();
 
@@ -271,12 +436,20 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   };
 
   /** 粘贴文件/截图：有文本时保留默认文本粘贴，文件同时进入暂存区 */
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const handlePaste = (e: ClipboardEvent): boolean => {
     const files = Array.from(e.clipboardData?.files ?? []);
-    if (files.length === 0) return;
+    if (files.length === 0) return false;
     addFiles(files);
-    if (!e.clipboardData.getData('text/plain')) e.preventDefault();
+    if (e.clipboardData?.getData('text/plain')) return false;
+    e.preventDefault();
+    return true;
   };
+
+  // 每次渲染刷新处理器，保证 ProseMirror 调用到最新的状态与闭包
+  useEffect(() => {
+    keyHandlerRef.current = handleComposerKeyDown;
+    pasteHandlerRef.current = handlePaste;
+  });
 
   return (
     <div className="relative z-1 px-3 pb-3">
@@ -336,33 +509,44 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         ) : null}
 
         {/* 提及候选（面板上方浮层） */}
-        {mentionQuery !== null && filtered.length > 0 ? (
+        {mention ? (
           <div className="absolute bottom-full left-0 right-0 z-20 mb-2 w-64 overflow-hidden rounded-md border border-line bg-popover p-1 shadow-pop">
             <div className="px-2 py-1 text-[11px] font-medium text-ink-tertiary">
               <RiAtLine className="mr-1 inline size-3" />
               提及成员
             </div>
-            {filtered.slice(0, 8).map((c) => (
+            {mention.items.map((c, i) => (
               <button
                 type="button"
-                key={c.principalId}
+                key={c.id}
+                // 保持编辑器聚焦与选区，避免点击候选前 blur 关闭弹层
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pickMention(c)}
-                className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+                className={cn(
+                  'flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink',
+                  i === mention.index && 'bg-surface-hover text-ink',
+                )}
               >
-                <UserAvatar
-                  name={c.name}
-                  variant={c.principalType === 'avatar' ? 'avatar' : 'human'}
-                  className="size-5"
-                  showAiBadge={false}
-                />
+                {c.kind === 'all' ? (
+                  <span className="flex size-5 items-center justify-center rounded-full bg-brand-soft text-brand">
+                    <RiTeamLine className="size-3.5" />
+                  </span>
+                ) : (
+                  <UserAvatar
+                    name={c.name}
+                    variant={c.kind}
+                    className="size-5"
+                    showAiBadge={false}
+                  />
+                )}
                 <span className="flex-1 truncate">{c.name}</span>
-                {c.principalType === 'avatar' ? (
+                {c.kind === 'avatar' ? (
                   <Badge variant="ai" className="shrink-0">
                     <SparklesIcon className="size-2.5" /> AI 分身
                   </Badge>
                 ) : (
                   <Badge variant="muted" className="shrink-0">
-                    真人
+                    {c.kind === 'all' ? '全员' : '真人'}
                   </Badge>
                 )}
               </button>
@@ -370,51 +554,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           </div>
         ) : null}
 
-        {/* 文本域 */}
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={handleChange}
-          onPaste={handlePaste}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              if (mentionQuery !== null && filtered.length > 0) {
-                pickMention(filtered[0]);
-                return;
-              }
-              void send();
-            }
-            if (e.key === 'Escape') setMentionQuery(null);
-          }}
-          placeholder="发消息，或 @ 提及成员…"
-          rows={Math.min(5, Math.max(1, text.split('\n').length))}
-          className="block max-h-40 min-h-[48px] w-full resize-none bg-transparent px-4 pb-1 pt-3.5 text-[14px] leading-[1.5] text-ink placeholder:text-ink-quaternary focus-visible:outline-none"
-        />
-
-        {/* 已选提及 */}
-        {mentions.length > 0 ? (
-          <div className="flex flex-wrap gap-1 px-3 pb-1.5">
-            {mentions.map((id) => {
-              const m = members?.find((x) => x.principalId === id);
-              return (
-                <span
-                  key={id}
-                  className="inline-flex items-center gap-1 rounded-full bg-surface-raised px-2 py-0.5 text-[11px] text-ink-secondary"
-                >
-                  @{m?.name ?? id}
-                  <button
-                    type="button"
-                    onClick={() => setMentions((prev) => prev.filter((x) => x !== id))}
-                    className="text-ink-quaternary transition-colors hover:text-ink"
-                  >
-                    <RiCloseLine className="size-2.5" />
-                  </button>
-                </span>
-              );
-            })}
-          </div>
-        ) : null}
+        {/* 文本域（TipTap：@ 成员以内联标签展示） */}
+        <EditorContent editor={editor} />
 
         {/* 工具行：左提示 / 右发送 */}
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2">
@@ -489,7 +630,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               variant="secondary"
               className="shrink-0 rounded-full p-0"
               onClick={() => void send()}
-              disabled={(!text.trim() && attachments.length === 0) || uploading}
+              disabled={(!docText.trim() && attachments.length === 0) || uploading}
               aria-label="发送"
             >
               <RiSendPlaneFill className="size-4" />

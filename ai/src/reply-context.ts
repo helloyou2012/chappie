@@ -2,7 +2,7 @@
  * 把某条消息、某个观察者分身的上下文序列化成 mmBERT 输入。
  * 必须与 training/serialize.py 完全一致。
  */
-import { contentText, type Message } from '@chappie/contract';
+import { ALL_MENTION_ID, contentText, type Message } from '@chappie/contract';
 import { dayjs } from './common/datetime';
 
 export interface ReplyMember {
@@ -46,6 +46,7 @@ function personLabel(name: string, role?: string, department?: string): string {
 function mentionSuffix(ids: string[] | undefined, members: ReplyMember[]): string {
   if (!ids?.length) return '';
   const parts = ids.map((id) => {
+    if (id === ALL_MENTION_ID) return '所有人·广播';
     const m = members.find((x) => x.principalId === id);
     return m ? `${m.name}·${typeLabel(m.principalType)}` : id;
   });
