@@ -66,7 +66,8 @@ training/data/llm_role/MANIFEST.json          # 组数/样本数/文件 sha256
 
 ```bash
 # 如模板数据已清理，先重新生成（可选）
-python training/generate_pairwise_templates.py --groups 1000
+python training/generate_pairwise_templates.py --groups 1000 \
+  --out training/data/pairwise_templates_1000.jsonl
 
 python training/train_linear_pairwise.py \
   --extra-train training/data/pairwise_templates_1000.jsonl \
