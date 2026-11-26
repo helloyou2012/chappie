@@ -119,6 +119,10 @@ Bun 侧只对 **工作群、无具体 @、auto/direct** 的候选打分；
 同一份 LLM 生成数据也可以训练 mmBERT-base。脚本按 val 选 best checkpoint 并校准
 `margin = max(真实候选 reply logit) - silence logit`，test 只在最后评估一次。
 
+CUDA 机器先执行 `bash training/gpu/setup.sh`（安装 CUDA torch + 依赖并自检）。
+首次下载模型时去掉 `HF_HUB_OFFLINE=1`，必要时设置 `HF_ENDPOINT=https://hf-mirror.com`；
+显存较小时把 `--groups-batch` 降到 1。
+
 ```bash
 HF_HUB_OFFLINE=1 python training/train_pairwise.py \
   --train training/data/llm_role/llm_role_train.jsonl \
