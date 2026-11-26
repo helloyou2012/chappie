@@ -1,6 +1,6 @@
 /** 认证状态：token / user / 服务地址；支持持久化恢复（Web localStorage / RN AsyncStorage）。 */
 
-import type { SendCodeResponse, User } from '@chappie/contract';
+import type { SendCodeResponse, UpdateProfileRequest, User } from '@chappie/contract';
 import { create } from 'zustand';
 import { ApiError, api, configureApi } from '../api';
 import { DEFAULT_ADMIN_URL, DEFAULT_SERVER_URL } from '../constants';
@@ -20,6 +20,7 @@ interface AuthState {
   setServerUrl: (serverUrl: string, adminUrl?: string) => Promise<void>;
   sendCode: (email: string) => Promise<SendCodeResponse>;
   login: (email: string, code: string) => Promise<void>;
+  updateProfile: (req: UpdateProfileRequest) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -133,6 +134,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await storageSet(STORAGE_KEYS.token, res.token);
     await storageSet(STORAGE_KEYS.user, JSON.stringify(res.user));
     set({ token: res.token, user: res.user, status: 'ready' });
+  },
+
+  updateProfile: async (req) => {
+    const res = await api.updateProfile(req);
+    set({ user: res.user });
   },
 
   logout: async () => {

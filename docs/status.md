@@ -270,3 +270,18 @@
 - [ ] 推送令牌失效清理（DeviceNotRegistered 票据回写）。
 - [ ] 端到端加密（待产品决策）。
 - [ ] 文件/图片上传（待对象存储）。
+
+49. **接话决策默认规则**：可选 mmBERT-base 上下文 reply/silent 模型
+    （`training/` 生成私聊/群聊数据 + `classifier/` Rust ONNX 服务）。ONNX 产物不随仓库发布；
+    未配置时走规则。
+50. **工作群角色接话模型**：`ai/src/linear-pairwise.ts` + `ai/src/models/linear-pairwise.json`。
+    train/val/test 的角色标注由大模型生成（120/40/60 组，回复组与沉默组各半），
+    另叠加脚本生成的角色模板做覆盖补充；不依赖真实聊天或 G1001。110 维角色/职责/点名/回应线索特征 + logistic pairwise；阈值在 val 上联合
+    组级 balanced accuracy 与候选 F1 校准（`-0.797818`）。独立 test：回复组召回 93.3%、
+    沉默组误唤醒 0.0%、top1 96.7%；候选级 P/R/F1 83.3/90.9/87.0%。纯通知/公告先由
+    回应线索门控静默；显式 @ 不进入模型。
+51. **mmBERT pairwise（当前运行时主模型）**：`training/train_pairwise.py` 用 LLM 数据训练
+    mmBERT-base（max_len 576，8 epoch，val 选模），导出 int8 ONNX 由 `classifier` `/rank` 服务；
+    运行时 `AI_ROLE_MODEL=mmbert`、`CLASSIFIER_RANK_MIN_MARGIN=-5.691539`。用真实 `/rank`
+    重新校准后：val 召回 100% / 误唤醒 0% / top1 100%；test 召回 96.7% / 误唤醒 0% / top1 100%，
+    优于线性模型 test 的 93.3% / 0% / 96.7%。

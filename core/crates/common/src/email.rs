@@ -31,7 +31,11 @@ impl EmailSender {
     pub async fn send_code(&self, email: &str, code: &str) {
         match self {
             EmailSender::Console => {
-                tracing::info!(email, code, "📧 AUTH_CODE —— 验证码已生成（console sender，仅开发）");
+                tracing::info!(
+                    email,
+                    code,
+                    "📧 AUTH_CODE —— 验证码已生成（console sender，仅开发）"
+                );
             }
             EmailSender::Resend { api_key, from } => {
                 let payload = json!({
@@ -83,7 +87,10 @@ mod tests {
 
     #[test]
     fn console_when_key_missing_or_blank() {
-        assert!(matches!(EmailSender::from_config(&None, "x"), EmailSender::Console));
+        assert!(matches!(
+            EmailSender::from_config(&None, "x"),
+            EmailSender::Console
+        ));
         assert!(matches!(
             EmailSender::from_config(&Some("   ".into()), "x"),
             EmailSender::Console

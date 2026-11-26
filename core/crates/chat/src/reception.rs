@@ -123,13 +123,12 @@ async fn peer_user_id(pg: &PgPool, conv_id: &str, owner_id: &str) -> AppResult<O
 }
 
 async fn contact_tags(pg: &PgPool, owner_id: &str, peer_id: &str) -> AppResult<Vec<String>> {
-    let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT tag FROM contact_tag_member WHERE user_id = $1 AND peer_id = $2",
-    )
-    .bind(owner_id)
-    .bind(peer_id)
-    .fetch_all(pg)
-    .await?;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT tag FROM contact_tag_member WHERE user_id = $1 AND peer_id = $2")
+            .bind(owner_id)
+            .bind(peer_id)
+            .fetch_all(pg)
+            .await?;
     Ok(rows.into_iter().map(|r| r.0).collect())
 }
 
@@ -215,10 +214,7 @@ pub async fn resolve_and_sync(
         }
     }
     // 临时档位到期自动回落 manual（与 AI turn-guard 保持一致）。
-    let temp_expired = member
-        .ai_mode_until
-        .map(|t| t < now)
-        .unwrap_or(false);
+    let temp_expired = member.ai_mode_until.map(|t| t < now).unwrap_or(false);
     let effective_mode = if temp_expired && member.ai_mode != "manual" {
         "manual".to_string()
     } else {
@@ -305,10 +301,7 @@ pub async fn resolve_and_sync(
 
     let changed = match &current {
         Some(c) => {
-            c.state != state
-                || c.strategy != strategy
-                || c.source != source
-                || c.until != until_dt
+            c.state != state || c.strategy != strategy || c.source != source || c.until != until_dt
         }
         None => true,
     };
@@ -354,18 +347,20 @@ pub async fn resolve_and_sync(
             "reason": "schedule/resolve",
             "handoffUntil": null,
         });
-        sqlx::query("INSERT INTO outbox (topic, key, payload) VALUES ('reception.changed', $1, $2)")
-            .bind(conv_id)
-            .bind(serde_json::to_value(&json!({
-                "eventId": ids::new_id("evt"),
-                "topic": "reception.changed",
-                "key": conv_id,
-                "traceId": null,
-                "occurredAt": time::now_iso(),
-                "data": data,
-            }))?)
-            .execute(pg)
-            .await?;
+        sqlx::query(
+            "INSERT INTO outbox (topic, key, payload) VALUES ('reception.changed', $1, $2)",
+        )
+        .bind(conv_id)
+        .bind(serde_json::to_value(&json!({
+            "eventId": ids::new_id("evt"),
+            "topic": "reception.changed",
+            "key": conv_id,
+            "traceId": null,
+            "occurredAt": time::now_iso(),
+            "data": data,
+        }))?)
+        .execute(pg)
+        .await?;
     }
 
     Ok(ResolvedReception {
@@ -907,13 +902,12 @@ pub async fn resolve_human_request(
         conv_id: String,
         status: String,
     }
-    let req: Option<ReqRow> = sqlx::query_as(
-        "SELECT conv_id, status FROM human_request WHERE id = $1 AND owner_id = $2",
-    )
-    .bind(request_id)
-    .bind(owner_id)
-    .fetch_optional(&db.pg)
-    .await?;
+    let req: Option<ReqRow> =
+        sqlx::query_as("SELECT conv_id, status FROM human_request WHERE id = $1 AND owner_id = $2")
+            .bind(request_id)
+            .bind(owner_id)
+            .fetch_optional(&db.pg)
+            .await?;
     let req = req.ok_or_else(|| AppError::not_found("请求不存在"))?;
     if req.status != "pending" {
         return Ok(());
@@ -986,7 +980,11 @@ pub async fn set_contact_tags(
     Ok(())
 }
 
-pub async fn contact_tags_for(pg: &PgPool, owner_id: &str, peer_id: &str) -> AppResult<Vec<String>> {
+pub async fn contact_tags_for(
+    pg: &PgPool,
+    owner_id: &str,
+    peer_id: &str,
+) -> AppResult<Vec<String>> {
     contact_tags(pg, owner_id, peer_id).await
 }
 
@@ -1069,12 +1067,11 @@ pub async fn human_interjection(
     .await?;
 
     // 持久化为会话级临时委托，避免下一次解析被显式 auto 档覆盖。
-    let avatar_id: Option<(String,)> = sqlx::query_as(
-        "SELECT id FROM principal WHERE owner_id = $1 AND type = 'avatar' LIMIT 1",
-    )
-    .bind(owner_id)
-    .fetch_optional(&mut **tx)
-    .await?;
+    let avatar_id: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM principal WHERE owner_id = $1 AND type = 'avatar' LIMIT 1")
+            .bind(owner_id)
+            .fetch_optional(&mut **tx)
+            .await?;
     if let Some((avatar_id,)) = avatar_id {
         let dlg_id = ids::new_id("dlg");
         sqlx::query(

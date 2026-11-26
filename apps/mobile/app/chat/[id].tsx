@@ -767,7 +767,7 @@ export default function ChatScreen() {
           >
             {attachments.map((att, index) => (
               <View
-                key={`${att.name}-${index}`}
+                key={`${att.uri}-${att.name}`}
                 style={{
                   flexDirection: 'row',
                   alignItems: 'center',

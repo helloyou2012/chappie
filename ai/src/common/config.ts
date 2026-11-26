@@ -18,6 +18,16 @@ export interface AiConfig {
   classifierBaseUrl: string;
   classifierApiKey: string;
   classifierModel: string;
+  /** 本地意图分类服务超时（毫秒）；留空/0 表示不启用模型分类 */
+  classifierTimeoutMs: number;
+  /** pairwise 候选分数需超过沉默候选的最小 margin */
+  classifierRankMinMargin: number;
+  /** 工作群启用角色关键词匹配（无模型兜底） */
+  roleMatch: boolean;
+  /** 角色匹配运行时：linear=本地线性模型优先，rule=仅规则，off=关闭 */
+  roleModel: 'linear' | 'mmbert' | 'rule' | 'off';
+  /** 线性模型文件路径（缺省 ai/src/models/linear-pairwise.json） */
+  roleModelPath: string;
   avatarDailyBudgetUsd: number;
   maxHopCount: number;
   /** 任务租约 TTL（秒）：心跳间隔续约，过期即可被恢复清扫认领 */
@@ -116,6 +126,11 @@ export function loadConfig(): AiConfig {
     classifierBaseUrl: env('CLASSIFIER_BASE_URL'),
     classifierApiKey: env('CLASSIFIER_API_KEY'),
     classifierModel: env('CLASSIFIER_MODEL'),
+    classifierTimeoutMs: Number(env('CLASSIFIER_TIMEOUT_MS', '300')),
+    classifierRankMinMargin: Number(env('CLASSIFIER_RANK_MIN_MARGIN', '0')),
+    roleMatch: env('AI_ROLE_MATCH', 'true') === 'true',
+    roleModel: (env('AI_ROLE_MODEL', 'linear') || 'linear') as AiConfig['roleModel'],
+    roleModelPath: env('AI_ROLE_MODEL_PATH'),
     avatarDailyBudgetUsd: Number(env('AVATAR_DAILY_BUDGET_USD', '1.0')),
     maxHopCount: Number(env('MAX_HOP_COUNT', '3')),
     taskLeaseTtlSeconds: Number(env('AI_TASK_LEASE_TTL_S', '120')),

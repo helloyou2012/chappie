@@ -70,7 +70,7 @@ export function parseIcsToItems(text: string, sourceId: string, now = dayjs()): 
 
   for (const raw of Object.values(parsed)) {
     const ev = raw as IcsEventLike;
-    if (!ev || ev.type !== 'VEVENT' || !(ev.start instanceof Date)) continue;
+    if (ev?.type !== 'VEVENT' || !(ev.start instanceof Date)) continue;
     const uid = ev.uid ?? ev.summary ?? 'event';
     const start = dayjs(ev.start);
     const exdates = new Set(

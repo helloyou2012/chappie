@@ -39,6 +39,10 @@ pub struct User {
     pub name: String,
     #[serde(default)]
     pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub job_role: String,
+    #[serde(default)]
+    pub department: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -49,6 +53,8 @@ impl User {
             email: self.email.clone(),
             name: self.name.clone(),
             avatar_url: self.avatar_url.clone(),
+            job_role: self.job_role.clone(),
+            department: self.department.clone(),
             created_at: time::iso(self.created_at),
         }
     }
@@ -62,6 +68,10 @@ pub struct UserApi {
     pub email: String,
     pub name: String,
     pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub job_role: String,
+    #[serde(default)]
+    pub department: String,
     pub created_at: String,
 }
 
@@ -74,7 +84,11 @@ fn default_schema_version() -> i32 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Content {
     Text {
         #[serde(default = "default_schema_version")]
@@ -128,7 +142,11 @@ impl Content {
 
 /// 卡片：draft | approval | task | handover | report（设计方案 §5.2）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum CardPayload {
     Draft {
         task_id: String,
@@ -368,7 +386,10 @@ impl TryFrom<MessageRow> for Message {
     fn try_from(row: MessageRow) -> Result<Self, Self::Error> {
         let (content, ai_meta) = if row.recalled {
             (
-                Content::Text { schema_version: 1, text: "消息已撤回".into() },
+                Content::Text {
+                    schema_version: 1,
+                    text: "消息已撤回".into(),
+                },
                 None,
             )
         } else {
@@ -447,6 +468,10 @@ pub struct MemberView {
     pub owner_id: Option<String>,
     pub name: String,
     pub role: String,
+    #[serde(default)]
+    pub job_role: String,
+    #[serde(default)]
+    pub department: String,
     pub ai_mode: String,
     #[serde(default = "default_ai_mode_source")]
     pub ai_mode_source: String,
@@ -497,7 +522,11 @@ fn default_pull_limit() -> i64 {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum ClientFrame {
     Auth {
         token: String,
@@ -546,7 +575,11 @@ fn default_platform() -> String {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum ServerFrame {
     AuthOk {
         user: UserApi,

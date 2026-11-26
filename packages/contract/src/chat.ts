@@ -229,6 +229,10 @@ export const MemberView = z.object({
   ownerId: z.string().nullable().default(null),
   name: z.string(),
   role: MemberRole,
+  /** 成员（或 avatar 的主人）的职位/角色 */
+  jobRole: z.string().default(''),
+  /** 成员（或 avatar 的主人）的部门 */
+  department: z.string().default(''),
   aiMode: AvatarMode,
   aiModeSource: AiModeSource.default('inherit'),
   aiModeUntil: z.string().nullable().default(null),

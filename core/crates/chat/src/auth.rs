@@ -33,14 +33,12 @@ pub async fn send_code(db: &Db, cfg: &Config, email: &str) -> AppResult<AuthCode
         .await
         .unwrap_or(1);
     if count == 1 {
-        let _ = db
-            .redis
-            .clone()
-            .expire::<_, ()>(&rl_key, 3600)
-            .await;
+        let _ = db.redis.clone().expire::<_, ()>(&rl_key, 3600).await;
     }
     if count > CODE_SEND_LIMIT_PER_HOUR {
-        return Err(AppError::RateLimited("验证码发送过于频繁，请 1 小时后再试".into()));
+        return Err(AppError::RateLimited(
+            "验证码发送过于频繁，请 1 小时后再试".into(),
+        ));
     }
 
     let code = ids::new_auth_code();
@@ -61,7 +59,12 @@ pub async fn send_code(db: &Db, cfg: &Config, email: &str) -> AppResult<AuthCode
     })
 }
 
-pub async fn verify_code(db: &Db, _cfg: &Config, email: &str, code: &str) -> AppResult<(String, UserApi, String)> {
+pub async fn verify_code(
+    db: &Db,
+    _cfg: &Config,
+    email: &str,
+    code: &str,
+) -> AppResult<(String, UserApi, String)> {
     let email = normalize(email);
     let code_key = redis_keys::AUTH_CODE(&email);
     let stored: Option<String> = db.redis.clone().get(code_key).await?;
@@ -145,6 +148,31 @@ async fn create_user(db: &Db, email: &str) -> AppResult<User> {
         .fetch_one(&db.pg)
         .await?;
     Ok(user)
+}
+
+/// 更新当前用户的职位/部门（用于群聊接话判断）
+pub async fn update_profile(
+    db: &Db,
+    user_id: &str,
+    job_role: Option<&str>,
+    department: Option<&str>,
+) -> AppResult<UserApi> {
+    let job_role = job_role.map(|s| s.trim().chars().take(40).collect::<String>());
+    let department = department.map(|s| s.trim().chars().take(60).collect::<String>());
+    let user = sqlx::query_as::<_, User>(
+        r#"UPDATE "user"
+           SET job_role = COALESCE($2, job_role),
+               department = COALESCE($3, department)
+           WHERE id = $1
+           RETURNING *"#,
+    )
+    .bind(user_id)
+    .bind(job_role)
+    .bind(department)
+    .fetch_optional(&db.pg)
+    .await?
+    .ok_or_else(|| AppError::not_found("用户不存在"))?;
+    Ok(user.to_api())
 }
 
 pub async fn register_device(

@@ -7,7 +7,11 @@ use crate::model::Message;
 
 /// 进程内 fanout 事件；多节点经 Redis Pub/Sub（core:bus）广播，JSON 序列化传输。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum DomainEvent {
     MessageCreated {
         message: Message,

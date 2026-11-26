@@ -28,11 +28,15 @@ struct FriendRequestRow {
     from_email: String,
     from_name: String,
     from_avatar_url: Option<String>,
+    from_job_role: String,
+    from_department: String,
     from_created_at: chrono::DateTime<chrono::Utc>,
     to_user_id: String,
     to_email: String,
     to_name: String,
     to_avatar_url: Option<String>,
+    to_job_role: String,
+    to_department: String,
     to_created_at: chrono::DateTime<chrono::Utc>,
     message: Option<String>,
     status: String,
@@ -54,6 +58,8 @@ impl FriendRequestRow {
                 email: self.from_email,
                 name: self.from_name,
                 avatar_url: self.from_avatar_url,
+                job_role: self.from_job_role,
+                department: self.from_department,
                 created_at: time::iso(self.from_created_at),
             },
             to_user: UserApi {
@@ -61,6 +67,8 @@ impl FriendRequestRow {
                 email: self.to_email,
                 name: self.to_name,
                 avatar_url: self.to_avatar_url,
+                job_role: self.to_job_role,
+                department: self.to_department,
                 created_at: time::iso(self.to_created_at),
             },
             direction: direction.into(),
@@ -75,9 +83,11 @@ impl FriendRequestRow {
 const SELECT_FRIEND_REQUEST: &str = r#"
     SELECT fr.id,
            fr.from_user_id, fu.email AS from_email, fu.name AS from_name,
-           fu.avatar_url AS from_avatar_url, fu.created_at AS from_created_at,
+           fu.avatar_url AS from_avatar_url, fu.job_role AS from_job_role,
+           fu.department AS from_department, fu.created_at AS from_created_at,
            fr.to_user_id, tu.email AS to_email, tu.name AS to_name,
-           tu.avatar_url AS to_avatar_url, tu.created_at AS to_created_at,
+           tu.avatar_url AS to_avatar_url, tu.job_role AS to_job_role,
+           tu.department AS to_department, tu.created_at AS to_created_at,
            fr.message, fr.status, fr.created_at, fr.resolved_at
     FROM friend_request fr
     JOIN "user" fu ON fu.id = fr.from_user_id
@@ -115,12 +125,11 @@ pub async fn send_request(
         }
     }
 
-    let target: Option<(String,)> = sqlx::query_as(
-        r#"SELECT id FROM "user" WHERE lower(email) = lower($1)"#,
-    )
-    .bind(email)
-    .fetch_optional(&db.pg)
-    .await?;
+    let target: Option<(String,)> =
+        sqlx::query_as(r#"SELECT id FROM "user" WHERE lower(email) = lower($1)"#)
+            .bind(email)
+            .fetch_optional(&db.pg)
+            .await?;
     let to_user_id = target
         .map(|r| r.0)
         .ok_or_else(|| AppError::not_found("该邮箱尚未注册"))?;
@@ -216,12 +225,11 @@ pub async fn accept_request(
     user_id: &str,
     request_id: &str,
 ) -> AppResult<FriendRequestView> {
-    let row: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT from_user_id, to_user_id, status FROM friend_request WHERE id = $1",
-    )
-    .bind(request_id)
-    .fetch_optional(&db.pg)
-    .await?;
+    let row: Option<(String, String, String)> =
+        sqlx::query_as("SELECT from_user_id, to_user_id, status FROM friend_request WHERE id = $1")
+            .bind(request_id)
+            .fetch_optional(&db.pg)
+            .await?;
     let (from_user_id, to_user_id, status) =
         row.ok_or_else(|| AppError::not_found("好友申请不存在"))?;
     if to_user_id != user_id {
@@ -240,13 +248,11 @@ pub async fn accept_request(
     .execute(&mut *tx)
     .await?;
     for (a, b) in [(&from_user_id, &to_user_id), (&to_user_id, &from_user_id)] {
-        sqlx::query(
-            "INSERT INTO contact (user_id, peer_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
-        )
-        .bind(a)
-        .bind(b)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("INSERT INTO contact (user_id, peer_id) VALUES ($1,$2) ON CONFLICT DO NOTHING")
+            .bind(a)
+            .bind(b)
+            .execute(&mut *tx)
+            .await?;
     }
     tx.commit().await?;
 

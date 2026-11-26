@@ -67,7 +67,10 @@ fn message_fixtures_roundtrip() {
 fn content_standalone_roundtrip() {
     let fx = fixtures();
     roundtrip::<Content>(&fx["humanMessage"]["content"], "humanMessage.content");
-    roundtrip::<Content>(&fx["draftCardMessage"]["content"], "draftCardMessage.content");
+    roundtrip::<Content>(
+        &fx["draftCardMessage"]["content"],
+        "draftCardMessage.content",
+    );
 }
 
 #[test]

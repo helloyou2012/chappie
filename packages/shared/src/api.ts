@@ -51,6 +51,7 @@ import type {
   UpdateCalendarItemResponse,
   UpdateContactRequest,
   UpdateContactResponse,
+  UpdateProfileRequest,
   UpdateReceptionRequest,
   UpdateTodoItemRequest,
   UsageDay,
@@ -174,6 +175,7 @@ export const api = {
     s<VerifyCodeResponse>('POST', '/api/v1/auth/code/verify', { email, code }),
   logout: () => s<{ ok: boolean }>('POST', '/api/v1/auth/logout'),
   me: () => s<MeResponse>('GET', '/api/v1/me'),
+  updateProfile: (req: UpdateProfileRequest) => s<MeResponse>('PATCH', '/api/v1/me', req),
 
   // 联系人
   listContacts: () => s<ListContactsResponse>('GET', '/api/v1/contacts'),

@@ -11,11 +11,22 @@ import {
   RiMoonLine,
   RiRobot2Line,
   RiSunLine,
+  RiUserSettingsLine,
 } from '@remixicon/react';
 import type { ComponentType } from 'react';
 import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { UserAvatar } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,7 +34,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import { Logo } from '@/components/ui/logo';
+import { toast } from '@/components/ui/toast';
 import { toggleTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 
@@ -48,6 +61,11 @@ const ITEMS: RailItem[] = [
  */
 export function IconRail() {
   const user = useAuthStore((s) => s.user);
+  const updateProfile = useAuthStore((s) => s.updateProfile);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [jobRole, setJobRole] = useState(user?.jobRole ?? '');
+  const [department, setDepartment] = useState(user?.department ?? '');
+  const [savingProfile, setSavingProfile] = useState(false);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   const [theme, setTheme] = useState<'light' | 'dark'>(
@@ -128,6 +146,15 @@ export function IconRail() {
             <div className="truncate text-[11px] text-ink-tertiary">{user?.email}</div>
           </div>
           <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => {
+              setJobRole(user?.jobRole ?? '');
+              setDepartment(user?.department ?? '');
+              setProfileOpen(true);
+            }}
+          >
+            <RiUserSettingsLine /> 个人资料
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/avatar')}>
             <RiRobot2Line /> 分身控制台
           </DropdownMenuItem>
@@ -141,6 +168,56 @@ export function IconRail() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>个人资料</DialogTitle>
+            <DialogDescription>职位和部门用于分身判断群聊里是否需要替主人接话。</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1 text-[12px] text-ink-secondary">
+              职位
+              <Input
+                value={jobRole}
+                maxLength={40}
+                placeholder="如：产品经理"
+                onChange={(e) => setJobRole(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[12px] text-ink-secondary">
+              部门
+              <Input
+                value={department}
+                maxLength={60}
+                placeholder="如：产品部"
+                onChange={(e) => setDepartment(e.target.value)}
+              />
+            </label>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="ghost" />}>取消</DialogClose>
+            <Button
+              disabled={savingProfile}
+              onClick={() => {
+                setSavingProfile(true);
+                void updateProfile({
+                  jobRole: jobRole.trim(),
+                  department: department.trim(),
+                })
+                  .then(() => {
+                    toast.success('已保存', '职位/部门已更新');
+                    setProfileOpen(false);
+                  })
+                  .catch((e) => toast.error('保存失败', e instanceof Error ? e.message : String(e)))
+                  .finally(() => setSavingProfile(false));
+              }}
+            >
+              {savingProfile ? '保存中…' : '保存'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

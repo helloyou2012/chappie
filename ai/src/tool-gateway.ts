@@ -10,13 +10,13 @@
  */
 
 import type { RiskLevel } from '@chappie/contract';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { fingerprint } from './common/canonical';
 import { dayjs } from './common/datetime';
 import { db } from './common/db';
-import { capabilityGrant, toolData } from './db/schema';
+import { capabilityGrant } from './db/schema';
 import { complete } from './model-gateway';
 import { readToolData, writeToolData } from './tool-data';
 import { calendarIcsTools } from './tools/calendar-ics';

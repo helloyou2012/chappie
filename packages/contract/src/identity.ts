@@ -27,6 +27,10 @@ export const User = z.object({
   email: z.string(),
   name: z.string(),
   avatarUrl: z.string().nullable().default(null),
+  /** 职位/角色，如「产品经理」；用于分身判断群聊接话 */
+  jobRole: z.string().default(''),
+  /** 部门，如「产品部」 */
+  department: z.string().default(''),
   createdAt: z.string(),
 });
 export type User = z.infer<typeof User>;

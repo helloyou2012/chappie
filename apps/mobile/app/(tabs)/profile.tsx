@@ -29,6 +29,7 @@ export default function ProfileScreen() {
   const adminUrl = useAuthStore((s) => s.adminUrl);
   const setServerUrl = useAuthStore((s) => s.setServerUrl);
   const logout = useAuthStore((s) => s.logout);
+  const updateProfile = useAuthStore((s) => s.updateProfile);
   const themeMode = useThemeStore((s) => s.mode);
   const setThemeMode = useThemeStore((s) => s.setMode);
 
@@ -39,10 +40,27 @@ export default function ProfileScreen() {
   const [pushBusy, setPushBusy] = useState(false);
   const [pushStatus, setPushStatus] = useState<string | null>(null);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const [jobRole, setJobRole] = useState(user?.jobRole ?? '');
+  const [department, setDepartment] = useState(user?.department ?? '');
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileNotice, setProfileNotice] = useState<string | null>(null);
 
   const saveServer = async () => {
     await setServerUrl(serverDraft.trim(), adminDraft.trim());
     setServerSaved(true);
+  };
+
+  const saveProfile = async () => {
+    setProfileBusy(true);
+    setProfileNotice(null);
+    try {
+      await updateProfile({ jobRole: jobRole.trim(), department: department.trim() });
+      setProfileNotice('已保存');
+    } catch (e) {
+      setProfileNotice(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setProfileBusy(false);
+    }
   };
 
   const registerPush = async () => {
@@ -77,6 +95,47 @@ export default function ProfileScreen() {
             </Text>
           </View>
           <Badge label="已登录" tone="success" />
+        </Card>
+
+        {/* 个人资料 */}
+        <Card>
+          <Text variant="subtitle">个人资料</Text>
+          <Text variant="caption" tone="muted" style={{ marginTop: 2, marginBottom: 8 }}>
+            职位和部门用于分身判断群聊里是否需要替主人接话。
+          </Text>
+          <Field label="职位">
+            <Input
+              value={jobRole}
+              onChangeText={setJobRole}
+              placeholder="如：产品经理"
+              maxLength={40}
+            />
+          </Field>
+          <Field label="部门" style={{ marginTop: 8 }}>
+            <Input
+              value={department}
+              onChangeText={setDepartment}
+              placeholder="如：产品部"
+              maxLength={60}
+            />
+          </Field>
+          {profileNotice ? (
+            <Text
+              variant="micro"
+              tone={profileNotice === '已保存' ? 'success' : 'danger'}
+              style={{ marginTop: 6 }}
+            >
+              {profileNotice}
+            </Text>
+          ) : null}
+          <Button
+            label="保存资料"
+            variant="outline"
+            size="sm"
+            loading={profileBusy}
+            onPress={() => void saveProfile()}
+            style={{ marginTop: 10 }}
+          />
         </Card>
 
         {/* 更多入口 */}

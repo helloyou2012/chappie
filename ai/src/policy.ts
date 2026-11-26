@@ -351,8 +351,9 @@ export async function evaluatePolicy(p: PolicyInput): Promise<PolicyEval> {
     }
   }
 
-  // 话题冷却（主人刚手动回复过的会话）
-  if (await redisExists(aiKeys.cooldown(p.conv.id, p.ownerId))) {
+  // 话题冷却（主人刚手动回复过的会话）。
+  // 显式 @ 是明确召唤，应该能唤醒分身，否则会出现「@ 了也不回」。
+  if (!p.mentioned && (await redisExists(aiKeys.cooldown(p.conv.id, p.ownerId)))) {
     return deny('话题冷却中（主人刚介入过）', mode, authority, strategy, reception.version);
   }
 

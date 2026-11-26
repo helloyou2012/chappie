@@ -18,9 +18,10 @@ export interface FileRecord {
 }
 
 function sanitizeName(name: string): string {
-  const base = name
+  const base = Array.from(name)
+    .filter((ch) => ch.charCodeAt(0) >= 0x20)
+    .join('')
     .replace(/[/\\]/g, '_')
-    .replace(/[\u0000-\u001f]/g, '')
     .trim();
   return (base || 'file').slice(0, 200);
 }

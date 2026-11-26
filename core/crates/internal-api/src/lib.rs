@@ -22,20 +22,32 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/internal/v1/get-context", post(get_context))
         .route("/internal/v1/get-reception", post(get_reception))
         .route("/internal/v1/set-reception", post(set_reception))
-        .route("/internal/v1/resolve-human-request", post(resolve_human_request))
+        .route(
+            "/internal/v1/resolve-human-request",
+            post(resolve_human_request),
+        )
         .route("/internal/v1/get-presence", post(get_presence))
         .route("/internal/v1/get-devices", post(get_devices))
         .route("/internal/v1/typing", post(typing))
         .route("/internal/v1/push-card", post(push_card))
         .route("/internal/v1/update-card", post(update_card))
         .route("/internal/v1/update-stream-text", post(update_stream_text))
-        .route("/internal/v1/finalize-stream-message", post(finalize_stream_message))
+        .route(
+            "/internal/v1/finalize-stream-message",
+            post(finalize_stream_message),
+        )
         .route("/internal/v1/freeze-avatar", post(freeze_avatar))
         .route("/internal/v1/update-avatar-name", post(update_avatar_name))
         .route("/internal/v1/create-avatar", post(create_avatar))
-        .route("/internal/v1/create-conversation", post(create_conversation))
+        .route(
+            "/internal/v1/create-conversation",
+            post(create_conversation),
+        )
         .route("/internal/v1/ensure-direct", post(ensure_direct))
-        .layer(middleware::from_fn_with_state(state, require_internal_token))
+        .layer(middleware::from_fn_with_state(
+            state,
+            require_internal_token,
+        ))
 }
 
 async fn require_internal_token(
@@ -316,12 +328,16 @@ async fn get_context(
     .await?;
     let members = conversation::get_members(&state.db, &req.conv_id).await?;
     let reception = match req.owner_id.as_deref() {
-        Some(owner) => Some(
-            im_core_chat::reception::get_reception(&state.db.pg, &req.conv_id, owner).await?,
-        ),
+        Some(owner) => {
+            Some(im_core_chat::reception::get_reception(&state.db.pg, &req.conv_id, owner).await?)
+        }
         None => None,
     };
-    Ok(Json(GetContextResp { messages, members, reception }))
+    Ok(Json(GetContextResp {
+        messages,
+        members,
+        reception,
+    }))
 }
 
 async fn get_reception(
@@ -410,13 +426,12 @@ async fn typing(
     State(state): State<AppState>,
     Json(req): Json<TypingReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let member: Option<(String,)> = sqlx::query_as(
-        "SELECT principal_id FROM member WHERE conv_id = $1 AND principal_id = $2",
-    )
-    .bind(&req.conv_id)
-    .bind(&req.principal_id)
-    .fetch_optional(&state.db.pg)
-    .await?;
+    let member: Option<(String,)> =
+        sqlx::query_as("SELECT principal_id FROM member WHERE conv_id = $1 AND principal_id = $2")
+            .bind(&req.conv_id)
+            .bind(&req.principal_id)
+            .fetch_optional(&state.db.pg)
+            .await?;
     if member.is_none() {
         return Err(AppError::not_found("主体不是该会话成员"));
     }
@@ -445,11 +460,10 @@ async fn push_card(
         None => avatar_self_conv(&state, &req.recipient_user_id).await?,
     };
     // 卡片发送者 = 该会话中的 avatar 分身，on_behalf_of = 主人
-    let avatar_principal: Option<(String, Option<String>, String, String)> = sqlx_query_avatar(
-        &state, &conv_id,
-    )
-    .await?;
-    let sender = avatar_principal.ok_or_else(|| AppError::internal_msg("分身会话中未找到分身主体"))?;
+    let avatar_principal: Option<(String, Option<String>, String, String)> =
+        sqlx_query_avatar(&state, &conv_id).await?;
+    let sender =
+        avatar_principal.ok_or_else(|| AppError::internal_msg("分身会话中未找到分身主体"))?;
 
     let msg = message::send_message(
         &state.db,
@@ -466,7 +480,10 @@ async fn push_card(
                 status: sender.3,
             },
             on_behalf_of: Some(req.recipient_user_id.clone()),
-            content: im_core_chat::Content::Card { schema_version: 1, card: req.card },
+            content: im_core_chat::Content::Card {
+                schema_version: 1,
+                card: req.card,
+            },
             mentions: vec![],
             reply_to: None,
             ai_meta: None,
@@ -544,8 +561,7 @@ async fn update_avatar_name(
     State(state): State<AppState>,
     Json(req): Json<UpdateAvatarNameReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    conversation::update_avatar_name(&state.db, &state.events, &req.avatar_id, &req.name)
-        .await?;
+    conversation::update_avatar_name(&state.db, &state.events, &req.avatar_id, &req.name).await?;
     tracing::info!(avatar_id = %req.avatar_id, name = %req.name, "avatar principal name updated");
     Ok(Json(json!({ "ok": true })))
 }
@@ -556,14 +572,12 @@ async fn create_avatar(
     Json(req): Json<CreateAvatarReq>,
 ) -> AppResult<Json<CreateAvatarResp>> {
     let avatar_id = ids::new_avatar_id();
-    sqlx::query(
-        "INSERT INTO principal (id, type, owner_id, name) VALUES ($1, 'avatar', $2, $3)",
-    )
-    .bind(&avatar_id)
-    .bind(&req.owner_id)
-    .bind(&req.name)
-    .execute(&state.db.pg)
-    .await?;
+    sqlx::query("INSERT INTO principal (id, type, owner_id, name) VALUES ($1, 'avatar', $2, $3)")
+        .bind(&avatar_id)
+        .bind(&req.owner_id)
+        .bind(&req.name)
+        .execute(&state.db.pg)
+        .await?;
     Ok(Json(CreateAvatarResp { avatar_id }))
 }
 
@@ -579,8 +593,8 @@ async fn ensure_direct(
     State(state): State<AppState>,
     Json(req): Json<EnsureDirectReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let conv_id = conversation::create_direct(&state.db, &state.events, &req.user_id, &req.peer_id)
-        .await?;
+    let conv_id =
+        conversation::create_direct(&state.db, &state.events, &req.user_id, &req.peer_id).await?;
     Ok(Json(json!({ "convId": conv_id })))
 }
 
@@ -629,8 +643,11 @@ async fn avatar_self_conv(state: &AppState, user_id: &str) -> AppResult<String> 
     .bind(user_id)
     .fetch_optional(&state.db.pg)
     .await?;
-    row.map(|r| r.0)
-        .ok_or_else(|| AppError::internal_msg(format!("用户 {user_id} 的分身会话尚未创建（avatar 未初始化）")))
+    row.map(|r| r.0).ok_or_else(|| {
+        AppError::internal_msg(format!(
+            "用户 {user_id} 的分身会话尚未创建（avatar 未初始化）"
+        ))
+    })
 }
 
 async fn sqlx_query_avatar(

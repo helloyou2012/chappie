@@ -21,11 +21,19 @@ pub struct PresenceApi {
 }
 
 pub async fn set_online(db: &Db, user_id: &str) {
-    let _: Result<(), _> = db.redis.clone().set_ex(redis_keys::PRESENCE(user_id), "1", 90).await;
+    let _: Result<(), _> = db
+        .redis
+        .clone()
+        .set_ex(redis_keys::PRESENCE(user_id), "1", 90)
+        .await;
 }
 
 pub async fn heartbeat(db: &Db, user_id: &str) {
-    let _: Result<(), _> = db.redis.clone().set_ex(redis_keys::PRESENCE(user_id), "1", 90).await;
+    let _: Result<(), _> = db
+        .redis
+        .clone()
+        .set_ex(redis_keys::PRESENCE(user_id), "1", 90)
+        .await;
 }
 
 pub async fn set_offline(db: &Db, user_id: &str) {
@@ -62,7 +70,11 @@ pub async fn get_presences(db: &Db, user_ids: &[String]) -> AppResult<Vec<Presen
         } else {
             None
         };
-        out.push(PresenceApi { user_id: uid.clone(), online, typing_conv_id });
+        out.push(PresenceApi {
+            user_id: uid.clone(),
+            online,
+            typing_conv_id,
+        });
     }
     Ok(out)
 }

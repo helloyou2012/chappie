@@ -55,12 +55,24 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                     uid
                 }
                 Err(e) => {
-                    send_frame(&mut sender, &ServerFrame::AuthError { message: e.to_string() }).await;
+                    send_frame(
+                        &mut sender,
+                        &ServerFrame::AuthError {
+                            message: e.to_string(),
+                        },
+                    )
+                    .await;
                     return;
                 }
             },
             _ => {
-                send_frame(&mut sender, &ServerFrame::AuthError { message: "首帧必须是 auth".into() }).await;
+                send_frame(
+                    &mut sender,
+                    &ServerFrame::AuthError {
+                        message: "首帧必须是 auth".into(),
+                    },
+                )
+                .await;
                 return;
             }
         },
@@ -167,7 +179,13 @@ async fn handle_client_frame(
             send_frame(sender, &ServerFrame::HeartbeatAck { ts }).await;
             Ok(())
         }
-        ClientFrame::SendMessage { client_msg_id, conv_id, content, mentions, reply_to } => {
+        ClientFrame::SendMessage {
+            client_msg_id,
+            conv_id,
+            content,
+            mentions,
+            reply_to,
+        } => {
             let ack_client_msg_id = client_msg_id.clone();
             let sender_principal = rest::get_principal(state, user_id).await?;
             let msg = message::send_message(
@@ -226,20 +244,27 @@ async fn handle_client_frame(
             message::recall_message(&state.db, &state.events, user_id, &msg_id).await?;
             Ok(())
         }
-        ClientFrame::PullMessages { conv_id, from_seq, limit } => {
+        ClientFrame::PullMessages {
+            conv_id,
+            from_seq,
+            limit,
+        } => {
             message::ensure_member(&state.db.pg, &conv_id, user_id).await?;
-            let messages =
-                message::pull_range(
-                    &state.db.pg,
-                    &conv_id,
-                    from_seq,
-                    limit.clamp(1, 200),
-                    Some(user_id),
-                )
-                .await?;
+            let messages = message::pull_range(
+                &state.db.pg,
+                &conv_id,
+                from_seq,
+                limit.clamp(1, 200),
+                Some(user_id),
+            )
+            .await?;
             send_frame(
                 sender,
-                &ServerFrame::MessagesBatch { conv_id, messages, has_more: false },
+                &ServerFrame::MessagesBatch {
+                    conv_id,
+                    messages,
+                    has_more: false,
+                },
             )
             .await;
             Ok(())

@@ -57,7 +57,9 @@ async fn main() -> anyhow::Result<()> {
     let internal_addr = format!("127.0.0.1:{}", cfg.internal_port);
     let internal_listener = tokio::net::TcpListener::bind(&internal_addr).await?;
 
-    tracing::info!("🚀 im-core 已启动: gateway http://{gateway_addr} | internal http://{internal_addr}");
+    tracing::info!(
+        "🚀 im-core 已启动: gateway http://{gateway_addr} | internal http://{internal_addr}"
+    );
 
     let gw = axum::serve(gateway_listener, app).with_graceful_shutdown(shutdown_signal());
     let int = axum::serve(internal_listener, internal);

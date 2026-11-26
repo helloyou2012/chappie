@@ -119,6 +119,15 @@ push：internal.pushCard 成功后的唯一推送入口（Expo Push）
 - **不确定即转人**：资金/法律场景直接转交；auto 档置信度 < 0.7 自动转草稿。
 - **记忆**：按对话对象隔离，敏感记忆不用于对外对话；「纠正」会写入偏好记忆。
 - **审计**：`audit_log` 追加式 + 哈希链；关键入口统一脱敏错误。
+- **意图/接话决策**：intent 仍由 `ai/src/classifier.ts` 规则判断。工作群角色接话支持
+  `AI_ROLE_MODEL=linear`（`ai/src/linear-pairwise.ts`，CPU 无服务）和 `mmbert`
+  （`training/train_pairwise.py` → int8 ONNX → `classifier` `/rank`）；两者训练/验证/测试
+  数据均由大模型生成（群成员、角色/部门、上下文、观察者 reply/silent）。只对工作群、
+  未 @ 的 auto/direct 候选打分，超过校准 margin 才允许最匹配的分身回复；纯通知/公告先由
+  回应线索门控静默。模型缺失/异常回退 `role-match.ts` 规则。
+- **群聊 @**：Web 候选同时列真人与分身；`ai/src/mentions.ts` 对正文里手打的 @昵称兜底补
+  `mentions`。同名真人与分身并存时，优先发送者自己的分身、其次任意分身；显式选中真人则
+  保持真人 mention，AI 不抢答。显式 @ 还可穿透接管后的 15 分钟话题冷却（`policy.ts`）。
 - **会话延续（P1）**：`ai/src/engagement.ts` 基于最近 10 分钟消息推导「回复链 / 同发送者窗口」，
   路由新增 `reply` / `continuation` 触发来源；最多 5 次分身回复，其他真人插话或 @ 他人即结束；
   纯寒暄（“好的”“嗯”等）不延续。

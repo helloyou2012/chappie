@@ -19,6 +19,8 @@ export const fixtureUser: User = {
   email: 'alice@demo.dev',
   name: 'Alice',
   avatarUrl: null,
+  jobRole: '产品经理',
+  department: '产品部',
   createdAt: '2026-11-01T08:00:00.000Z',
 };
 
@@ -353,6 +355,8 @@ export const fixtureFriendRequest: FriendRequestView = {
     email: 'bob@demo.dev',
     name: 'Bob',
     avatarUrl: null,
+    jobRole: '后端开发',
+    department: '研发部',
     createdAt: '2026-11-01T08:00:00.000Z',
   },
   direction: 'outgoing',

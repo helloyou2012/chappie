@@ -41,8 +41,12 @@ pub async fn run_redis_bus(state: AppState) -> anyhow::Result<()> {
     pubsub.subscribe(im_core_store::redis_keys::BUS).await?;
     tracing::info!("redis bus subscribed (node={})", state.node_id);
     while let Some(msg) = pubsub.on_message().next().await {
-        let Ok(payload) = msg.get_payload::<String>() else { continue };
-        let Ok(bus) = serde_json::from_str::<BusMessage>(&payload) else { continue };
+        let Ok(payload) = msg.get_payload::<String>() else {
+            continue;
+        };
+        let Ok(bus) = serde_json::from_str::<BusMessage>(&payload) else {
+            continue;
+        };
         if bus.origin == state.node_id {
             continue;
         }
@@ -53,20 +57,50 @@ pub async fn run_redis_bus(state: AppState) -> anyhow::Result<()> {
 
 fn dispatch(state: &AppState, event: &DomainEvent) {
     match event {
-        DomainEvent::MessageCreated { message, recipients } => {
-            push(state, recipients, &ServerFrame::MessageCreated { message: message.clone() });
-        }
-        DomainEvent::MessageRecalled { conv_id, msg_id, recipients } => {
+        DomainEvent::MessageCreated {
+            message,
+            recipients,
+        } => {
             push(
                 state,
                 recipients,
-                &ServerFrame::MessageRecalled { conv_id: conv_id.clone(), msg_id: msg_id.clone() },
+                &ServerFrame::MessageCreated {
+                    message: message.clone(),
+                },
             );
         }
-        DomainEvent::MessageUpdated { message, recipients } => {
-            push(state, recipients, &ServerFrame::MessageUpdated { message: message.clone() });
+        DomainEvent::MessageRecalled {
+            conv_id,
+            msg_id,
+            recipients,
+        } => {
+            push(
+                state,
+                recipients,
+                &ServerFrame::MessageRecalled {
+                    conv_id: conv_id.clone(),
+                    msg_id: msg_id.clone(),
+                },
+            );
         }
-        DomainEvent::Typing { conv_id, principal_id, until_ts, recipients } => {
+        DomainEvent::MessageUpdated {
+            message,
+            recipients,
+        } => {
+            push(
+                state,
+                recipients,
+                &ServerFrame::MessageUpdated {
+                    message: message.clone(),
+                },
+            );
+        }
+        DomainEvent::Typing {
+            conv_id,
+            principal_id,
+            until_ts,
+            recipients,
+        } => {
             push(
                 state,
                 recipients,
@@ -77,14 +111,26 @@ fn dispatch(state: &AppState, event: &DomainEvent) {
                 },
             );
         }
-        DomainEvent::Presence { principal_id, online, recipients } => {
+        DomainEvent::Presence {
+            principal_id,
+            online,
+            recipients,
+        } => {
             push(
                 state,
                 recipients,
-                &ServerFrame::Presence { principal_id: principal_id.clone(), online: *online },
+                &ServerFrame::Presence {
+                    principal_id: principal_id.clone(),
+                    online: *online,
+                },
             );
         }
-        DomainEvent::ReadSync { conv_id, principal_id, last_read_seq, recipients } => {
+        DomainEvent::ReadSync {
+            conv_id,
+            principal_id,
+            last_read_seq,
+            recipients,
+        } => {
             push(
                 state,
                 recipients,

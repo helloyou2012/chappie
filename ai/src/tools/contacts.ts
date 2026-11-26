@@ -4,7 +4,6 @@
  */
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { config } from '../common/config';
 import { db } from '../common/db';
 import { internal } from '../common/internal';
 import { newId } from '../common/log';

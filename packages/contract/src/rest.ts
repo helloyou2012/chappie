@@ -37,6 +37,12 @@ export const VerifyCodeResponse = z.object({
 
 export const MeResponse = z.object({ user: User });
 
+export const UpdateProfileRequest = z.object({
+  jobRole: z.string().max(40).optional(),
+  department: z.string().max(60).optional(),
+});
+export type UpdateProfileRequest = z.infer<typeof UpdateProfileRequest>;
+
 export const CreateConversationRequest = z
   .object({
     type: z.enum(['direct', 'group']),

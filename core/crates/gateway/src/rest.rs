@@ -27,27 +27,60 @@ pub fn public_routes() -> Router<AppState> {
 
 pub fn protected_routes(state: AppState) -> Router<AppState> {
     Router::new()
-        .route("/api/v1/me", get(me))
+        .route("/api/v1/me", get(me).patch(update_me))
         .route("/api/v1/contacts", get(list_contacts).post(add_contact))
         .route(
             "/api/v1/contacts/{peer_id}",
             delete(remove_contact).patch(update_contact),
         )
-        .route("/api/v1/friend-requests", get(list_friend_requests).post(send_friend_request))
-        .route("/api/v1/friend-requests/{id}/accept", post(accept_friend_request))
-        .route("/api/v1/friend-requests/{id}/reject", post(reject_friend_request))
-        .route("/api/v1/friend-requests/{id}/cancel", post(cancel_friend_request))
-        .route("/api/v1/conversations", get(list_conversations).post(create_conversation))
+        .route(
+            "/api/v1/friend-requests",
+            get(list_friend_requests).post(send_friend_request),
+        )
+        .route(
+            "/api/v1/friend-requests/{id}/accept",
+            post(accept_friend_request),
+        )
+        .route(
+            "/api/v1/friend-requests/{id}/reject",
+            post(reject_friend_request),
+        )
+        .route(
+            "/api/v1/friend-requests/{id}/cancel",
+            post(cancel_friend_request),
+        )
+        .route(
+            "/api/v1/conversations",
+            get(list_conversations).post(create_conversation),
+        )
         .route("/api/v1/conversations/{id}", delete(dissolve_group))
-        .route("/api/v1/conversations/{id}/transfer-owner", post(transfer_owner))
+        .route(
+            "/api/v1/conversations/{id}/transfer-owner",
+            post(transfer_owner),
+        )
         .route("/api/v1/conversations/{id}/messages", get(list_messages))
-        .route("/api/v1/conversations/{id}/members", get(list_members).post(add_members))
-        .route("/api/v1/conversations/{id}/members/{principal_id}", delete(remove_member))
-        .route("/api/v1/conversations/{id}/settings", axum::routing::patch(update_settings))
+        .route(
+            "/api/v1/conversations/{id}/members",
+            get(list_members).post(add_members),
+        )
+        .route(
+            "/api/v1/conversations/{id}/members/{principal_id}",
+            delete(remove_member),
+        )
+        .route(
+            "/api/v1/conversations/{id}/settings",
+            axum::routing::patch(update_settings),
+        )
         .route("/api/v1/conversations/{id}/takeover", post(takeover))
         .route("/api/v1/conversations/{id}/release", post(release))
-        .route("/api/v1/conversations/{id}/reception", get(get_reception).put(update_reception))
-        .route("/api/v1/conversations/{id}/request-human", post(request_human))
+        .route(
+            "/api/v1/conversations/{id}/reception",
+            get(get_reception).put(update_reception),
+        )
+        .route(
+            "/api/v1/conversations/{id}/request-human",
+            post(request_human),
+        )
         .route(
             "/api/v1/reception/delegations",
             get(list_delegations).post(upsert_delegation),
@@ -87,12 +120,17 @@ pub struct SendCodeReq {
     email: String,
 }
 
-async fn send_code(State(state): State<AppState>, Json(req): Json<SendCodeReq>) -> AppResult<Json<serde_json::Value>> {
+async fn send_code(
+    State(state): State<AppState>,
+    Json(req): Json<SendCodeReq>,
+) -> AppResult<Json<serde_json::Value>> {
     if !req.email.contains('@') || req.email.len() < 5 {
         return Err(AppError::bad("邮箱格式不正确"));
     }
     let r = auth::send_code(&state.db, &state.cfg, &req.email).await?;
-    Ok(Json(json!({ "devCode": r.dev_code, "expiresInSeconds": r.expires_in })))
+    Ok(Json(
+        json!({ "devCode": r.dev_code, "expiresInSeconds": r.expires_in }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -101,9 +139,15 @@ pub struct VerifyCodeReq {
     code: String,
 }
 
-async fn verify_code(State(state): State<AppState>, Json(req): Json<VerifyCodeReq>) -> AppResult<Json<serde_json::Value>> {
-    let (token, user, expires_at) = auth::verify_code(&state.db, &state.cfg, &req.email, &req.code).await?;
-    Ok(Json(json!({ "token": token, "user": user, "expiresAt": expires_at })))
+async fn verify_code(
+    State(state): State<AppState>,
+    Json(req): Json<VerifyCodeReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    let (token, user, expires_at) =
+        auth::verify_code(&state.db, &state.cfg, &req.email, &req.code).await?;
+    Ok(Json(
+        json!({ "token": token, "user": user, "expiresAt": expires_at }),
+    ))
 }
 
 async fn logout(
@@ -126,6 +170,28 @@ async fn me(
 ) -> AppResult<Json<serde_json::Value>> {
     let user = get_user(&state, &user.0).await?;
     Ok(Json(json!({ "user": user.to_api() })))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProfileReq {
+    job_role: Option<String>,
+    department: Option<String>,
+}
+
+async fn update_me(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
+    Json(req): Json<UpdateProfileReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    let user = im_core_chat::auth::update_profile(
+        &state.db,
+        &user.0,
+        req.job_role.as_deref(),
+        req.department.as_deref(),
+    )
+    .await?;
+    Ok(Json(json!({ "user": user })))
 }
 
 /// 联系人列表（取代旧的全站目录：用户只看得到自己添加的联系人）
@@ -313,14 +379,28 @@ async fn create_conversation(
 ) -> AppResult<Json<serde_json::Value>> {
     let conv_id = match req.conv_type.as_str() {
         "direct" => {
-            let peer = req.member_user_ids.first().ok_or_else(|| AppError::bad("direct 会话需要 1 个对方成员"))?;
+            let peer = req
+                .member_user_ids
+                .first()
+                .ok_or_else(|| AppError::bad("direct 会话需要 1 个对方成员"))?;
             conversation::create_direct(&state.db, &state.events, &user.0, peer).await?
         }
-        "group" => conversation::create_group(&state.db, &state.events, &user.0, &req.member_user_ids, req.title.as_deref()).await?,
+        "group" => {
+            conversation::create_group(
+                &state.db,
+                &state.events,
+                &user.0,
+                &req.member_user_ids,
+                req.title.as_deref(),
+            )
+            .await?
+        }
         other => return Err(AppError::bad(format!("未知的会话类型: {other}"))),
     };
     let views = conversation::list_conversations(&state.db, &user.0).await?;
-    let view = views.into_iter().find(|v| v.conversation.id == conv_id)
+    let view = views
+        .into_iter()
+        .find(|v| v.conversation.id == conv_id)
         .ok_or_else(|| AppError::internal_msg("会话创建后未能在列表中找到"))?;
     Ok(Json(json!({ "view": view })))
 }
@@ -393,14 +473,8 @@ async fn transfer_owner(
     Path(id): Path<String>,
     Json(req): Json<TransferOwnerReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    conversation::transfer_owner(
-        &state.db,
-        &state.events,
-        &user.0,
-        &id,
-        &req.target_user_id,
-    )
-    .await?;
+    conversation::transfer_owner(&state.db, &state.events, &user.0, &id, &req.target_user_id)
+        .await?;
     let members = conversation::get_members(&state.db, &id).await?;
     Ok(Json(json!({ "ok": true, "members": members })))
 }
@@ -523,9 +597,14 @@ async fn request_human(
     Path(id): Path<String>,
     Json(req): Json<RequestHumanReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let request_id =
-        im_core_chat::reception::request_human(&state.db, &state.events, &user.0, &id, req.reason.as_deref())
-            .await?;
+    let request_id = im_core_chat::reception::request_human(
+        &state.db,
+        &state.events,
+        &user.0,
+        &id,
+        req.reason.as_deref(),
+    )
+    .await?;
     Ok(Json(json!({
         "ok": true,
         "requestId": request_id,
@@ -555,8 +634,7 @@ async fn list_delegations(
     State(state): State<AppState>,
     axum::Extension(user): axum::Extension<CurrentUser>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let delegations =
-        im_core_chat::reception::list_delegations(&state.db.pg, &user.0).await?;
+    let delegations = im_core_chat::reception::list_delegations(&state.db.pg, &user.0).await?;
     Ok(Json(json!({ "delegations": delegations })))
 }
 
@@ -571,8 +649,10 @@ async fn upsert_delegation(
     if !["human", "avatar", "paused"].contains(&req.state.as_str()) {
         return Err(AppError::bad("state 不合法"));
     }
-    if !["summon", "assist", "full", "screen", "decline", "escalate", "silent", "off"]
-        .contains(&req.strategy.as_str())
+    if ![
+        "summon", "assist", "full", "screen", "decline", "escalate", "silent", "off",
+    ]
+    .contains(&req.strategy.as_str())
     {
         return Err(AppError::bad("strategy 不合法"));
     }
@@ -678,7 +758,15 @@ async fn submit_feedback(
     Path(msg_id): Path<String>,
     Json(req): Json<FeedbackReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    message::submit_feedback(&state.db, &user.0, &msg_id, &req.feedback_type, req.corrected_text, req.reason).await?;
+    message::submit_feedback(
+        &state.db,
+        &user.0,
+        &msg_id,
+        &req.feedback_type,
+        req.corrected_text,
+        req.reason,
+    )
+    .await?;
     Ok(Json(json!({ "ok": true })))
 }
 

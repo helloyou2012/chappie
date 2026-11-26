@@ -66,11 +66,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const filtered =
     mentionQuery === null
       ? []
-      : candidates.filter(
-          (c) =>
-            c.name.toLowerCase().includes(mentionQuery.toLowerCase()) ||
-            (mentionQuery === '' && c.principalType === 'avatar'),
-        );
+      : candidates
+          .filter((c) => c.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+          .sort(
+            (a, b) => Number(b.principalType === 'avatar') - Number(a.principalType === 'avatar'),
+          );
 
   const emitTyping = () => {
     const now = Date.now();
@@ -144,6 +144,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       toast.error('连接未就绪', '正在重新连接，请稍候再试');
       return;
     }
+    // 删掉 @昵称文本后，不应继续带上旧的 mention id
+    const activeMentions = mentions.filter((id) => {
+      const member = members?.find((m) => m.principalId === id);
+      return !member || value.toLowerCase().includes(`@${member.name.toLowerCase()}`);
+    });
     sendingRef.current = true;
     lastSentAtRef.current = Date.now();
     setUploading(true);
@@ -175,7 +180,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         clientMsgId: textId,
         convId,
         content: { type: 'text', schemaVersion: 1, text: value },
-        mentions,
+        mentions: activeMentions,
         replyTo: replyToId,
         createdAt,
         status: 'sending',
@@ -224,7 +229,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         ws.sendMessage(
           convId,
           { type: 'text', schemaVersion: 1, text: value },
-          { clientMsgId: textId, mentions, replyTo: replyToId },
+          { clientMsgId: textId, mentions: activeMentions, replyTo: replyToId },
         );
       }
     } catch (e) {
@@ -300,7 +305,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           <div className="flex flex-wrap gap-2 px-3 pt-2">
             {attachments.map((att, i) => (
               <div
-                key={`${att.file.name}-${i}`}
+                key={`${att.file.name}-${att.file.size}-${att.file.lastModified}`}
                 className="flex items-center gap-2 rounded-lg border border-line bg-surface-veil py-1 pl-1 pr-1.5"
               >
                 {att.preview ? (

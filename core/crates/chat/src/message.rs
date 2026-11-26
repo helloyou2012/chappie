@@ -59,7 +59,12 @@ pub async fn outbox_insert(
 // 发送（单写者路径：人类 WS 与分身内部 API 最终都走这里）
 // ---------------------------------------------------------------------------
 
-pub async fn send_message(db: &Db, cfg: &Config, events: &EventTx, p: SendParams) -> AppResult<Message> {
+pub async fn send_message(
+    db: &Db,
+    cfg: &Config,
+    events: &EventTx,
+    p: SendParams,
+) -> AppResult<Message> {
     if p.streaming && p.sender.principal_type != "avatar" {
         return Err(AppError::bad("只有分身消息支持流式生成"));
     }
@@ -111,8 +116,7 @@ pub async fn send_message(db: &Db, cfg: &Config, events: &EventTx, p: SendParams
             .bind(&p.conv_id)
             .fetch_optional(&mut *tx)
             .await?;
-    let (conv_type, system_tag) =
-        conv_meta.ok_or_else(|| AppError::not_found("会话不存在"))?;
+    let (conv_type, system_tag) = conv_meta.ok_or_else(|| AppError::not_found("会话不存在"))?;
 
     if p.sender.principal_type == "avatar" {
         let owner_id = p
@@ -217,7 +221,10 @@ pub async fn send_message(db: &Db, cfg: &Config, events: &EventTx, p: SendParams
     } else {
         conversation_recipients(&db.pg, &p.conv_id).await?
     };
-    let _ = events.send(DomainEvent::MessageCreated { message: message.clone(), recipients });
+    let _ = events.send(DomainEvent::MessageCreated {
+        message: message.clone(),
+        recipients,
+    });
     Ok(message)
 }
 
@@ -272,7 +279,10 @@ pub async fn history(
     .fetch_all(pg)
     .await?;
     let has_more = rows.len() == limit as usize;
-    let mut messages = rows.into_iter().map(Message::try_from).collect::<AppResult<Vec<_>>>()?;
+    let mut messages = rows
+        .into_iter()
+        .map(Message::try_from)
+        .collect::<AppResult<Vec<_>>>()?;
     messages.reverse();
     for msg in &mut messages {
         strip_owner_meta_for_viewer(msg, viewer_id);
@@ -389,7 +399,10 @@ pub async fn update_stream_text(
     .ok_or_else(|| AppError::bad("消息不在流式生成状态或已撤回"))?;
     let updated: Message = updated_row.try_into()?;
     let recipients = owner_recipients(updated.on_behalf_of.as_deref(), None);
-    let _ = events.send(DomainEvent::MessageUpdated { message: updated.clone(), recipients });
+    let _ = events.send(DomainEvent::MessageUpdated {
+        message: updated.clone(),
+        recipients,
+    });
     Ok(updated)
 }
 
@@ -513,7 +526,12 @@ pub async fn finalize_stream_message(
 // 撤回 / 已读 / 卡片 / 反馈
 // ---------------------------------------------------------------------------
 
-pub async fn recall_message(db: &Db, events: &EventTx, actor_id: &str, msg_id: &str) -> AppResult<()> {
+pub async fn recall_message(
+    db: &Db,
+    events: &EventTx,
+    actor_id: &str,
+    msg_id: &str,
+) -> AppResult<()> {
     let row = get_message(&db.pg, msg_id).await?;
     if row.recalled {
         return Ok(());
@@ -521,7 +539,9 @@ pub async fn recall_message(db: &Db, events: &EventTx, actor_id: &str, msg_id: &
     // 本人，或分身消息的主人（主人可撤回分身的代发）
     let allowed = row.sender_id == actor_id || row.on_behalf_of.as_deref() == Some(actor_id);
     if !allowed {
-        return Err(AppError::forbidden("只能撤回自己的消息（或自己分身代发的消息）"));
+        return Err(AppError::forbidden(
+            "只能撤回自己的消息（或自己分身代发的消息）",
+        ));
     }
     ensure_member(&db.pg, &row.conv_id, actor_id).await?;
 
@@ -543,7 +563,13 @@ pub async fn recall_message(db: &Db, events: &EventTx, actor_id: &str, msg_id: &
     Ok(())
 }
 
-pub async fn mark_read(db: &Db, events: &EventTx, principal_id: &str, conv_id: &str, seq: i64) -> AppResult<()> {
+pub async fn mark_read(
+    db: &Db,
+    events: &EventTx,
+    principal_id: &str,
+    conv_id: &str,
+    seq: i64,
+) -> AppResult<()> {
     ensure_member(&db.pg, conv_id, principal_id).await?;
     sqlx::query(
         "UPDATE member SET last_read_seq = GREATEST(last_read_seq, $3)
@@ -638,9 +664,17 @@ pub async fn submit_feedback(
 }
 
 /// 更新卡片内容（任务进度等；仅内部 API 调用）
-pub async fn update_card_content(db: &Db, events: &EventTx, msg_id: &str, card: CardPayload) -> AppResult<Message> {
+pub async fn update_card_content(
+    db: &Db,
+    events: &EventTx,
+    msg_id: &str,
+    card: CardPayload,
+) -> AppResult<Message> {
     let row = get_message(&db.pg, msg_id).await?;
-    let content = Content::Card { schema_version: 1, card };
+    let content = Content::Card {
+        schema_version: 1,
+        card,
+    };
     let content_json = serde_json::to_value(&content)?;
     sqlx::query("UPDATE message SET content = $2 WHERE msg_id = $1")
         .bind(msg_id)
@@ -649,7 +683,10 @@ pub async fn update_card_content(db: &Db, events: &EventTx, msg_id: &str, card: 
         .await?;
     let updated: Message = get_message(&db.pg, msg_id).await?.try_into()?;
     let recipients = conversation_recipients(&db.pg, &row.conv_id).await?;
-    let _ = events.send(DomainEvent::MessageUpdated { message: updated.clone(), recipients });
+    let _ = events.send(DomainEvent::MessageUpdated {
+        message: updated.clone(),
+        recipients,
+    });
     Ok(updated)
 }
 
@@ -665,7 +702,10 @@ pub struct MemberSnapshot {
     pub owner_id: Option<String>,
 }
 
-async fn members_snapshot(tx: &mut Transaction<'_, Postgres>, conv_id: &str) -> AppResult<Vec<MemberSnapshot>> {
+async fn members_snapshot(
+    tx: &mut Transaction<'_, Postgres>,
+    conv_id: &str,
+) -> AppResult<Vec<MemberSnapshot>> {
     let rows = sqlx::query_as::<_, MemberSnapshot>(
         "SELECT m.principal_id, p.type AS principal_type, p.owner_id
          FROM member m JOIN principal p ON p.id = m.principal_id
@@ -728,7 +768,10 @@ pub async fn send_system_message(
             conv_id: conv_id.to_string(),
             sender: system,
             on_behalf_of: None,
-            content: Content::Text { schema_version: 1, text: text.into() },
+            content: Content::Text {
+                schema_version: 1,
+                text: text.into(),
+            },
             mentions: vec![],
             reply_to: None,
             ai_meta: None,
@@ -742,7 +785,12 @@ pub async fn send_system_message(
 
 /// 供 Executor 抽象使用的插入（测试与内部工具）
 #[allow(dead_code)]
-pub async fn raw_outbox_insert<'e, E>(executor: E, topic: &str, key: &str, payload: &serde_json::Value) -> AppResult<()>
+pub async fn raw_outbox_insert<'e, E>(
+    executor: E,
+    topic: &str,
+    key: &str,
+    payload: &serde_json::Value,
+) -> AppResult<()>
 where
     E: Executor<'e, Database = Postgres>,
 {

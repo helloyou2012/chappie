@@ -57,7 +57,12 @@ impl ConnectionRegistry {
     }
 
     pub fn online_count(&self, user_id: &str) -> usize {
-        self.inner.read().unwrap().get(user_id).map(|l| l.len()).unwrap_or(0)
+        self.inner
+            .read()
+            .unwrap()
+            .get(user_id)
+            .map(|l| l.len())
+            .unwrap_or(0)
     }
 }
 
