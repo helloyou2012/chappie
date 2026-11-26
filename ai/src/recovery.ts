@@ -343,6 +343,8 @@ async function recoverFromCheckpoint(
         tool: decision.tool,
         args: decision.args,
       });
+      // 与主循环一致：挂起审批前定稿流式消息，避免长期停在「生成中」
+      await finalizeStreamOwnerOnly(task.id, '等待主人审批');
       await db
         .update(agentTask)
         .set({
@@ -357,6 +359,7 @@ async function recoverFromCheckpoint(
             convId: task.triggerConvId,
             confidence: 0.75,
             checkpoint: null,
+            streamMsgId: null,
           })}::jsonb`,
           lockedBy: null,
           leaseUntil: null,

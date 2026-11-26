@@ -1044,6 +1044,8 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
               convId: input.convId,
               confidence,
               checkpoint: null,
+              // 当前流式消息已定稿，续跑时另开一条，避免更新已定稿消息
+              streamMsgId: null,
               activity: streamer.currentActivity,
               thinking: streamer.currentThinking,
             })}::jsonb`,
@@ -1068,6 +1070,33 @@ export async function runAgent(input: AgentInput): Promise<AgentOutcome> {
           decision.tool.risk,
         );
         await updateTaskStats(input.taskId, costUsd, tokensUsed);
+        // 等待审批期间不能把流式消息一直挂在「生成中」：定稿并写明原因，
+        // 审批通过后的续跑会另发一条最终回复（定稿后无法再复用同一条流式消息）。
+        // 草稿档保持仅主人可见，避免半自动产物对外发出。
+        const visible = input.mode !== 'draft';
+        const note = visible
+          ? `这个操作需要 ${ownerName} 本人确认一下，确认后我才能继续～`
+          : `需要 ${ownerName} 确认「${decision.tool.name}」后我才能继续，确认请求已推送。`;
+        const finished = await streamer.finalize(
+          note,
+          visible,
+          buildStreamAiMeta({ risk: maxRiskSeen, confidence, explanation: null }),
+        );
+        // 流式不可用（写入失败等）时补一条普通消息，避免对方干等没有下文
+        if (!finished && visible && !isSelfChat) {
+          await deliverText(
+            input,
+            note,
+            {
+              decision: 'reply',
+              reason: '高风险操作等待主人审批',
+              confidence,
+              toolsUsed,
+              memoriesUsed: [],
+            },
+            maxRiskSeen,
+          ).catch(() => undefined);
+        }
         return {
           status: 'waiting_approval',
           approvalId: approval.approvalId,
