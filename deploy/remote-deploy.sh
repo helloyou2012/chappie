@@ -19,24 +19,33 @@ BUN=/home/ubuntu/.bun/bin/bun
 echo "==> deploy start $(date -u +%FT%TZ)"
 test -x "$SRC/bin/im-core" || { echo "缺少 bin/im-core"; exit 1; }
 test -f "$SRC/ai/dist/index.js" || { echo "缺少 ai/dist/index.js"; exit 1; }
-test -x "$SRC/bin/chappie-classifier" || { echo "缺少 bin/chappie-classifier"; exit 1; }
-test -f "$SRC/classifier/model/model.onnx" || { echo "缺少 classifier/model/model.onnx"; exit 1; }
-test -f "$SRC/classifier/model/tokenizer.json" || { echo "缺少 classifier/model/tokenizer.json"; exit 1; }
+test -f "$SRC/ai/dist/models/linear-pairwise.json" || { echo "缺少 ai/dist/models/linear-pairwise.json"; exit 1; }
+
+CLASSIFIER_PRESENT=0
+if [ -x "$SRC/bin/chappie-classifier" ] \
+  && [ -f "$SRC/classifier/model/model.onnx" ] \
+  && [ -f "$SRC/classifier/model/tokenizer.json" ] \
+  && [ -f "$SRC/classifier/model/labels.json" ] \
+  && [ -f "$SRC/classifier/model/margin.json" ]; then
+  CLASSIFIER_PRESENT=1
+fi
 
 sudo mkdir -p "$ROOT/bin" "$ROOT/web" "$ROOT/ai/dist" "$ROOT/ai/migrations" "$ROOT/classifier/model"
 sudo install -m 755 "$SRC/bin/im-core" "$ROOT/bin/im-core"
-sudo install -m 755 "$SRC/bin/chappie-classifier" "$ROOT/bin/chappie-classifier"
+if [ "$CLASSIFIER_PRESENT" = 1 ]; then
+  sudo install -m 755 "$SRC/bin/chappie-classifier" "$ROOT/bin/chappie-classifier"
+fi
 sudo rsync -a --delete "$SRC/web/" "$ROOT/web/"
 sudo rsync -a --delete "$SRC/ai/dist/" "$ROOT/ai/dist/"
 sudo rsync -a --delete "$SRC/ai/migrations/" "$ROOT/ai/migrations/"
-sudo chown -R ubuntu:ubuntu "$ROOT/bin" "$ROOT/web" "$ROOT/ai"
+sudo chown -R ubuntu:ubuntu "$ROOT/bin" "$ROOT/web" "$ROOT/ai" "$ROOT/classifier"
 
 # 数据库迁移（幂等；新增迁移随产物发布，先迁移后重启）
 "$BUN" --env-file="$ROOT/.env" "$ROOT/ai/dist/migrate.js"
 
 MEM_MB=$(free -m | awk '/^Mem:/{print $2}')
 CLASSIFIER_ENABLED=0
-if [ "${MEM_MB:-0}" -ge 1800 ]; then
+if [ "$CLASSIFIER_PRESENT" = 1 ] && [ "${MEM_MB:-0}" -ge 1800 ]; then
   CLASSIFIER_ENABLED=1
   sudo rsync -a --delete "$SRC/classifier/model/" "$ROOT/classifier/model/"
   sudo install -m 644 "$SRC/chappie-classifier.service" /etc/systemd/system/chappie-classifier.service
@@ -55,8 +64,11 @@ if [ "${MEM_MB:-0}" -ge 1800 ]; then
     sudo journalctl -u chappie-classifier -n 40 --no-pager || true
     exit 1
   fi
+elif [ "$CLASSIFIER_PRESENT" = 1 ]; then
+  echo "WARN: 服务器内存 ${MEM_MB:-?}MB < 1800MB，跳过 classifier；请使用 AI_ROLE_MODEL=linear"
+  sudo systemctl disable --now chappie-classifier 2>/dev/null || true
 else
-  echo "WARN: 服务器内存 ${MEM_MB:-?}MB < 1800MB，跳过 classifier；请在 .env 使用 AI_ROLE_MODEL=linear"
+  echo "INFO: 未打包 classifier，使用 AI_ROLE_MODEL=linear"
   sudo systemctl disable --now chappie-classifier 2>/dev/null || true
 fi
 
@@ -70,11 +82,14 @@ done
 systemctl is-active chappie-core chappie-ai
 if [ "$CLASSIFIER_ENABLED" = 1 ]; then systemctl is-active chappie-classifier; fi
 
-if ! grep -q '^AI_ROLE_MODEL=mmbert' "$ROOT/.env" 2>/dev/null; then
-  echo "WARN: $ROOT/.env 未设置 AI_ROLE_MODEL=mmbert，classifier 已启动但 AI 不会使用"
+if [ "$CLASSIFIER_ENABLED" = 0 ] && grep -q '^AI_ROLE_MODEL=mmbert' "$ROOT/.env" 2>/dev/null; then
+  echo "WARN: classifier 未启用但 .env 是 AI_ROLE_MODEL=mmbert；请改为 AI_ROLE_MODEL=linear"
 fi
-if ! grep -q '^CLASSIFIER_BASE_URL=http://127.0.0.1:7010' "$ROOT/.env" 2>/dev/null; then
-  echo "WARN: $ROOT/.env 未设置 CLASSIFIER_BASE_URL=http://127.0.0.1:7010"
+if [ "$CLASSIFIER_ENABLED" = 1 ] && ! grep -q '^AI_ROLE_MODEL=mmbert' "$ROOT/.env" 2>/dev/null; then
+  echo "WARN: classifier 已启动但 .env 不是 AI_ROLE_MODEL=mmbert"
+fi
+if [ "$CLASSIFIER_ENABLED" = 1 ] && ! grep -q '^CLASSIFIER_BASE_URL=http://127.0.0.1:7010' "$ROOT/.env" 2>/dev/null; then
+  echo "WARN: .env 未设置 CLASSIFIER_BASE_URL=http://127.0.0.1:7010"
 fi
 
 echo "==> deploy done $(date -u +%FT%TZ)"

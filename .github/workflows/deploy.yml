@@ -22,6 +22,8 @@ jobs:
     name: Build artifacts
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      MODEL_ARTIFACTS_URL: ${{ secrets.MODEL_ARTIFACTS_URL }}
     steps:
       - uses: actions/checkout@v7
 
@@ -85,13 +87,12 @@ jobs:
         run: cargo build --release --manifest-path core/Cargo.toml -p im-core
 
       - name: Build classifier (release)
+        if: env.MODEL_ARTIFACTS_URL != ''
         run: cargo build --release --manifest-path classifier/Cargo.toml
 
       - name: Download classifier model artifacts
-        env:
-          MODEL_ARTIFACTS_URL: ${{ secrets.MODEL_ARTIFACTS_URL }}
+        if: env.MODEL_ARTIFACTS_URL != ''
         run: |
-          test -n "$MODEL_ARTIFACTS_URL" || { echo "::error::MODEL_ARTIFACTS_URL 未配置：请上传 classifier-model.tar.gz 并设置 secret"; exit 1; }
           mkdir -p build/classifier/model
           curl -fL --retry 3 --retry-delay 3 "$MODEL_ARTIFACTS_URL" -o /tmp/classifier-model.tar.gz
           tar -xzf /tmp/classifier-model.tar.gz -C build/classifier/model
@@ -110,13 +111,17 @@ jobs:
           cd ai
           bun build src/index.ts --target=bun --outdir=../build/ai/dist --minify
           bun build src/migrate.ts --target=bun --outdir=../build/ai/dist --minify
+          mkdir -p ../build/ai/dist/models
+          cp src/models/linear-pairwise.json ../build/ai/dist/models/
           cp -r migrations ../build/ai/migrations
 
       - name: Package deploy artifact
         run: |
           mkdir -p build/bin build/web build/classifier
           cp core/target/release/im-core build/bin/im-core
-          cp classifier/target/release/chappie-classifier build/bin/chappie-classifier
+          if [ -f classifier/target/release/chappie-classifier ]; then
+            cp classifier/target/release/chappie-classifier build/bin/chappie-classifier
+          fi
           cp -r apps/web/dist/. build/web/
           cp deploy/remote-deploy.sh build/remote-deploy.sh
           cp deploy/chappie-classifier.service build/chappie-classifier.service

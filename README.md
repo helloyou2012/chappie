@@ -210,7 +210,9 @@ MODEL_NAME=gpt-4o-mini
 当前 `.env` 使用 **mmBERT-base pairwise**（`training/train_pairwise.py` → int8 ONNX →
 `classifier` `/rank`），`AI_ROLE_MODEL=mmbert`；也保留 CPU 毫秒级
 `training/train_linear_pairwise.py`（`ai/src/models/linear-pairwise.json`）作为
-无外部服务备选。模型缺失/异常回退 `role-match.ts` 规则。
+无外部服务备选。**小内存服务器（<2GB）建议直接 `AI_ROLE_MODEL=linear`**：部署包已将
+linear 模型放进 `ai/dist/models/`，实测额外 RSS 约 0.36MB、单次决定约 0.01ms。
+模型缺失/异常回退 `role-match.ts` 规则。
 
 ### 端口与环境变量
 
