@@ -203,7 +203,14 @@ MODEL_NAME=gpt-4o-mini
 | `openai-responses` | POST `{base}/responses`        | OpenAI Responses API（含 function_call 工具循环）       |
 | `anthropic`        | POST `{base}/v1/messages`      | Anthropic Messages API（tool_use / tool_result）        |
 
-未配置 key 或调用失败会自动降级为 mock。分类小模型预留了 `CLASSIFIER_*` 配置项，当前分类仍为规则实现。
+未配置 key 或调用失败会自动降级为 mock。
+
+默认意图/策略仍是规则实现。工作群“哪个分身该接话”由角色模型决定：
+训练/验证/测试数据全部由大模型生成（角色/部门 + 上下文 + reply/silent 标签）。
+当前 `.env` 使用 **mmBERT-base pairwise**（`training/train_pairwise.py` → int8 ONNX →
+`classifier` `/rank`），`AI_ROLE_MODEL=mmbert`；也保留 CPU 毫秒级
+`training/train_linear_pairwise.py`（`ai/src/models/linear-pairwise.json`）作为
+无外部服务备选。模型缺失/异常回退 `role-match.ts` 规则。
 
 ### 端口与环境变量
 
@@ -223,6 +230,10 @@ MODEL_NAME=gpt-4o-mini
 | `WALLET_INITIAL_BALANCE`           | 10000                                                | 应用内演示账本初始余额（非真实资金）                                         |
 | `INBOUND_EMAIL_TOKEN`              | 空                                                   | 入站邮件 webhook 共享密钥；空则拒绝                                          |
 | `S3_*` / `FILE_LOCAL_DIR`          | 空 / `.data/files`                                   | 配置 S3 则用对象存储，否则本地目录                                           |
+| `CLASSIFIER_BASE_URL`              | 空                                                   | 可选 mmBERT ONNX 分类服务；留空使用规则                                      |
+| `AI_ROLE_MATCH`                    | `true`                                               | 工作群角色规则兜底（模型缺失时）                                             |
+| `AI_ROLE_MODEL`                    | `linear`                                             | `linear` / `mmbert` / `rule` / `off`；mmBERT 需配 `CLASSIFIER_BASE_URL`      |
+| `CLASSIFIER_TIMEOUT_MS`            | 12000（mmBERT）                                      | `/rank` 超时；失败自动回退角色规则                                           |
 | `MODEL_MULTIMODAL`                 | `true`                                               | 视觉模型识图（DeepSeek Flash / gpt-4o / claude）；会话图片转 base64 传给模型 |
 | `AI_ATTACHMENT_BURST_MS`           | 1200                                                 | 附件+文本合并窗口；窗口内只由最后一条触发一次回复                            |
 | `AI_FILE_AUTO_READ`                | `true`                                               | 自动提取最近文本/PDF/DOCX/XLSX 附件内容注入提示词                            |
