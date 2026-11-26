@@ -190,7 +190,6 @@ async fn rank(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RankRequest>,
 ) -> Result<Json<RankResponse>, (StatusCode, String)> {
-    let rows = run_batch(&state, &req.texts).await?;
     let reply_idx = state
         .labels
         .iter()
@@ -201,10 +200,15 @@ async fn rank(
                 "missing reply label".into(),
             )
         })?;
-    let mut scores = Vec::with_capacity(rows.len());
-    let mut probs = Vec::with_capacity(rows.len());
-    for row in rows {
-        let p = softmax(&row);
+    // 单条推理：控制激活内存，适配 1GB 级远端；/rank 的时延由调用方超时兜底。
+    let mut scores = Vec::with_capacity(req.texts.len());
+    let mut probs = Vec::with_capacity(req.texts.len());
+    for text in &req.texts {
+        let rows = run_batch(&state, std::slice::from_ref(text)).await?;
+        let row = rows
+            .first()
+            .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "empty rank row".into()))?;
+        let p = softmax(row);
         scores.push(row[reply_idx]);
         probs.push(p[reply_idx]);
     }
@@ -254,8 +258,15 @@ async fn main() -> Result<()> {
         .with_name("chappie-classifier")
         .build()
         .context("ort environment")?;
-    let session = Session::builder(&environment)
-        .context("ort builder")?
+    let mut builder = Session::builder(&environment).context("ort builder")?;
+    // 低内存部署：禁用内存 pattern，单线程；大模型在小内存机器上更稳
+    builder = builder
+        .with_memory_pattern(false)
+        .map_err(|e| anyhow!("ort memory pattern: {e}"))?;
+    builder = builder
+        .with_intra_threads(1)
+        .map_err(|e| anyhow!("ort threads: {e}"))?;
+    let session = builder
         .commit_from_file(&model_path)
         .with_context(|| format!("load model {model_path}"))?;
 

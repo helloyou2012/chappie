@@ -43,7 +43,7 @@ Then `sudo systemctl restart chappie-ai`.
 
 ## Memory
 
-The int8 ONNX model is ~296MB and tokenizer ~33MB. The current smallest remote
-(1 vCPU / ~957MB RAM) may not have enough headroom for core + AI + classifier.
-Check `free -m` after deploy; if the classifier is OOM-killed, use
-`AI_ROLE_MODEL=linear` on that host or resize it.
+The int8 ONNX model is ~296MB and tokenizer ~33MB. `remote-deploy.sh` checks RAM: below **1800MB** it skips the classifier and keeps
+`AI_ROLE_MODEL=linear`/rule fallback. The current smallest remote
+(1 vCPU / ~957MB RAM) is below this threshold. Resize to >=2GB, then redeploy
+to enable `/rank`.

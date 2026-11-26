@@ -29,26 +29,35 @@ sudo install -m 755 "$SRC/bin/chappie-classifier" "$ROOT/bin/chappie-classifier"
 sudo rsync -a --delete "$SRC/web/" "$ROOT/web/"
 sudo rsync -a --delete "$SRC/ai/dist/" "$ROOT/ai/dist/"
 sudo rsync -a --delete "$SRC/ai/migrations/" "$ROOT/ai/migrations/"
-sudo rsync -a --delete "$SRC/classifier/model/" "$ROOT/classifier/model/"
-sudo install -m 644 "$SRC/chappie-classifier.service" /etc/systemd/system/chappie-classifier.service
-sudo chown -R ubuntu:ubuntu "$ROOT/bin" "$ROOT/web" "$ROOT/ai" "$ROOT/classifier"
+sudo chown -R ubuntu:ubuntu "$ROOT/bin" "$ROOT/web" "$ROOT/ai"
 
 # 数据库迁移（幂等；新增迁移随产物发布，先迁移后重启）
 "$BUN" --env-file="$ROOT/.env" "$ROOT/ai/dist/migrate.js"
 
-sudo systemctl daemon-reload
-sudo systemctl enable --now chappie-classifier
-sudo systemctl restart chappie-classifier
-for _ in $(seq 1 20); do
-  if curl -fsS --max-time 2 http://127.0.0.1:7010/health >/dev/null 2>&1; then
-    break
+MEM_MB=$(free -m | awk '/^Mem:/{print $2}')
+CLASSIFIER_ENABLED=0
+if [ "${MEM_MB:-0}" -ge 1800 ]; then
+  CLASSIFIER_ENABLED=1
+  sudo rsync -a --delete "$SRC/classifier/model/" "$ROOT/classifier/model/"
+  sudo install -m 644 "$SRC/chappie-classifier.service" /etc/systemd/system/chappie-classifier.service
+  sudo chown -R ubuntu:ubuntu "$ROOT/classifier"
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now chappie-classifier
+  sudo systemctl restart chappie-classifier
+  for _ in $(seq 1 20); do
+    if curl -fsS --max-time 2 http://127.0.0.1:7010/health >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  if ! curl -fsS --max-time 5 http://127.0.0.1:7010/health; then
+    echo "classifier health check failed; recent logs:"
+    sudo journalctl -u chappie-classifier -n 40 --no-pager || true
+    exit 1
   fi
-  sleep 1
-done
-if ! curl -fsS --max-time 5 http://127.0.0.1:7010/health; then
-  echo "classifier health check failed; recent logs:"
-  sudo journalctl -u chappie-classifier -n 40 --no-pager || true
-  exit 1
+else
+  echo "WARN: 服务器内存 ${MEM_MB:-?}MB < 1800MB，跳过 classifier；请在 .env 使用 AI_ROLE_MODEL=linear"
+  sudo systemctl disable --now chappie-classifier 2>/dev/null || true
 fi
 
 sudo systemctl restart chappie-core chappie-ai
@@ -58,7 +67,8 @@ for _ in $(seq 1 20); do
   fi
   sleep 1
 done
-systemctl is-active chappie-core chappie-ai chappie-classifier
+systemctl is-active chappie-core chappie-ai
+if [ "$CLASSIFIER_ENABLED" = 1 ]; then systemctl is-active chappie-classifier; fi
 
 if ! grep -q '^AI_ROLE_MODEL=mmbert' "$ROOT/.env" 2>/dev/null; then
   echo "WARN: $ROOT/.env 未设置 AI_ROLE_MODEL=mmbert，classifier 已启动但 AI 不会使用"
