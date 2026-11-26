@@ -72,7 +72,10 @@ mod tests {
             redact_url("redis://:secret@127.0.0.1:6379"),
             "redis://***@127.0.0.1:6379"
         );
-        assert_eq!(redact_url("redis://127.0.0.1:6379"), "redis://127.0.0.1:6379");
+        assert_eq!(
+            redact_url("redis://127.0.0.1:6379"),
+            "redis://127.0.0.1:6379"
+        );
     }
 }
 
@@ -82,8 +85,7 @@ mod tests {
 
 pub mod redis_keys {
     pub const PRESENCE: fn(&str) -> String = |uid| format!("core:presence:{uid}");
-    pub const TYPING: fn(&str, &str) -> String =
-        |conv, uid| format!("core:typing:{conv}:{uid}");
+    pub const TYPING: fn(&str, &str) -> String = |conv, uid| format!("core:typing:{conv}:{uid}");
     pub const AUTH_CODE: fn(&str) -> String = |email| format!("core:code:{email}");
     pub const AUTH_CODE_RL: fn(&str) -> String = |email| format!("core:rl:code:{email}");
     pub const AUTH_TOKEN: fn(&str) -> String = |token| format!("core:auth:{token}");
