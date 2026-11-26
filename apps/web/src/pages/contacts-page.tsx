@@ -550,35 +550,39 @@ export function ContactsPage() {
               ；留空表示清除备注。
             </DialogDescription>
           </DialogHeader>
-          <Input
-            autoFocus
-            value={aliasDraft}
-            maxLength={40}
-            onChange={(e) => setAliasDraft(e.target.value)}
-            placeholder="如：大学室友 / 王总"
-          />
-          <Input
-            value={tagsDraft}
-            maxLength={200}
-            onChange={(e) => setTagsDraft(e.target.value)}
-            placeholder="分组标签，用逗号分隔：家人，工作，VIP"
-          />
-          <p className="text-[11px] text-muted-foreground">
-            标签用于 contact_group 接待委托与策略匹配。
-          </p>
-          <div className="flex items-center justify-between rounded-md border px-3 py-2">
-            <div>
-              <p className="text-xs font-medium">重要消息始终提醒</p>
-              <p className="text-[10px] text-muted-foreground">静默/筛选模式下也推送给你</p>
+          <div className="flex flex-col gap-2">
+            <Input
+              autoFocus
+              value={aliasDraft}
+              maxLength={40}
+              onChange={(e) => setAliasDraft(e.target.value)}
+              placeholder="如：大学室友 / 王总"
+            />
+            <Input
+              value={tagsDraft}
+              maxLength={200}
+              onChange={(e) => setTagsDraft(e.target.value)}
+              placeholder="分组标签，用逗号分隔：家人，工作，VIP"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              标签用于 contact_group 接待委托与策略匹配。
+            </p>
+            <div className="flex items-center justify-between rounded-md border px-3 py-2">
+              <div>
+                <p className="text-xs font-medium">重要消息始终提醒</p>
+                <p className="text-[10px] text-muted-foreground">静默/筛选模式下也推送给你</p>
+              </div>
+              <Switch checked={alwaysNotify} onCheckedChange={setAlwaysNotify} />
             </div>
-            <Switch checked={alwaysNotify} onCheckedChange={setAlwaysNotify} />
-          </div>
-          <div className="flex items-center justify-between rounded-md border px-3 py-2">
-            <div>
-              <p className="text-xs font-medium">强制真人接待</p>
-              <p className="text-[10px] text-muted-foreground">该联系人的消息不会被分身自动回复</p>
+            <div className="flex items-center justify-between rounded-md border px-3 py-2">
+              <div>
+                <p className="text-xs font-medium">强制真人接待</p>
+                <p className="text-[10px] text-muted-foreground">
+                  该联系人的消息不会被分身自动回复
+                </p>
+              </div>
+              <Switch checked={forceHuman} onCheckedChange={setForceHuman} />
             </div>
-            <Switch checked={forceHuman} onCheckedChange={setForceHuman} />
           </div>
           <DialogFooter>
             <Button onClick={() => void saveAlias()} disabled={savingAlias}>
@@ -612,9 +616,7 @@ export function ContactsPage() {
                 onClick={() => setMode(m)}
                 className={cn(
                   'rounded-md border px-3 py-2.5 text-left transition-colors',
-                  mode === m
-                    ? 'border-primary bg-surface-selected'
-                    : 'border-line hover:bg-surface-hover',
+                  mode === m ? 'border-primary' : 'border-line hover:bg-surface-hover',
                 )}
               >
                 <div className="text-[13px] font-medium">{MODE_LABELS[m]}</div>

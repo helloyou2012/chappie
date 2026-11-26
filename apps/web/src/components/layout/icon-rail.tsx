@@ -153,10 +153,10 @@ export function IconRail() {
               setProfileOpen(true);
             }}
           >
-            <RiUserSettingsLine /> 个人资料
+            <RiUserSettingsLine className="size-3.5" /> 个人资料
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/avatar')}>
-            <RiRobot2Line /> 分身控制台
+            <RiRobot2Line className="size-3.5" /> 分身控制台
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -164,7 +164,7 @@ export function IconRail() {
               void logout().then(() => navigate('/login'));
             }}
           >
-            <RiLogoutBoxRLine /> 退出登录
+            <RiLogoutBoxRLine className="size-3.5" /> 退出登录
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
