@@ -46,9 +46,8 @@ training/data/llm_role/MANIFEST.json          # 组数/样本数/文件 sha256
 
 原因：test 是独立评估集；大模型生成不可完全复现，保留数据和哈希才能复现指标。
 
-- `training/.gitignore` 默认忽略 `/data/`，所以这些文件目前只在本地。
-  如果要把 3.6MB 数据纳入仓库，可对 `llm_role/llm_role_*.jsonl` 和 `MANIFEST.json`
-  解除忽略，或放 Git LFS/对象存储。
+- `training/.gitignore` 已对 `llm_role/llm_role_*.jsonl` 和 `MANIFEST.json` 解除忽略；
+  这三份数据和清单已提交到 `main`，可直接用于复现。
 - `cache_*.jsonl`（约 3.5MB）是生成过程的断点缓存，最终文件生成后**可以删除**；
   跑 `generate_llm_role_data.py` 时可保留以便续跑。
 - `pairwise_templates_1000.jsonl`（14MB）是线性模型的辅助模板数据，可由
