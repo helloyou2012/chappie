@@ -7,6 +7,7 @@ on:
       - "docs/**"
       - "**/*.md"
       - "training/**"
+      - "scripts/**"
       - "model/**"
   workflow_dispatch:
 
