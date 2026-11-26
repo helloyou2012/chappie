@@ -1,0 +1,11 @@
+# 原始/实验数据默认忽略
+/data/*
+/out/*
+
+# 最终 LLM 角色数据体积小，纳入 Git
+!/data/llm_role/
+/data/llm_role/*
+!/data/llm_role/llm_role_train.jsonl
+!/data/llm_role/llm_role_val.jsonl
+!/data/llm_role/llm_role_test.jsonl
+!/data/llm_role/MANIFEST.json

@@ -1,0 +1,10 @@
+torch>=2.4
+transformers>=4.53
+datasets>=3.0
+accelerate>=1.0
+scikit-learn>=1.5
+psycopg[binary]>=3.2
+onnx>=1.17
+onnxscript
+onnxruntime>=1.20
+optimum[onnxruntime]>=1.24

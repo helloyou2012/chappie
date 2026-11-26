@@ -1,0 +1,33 @@
+{
+  "source": "training/generate_llm_role_data.py",
+  "seed": 20261127,
+  "splits": {
+    "train": {
+      "file": "training/data/llm_role/llm_role_train.jsonl",
+      "bytes": 2006236,
+      "sha256": "6cb2eef293a71b6eebd9d7c1a2d83095afccc371d95aff6fff2bdac034a45c66",
+      "groups": 120,
+      "samples": 462,
+      "reply_groups": 60,
+      "silent_groups": 60
+    },
+    "val": {
+      "file": "training/data/llm_role/llm_role_val.jsonl",
+      "bytes": 656767,
+      "sha256": "6e3edb06676aa826d03d70e2558373650c705fa116883b6c86dcfeb2c892a846",
+      "groups": 40,
+      "samples": 153,
+      "reply_groups": 20,
+      "silent_groups": 20
+    },
+    "test": {
+      "file": "training/data/llm_role/llm_role_test.jsonl",
+      "bytes": 967203,
+      "sha256": "2c039b1ab4a03c747c6669d5116152e6cfcaf3a854077b8d2bfff9e1afffd538",
+      "groups": 60,
+      "samples": 230,
+      "reply_groups": 30,
+      "silent_groups": 30
+    }
+  }
+}
