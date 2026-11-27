@@ -4,7 +4,7 @@
  * 高度档位与 Button 对齐：size="md" → 44（默认，触控友好），size="sm" → 34。
  * 同一行里的 Input / Button 必须使用同一档位，不允许混用。
  */
-import type { ReactNode } from 'react';
+import { type ComponentRef, forwardRef, type ReactNode } from 'react';
 import { type StyleProp, TextInput, type TextInputProps, View, type ViewStyle } from 'react-native';
 import { useTheme } from '@/hooks/use-theme';
 import { Text } from './text';
@@ -41,16 +41,14 @@ export function Field({
   );
 }
 
-export function Input({
-  multiline = false,
-  minHeight,
-  size = 'md',
-  style,
-  ...props
-}: TextInputProps & { minHeight?: number; size?: InputSize }) {
+export const Input = forwardRef<
+  ComponentRef<typeof TextInput>,
+  TextInputProps & { minHeight?: number; size?: InputSize }
+>(function Input({ multiline = false, minHeight, size = 'md', style, ...props }, ref) {
   const t = useTheme();
   return (
     <TextInput
+      ref={ref}
       placeholderTextColor={t.textMuted}
       multiline={multiline}
       style={[
@@ -73,4 +71,4 @@ export function Input({
       {...props}
     />
   );
-}
+});

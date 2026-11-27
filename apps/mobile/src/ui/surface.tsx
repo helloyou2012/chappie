@@ -21,15 +21,18 @@ export function Screen({
   padded = false,
   style,
   refreshControl,
+  background = 'canvas',
 }: {
   children: ReactNode;
   scroll?: boolean;
   padded?: boolean;
   style?: StyleProp<ViewStyle>;
   refreshControl?: React.ReactElement<typeof RefreshControl>;
+  /** canvas：灰色画布；card：白底列表页 */
+  background?: 'canvas' | 'card';
 }) {
   const t = useTheme();
-  const base: ViewStyle = { flex: 1, backgroundColor: t.bg };
+  const base: ViewStyle = { flex: 1, backgroundColor: background === 'card' ? t.card : t.bg };
   if (!scroll) {
     return <View style={[base, padded && { padding: 16 }, style]}>{children}</View>;
   }
@@ -45,44 +48,46 @@ export function Screen({
   );
 }
 
-/** 页头：标题 + 副标题 + 右侧操作，自动处理状态栏安全区；onBack 时左侧显示返回按钮。 */
+/**
+ * 顶层页头：大标题 + 副标题 + 右侧操作，自动处理状态栏安全区。
+ * 传 avatar 时左侧显示账户头像（飞书式大标题页）；二级页优先用 <NavBar>。
+ */
 export function PageHeader({
   title,
   subtitle,
   right,
   onBack,
   large = false,
+  avatar,
 }: {
   title: string;
   subtitle?: string;
   right?: ReactNode;
   onBack?: () => void;
   large?: boolean;
+  /** 左侧账户头像（大标题页） */
+  avatar?: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   return (
     <View
       style={{
-        paddingTop: insets.top + (large ? 10 : 6),
+        paddingTop: insets.top + (large ? 12 : 6),
         paddingHorizontal: onBack ? 8 : 16,
-        paddingBottom: large ? 10 : 6,
+        paddingBottom: large ? 12 : 6,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: large ? 12 : 10,
       }}
     >
       {onBack ? <IconButton icon="arrow-left-s-line" label="返回" onPress={onBack} /> : null}
-      <View style={{ flex: 1 }}>
+      {avatar}
+      <View style={{ flex: 1, minWidth: 0 }}>
         <Text variant={large ? 'h1' : 'title'} numberOfLines={1}>
           {title}
         </Text>
         {subtitle ? (
-          <Text
-            variant="caption"
-            tone="muted"
-            style={{ marginTop: large ? 2 : 1 }}
-            numberOfLines={1}
-          >
+          <Text variant="caption" tone="muted" style={{ marginTop: 1 }} numberOfLines={1}>
             {subtitle}
           </Text>
         ) : null}

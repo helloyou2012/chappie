@@ -5,41 +5,20 @@ import {
   type ConversationView,
   type FriendRequestView,
   groupByInitial,
-  MODE_DESCRIPTIONS,
-  MODE_LABELS,
   type Policy,
   useChatStore,
 } from '@chappie/shared';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, SectionList, View } from 'react-native';
-import Icon from 'react-native-remix-icon';
+import { ContactDetailSheet } from '@/components/contacts/contact-detail-sheet';
+import { ContactRow } from '@/components/contacts/contact-row';
+import { GroupsSheet } from '@/components/contacts/groups-sheet';
+import { ContactsQuickEntries } from '@/components/contacts/quick-entries';
+import { FriendRequestsSheet } from '@/components/contacts/requests-sheet';
+import { type ContactMode, contactPolicy, displayName } from '@/components/contacts/utils';
 import { useTheme } from '@/hooks/use-theme';
-import {
-  Avatar,
-  Badge,
-  BottomSheet,
-  Button,
-  Card,
-  Dialog,
-  EmptyState,
-  IconButton,
-  Input,
-  ListRow,
-  PageHeader,
-  Spinner,
-  Text,
-} from '@/ui';
-
-const MODES = ['manual', 'draft', 'auto', 'off'] as const;
-
-function displayName(c: ContactView): string {
-  return c.alias?.trim() || c.user.name;
-}
-
-function contactPolicy(policies: Policy[], peerId: string): Policy | undefined {
-  return policies.find((p) => p.scopeType === 'contact' && p.scopeId === peerId);
-}
+import { EmptyState, IconButton, NavBar, SearchField, SectionHeader, Spinner, Text } from '@/ui';
 
 export default function ContactsScreen() {
   const t = useTheme();
@@ -50,21 +29,16 @@ export default function ContactsScreen() {
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequestView[]>([]);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [email, setEmail] = useState('');
-  const [adding, setAdding] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [groups, setGroups] = useState<ConversationView[]>([]);
   const [groupsOpen, setGroupsOpen] = useState(false);
+  const [requestsOpen, setRequestsOpen] = useState(false);
   const listRef = useRef<SectionList<ContactView, { title: string }>>(null);
 
-  const [aliasTarget, setAliasTarget] = useState<ContactView | null>(null);
-  const [aliasDraft, setAliasDraft] = useState('');
-  const [savingAlias, setSavingAlias] = useState(false);
-
-  const [modeTarget, setModeTarget] = useState<ContactView | null>(null);
-  const [mode, setMode] = useState<(typeof MODES)[number]>('manual');
-  const [savingMode, setSavingMode] = useState(false);
+  // 联系人详情 / 备注 / 档位共用同一个抽屉，避免 iOS 上多个 Modal 叠加
+  const [sheetContact, setSheetContact] = useState<ContactView | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,13 +86,9 @@ export default function ContactsScreen() {
 
   const grouped = useMemo(() => groupByInitial(filtered, (c) => displayName(c)), [filtered]);
 
-  const add = async () => {
-    const value = email.trim();
-    if (!value) return;
-    setAdding(true);
+  const add = async (value: string): Promise<boolean> => {
     try {
       const res = await api.sendFriendRequest({ email: value });
-      setEmail('');
       if (res.request.status === 'accepted') {
         await load();
         Alert.alert('已互为联系人', res.request.toUser.name);
@@ -126,10 +96,10 @@ export default function ContactsScreen() {
         setOutgoingRequests((prev) => [res.request, ...prev]);
         Alert.alert('好友申请已发送', `等待 ${res.request.toUser.name} 确认`);
       }
+      return true;
     } catch (e) {
       Alert.alert('发送失败', e instanceof Error ? e.message : String(e));
-    } finally {
-      setAdding(false);
+      return false;
     }
   };
 
@@ -169,63 +139,38 @@ export default function ContactsScreen() {
     }
   };
 
-  const openAlias = (c: ContactView) => {
-    setAliasTarget(c);
-    setAliasDraft(c.alias ?? '');
+  const openContact = (c: ContactView) => {
+    setSheetContact(c);
   };
 
-  const saveAlias = async () => {
-    if (!aliasTarget) return;
-    setSavingAlias(true);
-    try {
-      const res = await api.updateContact(aliasTarget.user.id, {
-        alias: aliasDraft.trim() || null,
+  const saveAliasFor = async (contact: ContactView, alias: string | null) => {
+    const res = await api.updateContact(contact.user.id, { alias });
+    setContacts((prev) => prev.map((c) => (c.user.id === res.contact.user.id ? res.contact : c)));
+    setSheetContact((prev) => (prev && prev.user.id === res.contact.user.id ? res.contact : prev));
+  };
+
+  const saveModeFor = async (contact: ContactView, mode: ContactMode) => {
+    const existing = contactPolicy(policies, contact.user.id);
+    if (existing) {
+      await adminApi.updatePolicy(existing.id, { rule: { ...existing.rule, mode } });
+    } else {
+      await adminApi.createPolicy({
+        scopeType: 'contact',
+        scopeId: contact.user.id,
+        name: `联系人 · ${displayName(contact)}`,
+        rule: {
+          mode,
+          schedule: [],
+          allowCapabilities: null,
+          denyTopics: [],
+          maxRisk: 'L1',
+          rateLimitPerHour: 20,
+          escalateWhen: [],
+        },
       });
-      setContacts((prev) => prev.map((c) => (c.user.id === res.contact.user.id ? res.contact : c)));
-      setAliasTarget(null);
-    } catch (e) {
-      Alert.alert('保存失败', e instanceof Error ? e.message : String(e));
-    } finally {
-      setSavingAlias(false);
     }
-  };
-
-  const openMode = (c: ContactView) => {
-    setModeTarget(c);
-    setMode(contactPolicy(policies, c.user.id)?.rule.mode ?? 'manual');
-  };
-
-  const saveMode = async () => {
-    if (!modeTarget) return;
-    setSavingMode(true);
-    try {
-      const existing = contactPolicy(policies, modeTarget.user.id);
-      if (existing) {
-        await adminApi.updatePolicy(existing.id, { rule: { ...existing.rule, mode } });
-      } else {
-        await adminApi.createPolicy({
-          scopeType: 'contact',
-          scopeId: modeTarget.user.id,
-          name: `联系人 · ${displayName(modeTarget)}`,
-          rule: {
-            mode,
-            schedule: [],
-            allowCapabilities: null,
-            denyTopics: [],
-            maxRisk: 'L1',
-            rateLimitPerHour: 20,
-            escalateWhen: [],
-          },
-        });
-      }
-      const res = await adminApi.listPolicies();
-      setPolicies(res.policies);
-      setModeTarget(null);
-    } catch (e) {
-      Alert.alert('保存失败', e instanceof Error ? e.message : String(e));
-    } finally {
-      setSavingMode(false);
-    }
+    const res = await adminApi.listPolicies();
+    setPolicies(res.policies);
   };
 
   const remove = (c: ContactView) => {
@@ -235,6 +180,7 @@ export default function ContactsScreen() {
         text: '移除',
         style: 'destructive',
         onPress: () => {
+          setSheetContact(null);
           setBusyId(c.user.id);
           void api
             .removeContact(c.user.id)
@@ -247,6 +193,7 @@ export default function ContactsScreen() {
   };
 
   const startChat = async (c: ContactView) => {
+    setSheetContact(null);
     setBusyId(c.user.id);
     try {
       const res = await api.createConversation({
@@ -262,65 +209,47 @@ export default function ContactsScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.bg }}>
-      <PageHeader
-        title="联系人"
-        subtitle="备注、我的分身对 TA 的档位、发起单聊"
+    <View style={{ flex: 1, backgroundColor: t.card }}>
+      <NavBar
+        title="通讯录"
+        rightInset={82}
         onBack={() => router.back()}
+        right={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+            <IconButton
+              icon="search-line"
+              label="搜索联系人"
+              size={38}
+              tone={searchOpen ? 'primary' : 'default'}
+              onPress={() => {
+                setSearchOpen((v) => !v);
+                if (searchOpen) setQuery('');
+              }}
+            />
+            <IconButton
+              icon="add-line"
+              label="添加联系人"
+              size={38}
+              onPress={() => setRequestsOpen(true)}
+            />
+          </View>
+        }
       />
-      <View style={{ paddingHorizontal: 16, gap: 8 }}>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Input
-            size="sm"
-            value={email}
-            onChangeText={setEmail}
-            placeholder="输入邮箱发送好友申请"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            style={{ flex: 1 }}
-          />
-          <Button
-            size="sm"
-            fullWidth={false}
-            label={adding ? '发送中' : '发送申请'}
-            loading={adding}
-            disabled={!email.trim()}
-            onPress={() => void add()}
+
+      {searchOpen ? (
+        <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+          <SearchField
+            autoFocus
+            value={query}
+            onChangeText={setQuery}
+            placeholder="姓名 / 邮箱 / 备注"
+            onCancel={() => {
+              setSearchOpen(false);
+              setQuery('');
+            }}
           />
         </View>
-        <Input
-          size="sm"
-          value={query}
-          onChangeText={setQuery}
-          placeholder="搜索姓名 / 邮箱 / 备注"
-        />
-      </View>
-
-      {/* 常驻入口：群聊 */}
-      <View style={{ paddingHorizontal: 16, paddingTop: 4 }}>
-        <Card padding={4}>
-          <ListRow
-            leading={
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 10,
-                  backgroundColor: t.surfaceRaised,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Icon name="group-line" size={18} color={t.textMuted} />
-              </View>
-            }
-            title="群聊"
-            subtitle={`${groups.length} 个群聊`}
-            trailing={<Icon name="arrow-right-s-line" size={18} color={t.textMuted} />}
-            onPress={() => setGroupsOpen(true)}
-          />
-        </Card>
-      </View>
+      ) : null}
 
       {loading ? (
         <Spinner />
@@ -328,171 +257,54 @@ export default function ContactsScreen() {
         <View style={{ flex: 1, flexDirection: 'row' }}>
           <SectionList
             ref={listRef}
+            style={{ flex: 1 }}
             sections={grouped}
             keyExtractor={(c) => c.user.id}
             stickySectionHeadersEnabled
-            contentContainerStyle={{ padding: 14, paddingRight: 24, paddingBottom: 32 }}
+            contentContainerStyle={{ paddingBottom: 40 }}
             ListHeaderComponent={
-              incomingRequests.length > 0 || outgoingRequests.length > 0 ? (
-                <View style={{ gap: 8, marginBottom: 10 }}>
-                  {incomingRequests.map((r) => (
-                    <Card key={r.id} padding={12}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Avatar name={r.fromUser.name} size={36} />
-                        <View style={{ flex: 1, minWidth: 0 }}>
-                          <Text variant="body" style={{ fontWeight: '600' }} numberOfLines={1}>
-                            好友申请 · {r.fromUser.name}
-                          </Text>
-                          <Text variant="micro" tone="muted" numberOfLines={1}>
-                            {r.fromUser.email}
-                            {r.message ? ` · ${r.message}` : ''}
-                          </Text>
-                        </View>
-                        <Button
-                          size="sm"
-                          fullWidth={false}
-                          label="接受"
-                          loading={busyId === r.id}
-                          onPress={() => void acceptRequest(r)}
-                        />
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          fullWidth={false}
-                          label="拒绝"
-                          disabled={busyId === r.id}
-                          onPress={() => void rejectRequest(r)}
-                        />
-                      </View>
-                    </Card>
-                  ))}
-                  {outgoingRequests.map((r) => (
-                    <Card key={r.id} padding={10}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Avatar name={r.toUser.name} size={30} />
-                        <View style={{ flex: 1, minWidth: 0 }}>
-                          <Text variant="caption" numberOfLines={1}>
-                            已向 {r.toUser.name} 发送申请
-                          </Text>
-                          <Text variant="micro" tone="muted" numberOfLines={1}>
-                            等待对方确认
-                          </Text>
-                        </View>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          fullWidth={false}
-                          label="撤回"
-                          disabled={busyId === r.id}
-                          onPress={() => void cancelRequest(r)}
-                        />
-                      </View>
-                    </Card>
-                  ))}
-                </View>
-              ) : undefined
+              <>
+                <ContactsQuickEntries
+                  incomingCount={incomingRequests.length}
+                  groupCount={groups.length}
+                  onRequests={() => setRequestsOpen(true)}
+                  onGroups={() => setGroupsOpen(true)}
+                />
+                <SectionHeader title={query.trim() ? '搜索结果' : '我的联系人'} />
+              </>
             }
-            SectionSeparatorComponent={() => <View style={{ height: 2 }} />}
-            renderSectionHeader={({ section }) => (
-              <View
-                style={{
-                  backgroundColor: t.bg,
-                  paddingVertical: 3,
-                  paddingHorizontal: 4,
-                }}
-              >
-                <Text variant="micro" tone="muted" style={{ fontWeight: '600' }}>
-                  {section.title}
-                </Text>
-              </View>
+            SectionSeparatorComponent={() => <View style={{ height: 0 }} />}
+            renderSectionHeader={({ section }) => <SectionHeader title={section.title} />}
+            renderItem={({ item: c }) => (
+              <ContactRow
+                contact={c}
+                policy={contactPolicy(policies, c.user.id)}
+                busy={busyId === c.user.id}
+                onPress={() => openContact(c)}
+              />
             )}
-            renderItem={({ item: c }) => {
-              const policy = contactPolicy(policies, c.user.id);
-              return (
-                <Card padding={12}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                    <Avatar name={c.user.name} size={38} />
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Text variant="body" style={{ fontWeight: '600' }} numberOfLines={1}>
-                          {displayName(c)}
-                        </Text>
-                        <Badge
-                          label={policy ? MODE_LABELS[policy.rule.mode] : '默认档位'}
-                          tone={policy ? 'ai' : 'outline'}
-                        />
-                      </View>
-                      <Text variant="micro" tone="muted" numberOfLines={1}>
-                        {c.alias ? `${c.user.name} · ` : ''}
-                        {c.user.email}
-                      </Text>
-                    </View>
-                    <Button
-                      size="sm"
-                      fullWidth={false}
-                      label="发消息"
-                      loading={busyId === c.user.id}
-                      onPress={() => void startChat(c)}
-                    />
-                  </View>
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      justifyContent: 'flex-end',
-                      gap: 6,
-                      marginTop: 8,
-                    }}
-                  >
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      fullWidth={false}
-                      label="档位"
-                      icon="robot-2-line"
-                      onPress={() => openMode(c)}
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      fullWidth={false}
-                      label="备注"
-                      icon="edit-line"
-                      onPress={() => openAlias(c)}
-                    />
-                    <IconButton
-                      icon="delete-bin-line"
-                      label={`移除 ${displayName(c)}`}
-                      tone="danger"
-                      size={34}
-                      disabled={busyId === c.user.id}
-                      onPress={() => remove(c)}
-                    />
-                  </View>
-                </Card>
-              );
-            }}
             ListEmptyComponent={
               <EmptyState
                 icon="contacts-line"
                 title={contacts.length === 0 ? '还没有联系人' : '没有匹配的联系人'}
                 description={
                   contacts.length === 0
-                    ? '在上方按邮箱发送好友申请，对方接受后即可发起会话'
+                    ? '点右上角 + 按邮箱添加，对方接受后即可发起会话'
                     : '换个关键词试试'
                 }
               />
             }
           />
           {/* 右侧字母索引 */}
-          {grouped.length > 1 ? (
+          {grouped.length > 1 && !searchOpen ? (
             <View
               style={{
                 position: 'absolute',
-                right: 4,
-                top: 40,
-                bottom: 40,
+                right: 2,
+                top: 32,
+                bottom: 32,
                 justifyContent: 'center',
-                gap: 1,
+                gap: 0.5,
               }}
             >
               {grouped.map((section) => (
@@ -508,10 +320,10 @@ export default function ContactsScreen() {
                       });
                     }
                   }}
-                  hitSlop={4}
-                  style={{ paddingHorizontal: 6, paddingVertical: 1 }}
+                  hitSlop={3}
+                  style={{ paddingHorizontal: 7, paddingVertical: 1 }}
                 >
-                  <Text variant="micro" tone="tertiary">
+                  <Text variant="micro" tone="tertiary" style={{ fontWeight: '500' }}>
                     {section.title}
                   </Text>
                 </Pressable>
@@ -521,98 +333,38 @@ export default function ContactsScreen() {
         </View>
       )}
 
-      {/* 备注名 */}
-      <Dialog
-        visible={aliasTarget !== null}
-        onClose={() => setAliasTarget(null)}
-        title="编辑备注名"
-      >
-        <Text variant="micro" tone="muted" style={{ marginBottom: 8 }} numberOfLines={2}>
-          {aliasTarget ? `${aliasTarget.user.name} · ${aliasTarget.user.email}` : ''}
-          ；留空表示清除备注。
-        </Text>
-        <Input
-          autoFocus
-          value={aliasDraft}
-          maxLength={40}
-          onChangeText={setAliasDraft}
-          placeholder="如：大学室友 / 王总"
-        />
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-          <Button
-            label="保存"
-            loading={savingAlias}
-            onPress={() => void saveAlias()}
-            style={{ flex: 1 }}
-          />
-          <Button
-            label="取消"
-            variant="ghost"
-            fullWidth={false}
-            onPress={() => setAliasTarget(null)}
-          />
-        </View>
-      </Dialog>
+      <ContactDetailSheet
+        contact={sheetContact}
+        policy={sheetContact ? contactPolicy(policies, sheetContact.user.id) : undefined}
+        busy={sheetContact ? busyId === sheetContact.user.id : false}
+        onClose={() => setSheetContact(null)}
+        onStartChat={(c) => void startChat(c)}
+        onRemove={remove}
+        onSaveAlias={saveAliasFor}
+        onSaveMode={saveModeFor}
+      />
 
-      {/* 对 TA 的分身档位 */}
-      <BottomSheet
-        visible={modeTarget !== null}
-        onClose={() => setModeTarget(null)}
-        title={modeTarget ? `我的分身对「${displayName(modeTarget)}」的档位` : '我的分身档位'}
-        description="只影响你的分身与 TA 的私聊表现，不会修改对方分身的设置；会话内单独切换的档位优先级更高。"
-      >
-        {MODES.map((m) => (
-          <View
-            key={m}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 }}
-          >
-            <Button
-              size="sm"
-              variant={mode === m ? 'primary' : 'outline'}
-              fullWidth={false}
-              label={MODE_LABELS[m]}
-              onPress={() => setMode(m)}
-            />
-            <Text variant="caption" tone={mode === m ? 'default' : 'muted'} style={{ flex: 1 }}>
-              {MODE_DESCRIPTIONS[m]}
-            </Text>
-            {mode === m ? <Icon name="check-line" size={16} color={t.agent} /> : null}
-          </View>
-        ))}
-        <Button
-          label="保存档位"
-          loading={savingMode}
-          onPress={() => void saveMode()}
-          style={{ marginTop: 16 }}
-        />
-      </BottomSheet>
+      <FriendRequestsSheet
+        visible={requestsOpen}
+        onClose={() => setRequestsOpen(false)}
+        incoming={incomingRequests}
+        outgoing={outgoingRequests}
+        busyId={busyId}
+        onAdd={add}
+        onAccept={(r) => void acceptRequest(r)}
+        onReject={(r) => void rejectRequest(r)}
+        onCancel={(r) => void cancelRequest(r)}
+      />
 
-      {/* 群聊列表 */}
-      <BottomSheet
+      <GroupsSheet
         visible={groupsOpen}
         onClose={() => setGroupsOpen(false)}
-        title={`群聊（${groups.length}）`}
-        maxHeight="80%"
-      >
-        <SectionList
-          sections={[{ title: '群聊', data: groups }]}
-          keyExtractor={(g) => g.conversation.id}
-          style={{ maxHeight: 420 }}
-          renderSectionHeader={() => null}
-          renderItem={({ item: g }) => (
-            <ListRow
-              leading={<Avatar name={g.displayTitle} variant="group" size={34} />}
-              title={g.displayTitle}
-              subtitle={g.lastMsgPreview ?? '暂无消息'}
-              onPress={() => {
-                setGroupsOpen(false);
-                router.push(`/chat/${g.conversation.id}`);
-              }}
-            />
-          )}
-          ListEmptyComponent={<EmptyState title="还没有群聊" />}
-        />
-      </BottomSheet>
+        groups={groups}
+        onOpen={(id) => {
+          setGroupsOpen(false);
+          router.push(`/chat/${id}`);
+        }}
+      />
     </View>
   );
 }

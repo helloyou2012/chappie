@@ -107,6 +107,7 @@ export function IconButton({
   tone = 'default',
   disabled = false,
   filled = false,
+  solid = false,
 }: {
   icon: IconName;
   /** 无障碍标签（必填） */
@@ -116,6 +117,8 @@ export function IconButton({
   tone?: 'default' | 'primary' | 'danger' | 'muted';
   disabled?: boolean;
   filled?: boolean;
+  /** 实心圆钮：tone 色为底、图标反白；禁用时回落为中性灰 */
+  solid?: boolean;
 }) {
   const t = useTheme();
   const color =
@@ -126,6 +129,16 @@ export function IconButton({
         : tone === 'muted'
           ? t.textMuted
           : t.text;
+  const solidBackground = tone === 'danger' ? t.danger : tone === 'primary' ? t.primary : t.text;
+  const solidColor = tone === 'primary' ? t.primaryFg : '#ffffff';
+  const background = solid
+    ? disabled
+      ? t.surfaceHover
+      : solidBackground
+    : filled
+      ? t.surfaceRaised
+      : 'transparent';
+  const fg = solid ? (disabled ? t.textTertiary : solidColor) : color;
   return (
     <Pressable
       accessibilityRole="button"
@@ -140,11 +153,12 @@ export function IconButton({
         borderRadius: size / 2,
         alignItems: 'center',
         justifyContent: 'center',
-        opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
-        backgroundColor: filled ? t.surfaceRaised : 'transparent',
+        // 实心钮禁用时已用中性色表达不可用，不再叠加透明度
+        opacity: disabled ? (solid ? 1 : 0.4) : pressed ? 0.7 : 1,
+        backgroundColor: background,
       })}
     >
-      <Icon name={icon} size={Math.round(size * 0.52)} color={color} />
+      <Icon name={icon} size={Math.round(size * 0.52)} color={fg} />
     </Pressable>
   );
 }

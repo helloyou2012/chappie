@@ -8,8 +8,10 @@ import { useTheme } from '@/hooks/use-theme';
 export type TextVariant =
   | 'h1'
   | 'h2'
+  | 'nav'
   | 'title'
   | 'subtitle'
+  | 'row'
   | 'body'
   | 'bodySm'
   | 'caption'
@@ -28,10 +30,12 @@ export type TextTone =
   | 'agent';
 
 const VARIANTS: Record<TextVariant, TextStyle> = {
-  h1: { fontSize: 24, fontWeight: '700', letterSpacing: -0.3 },
+  h1: { fontSize: 26, fontWeight: '700', letterSpacing: -0.4 },
   h2: { fontSize: 20, fontWeight: '700', letterSpacing: -0.2 },
+  nav: { fontSize: 17, fontWeight: '600', letterSpacing: -0.2 },
   title: { fontSize: 17, fontWeight: '700' },
   subtitle: { fontSize: 15, fontWeight: '600' },
+  row: { fontSize: 16, fontWeight: '400', letterSpacing: -0.2 },
   body: { fontSize: 14 },
   bodySm: { fontSize: 13 },
   caption: { fontSize: 12 },

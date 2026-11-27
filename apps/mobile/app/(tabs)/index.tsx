@@ -1,121 +1,15 @@
-import {
-  api,
-  type ContactView,
-  type ConversationView,
-  type DeviceView,
-  formatTime,
-  useAuthStore,
-  useChatStore,
-} from '@chappie/shared';
+import { api, type DeviceView, useAuthStore, useChatStore } from '@chappie/shared';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, FlatList, Platform, RefreshControl, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FlatList, Platform, RefreshControl, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-remix-icon';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ConversationRow } from '@/components/conversations/conversation-row';
+import { NewConversationSheet } from '@/components/conversations/new-conversation-sheet';
 import { useTheme } from '@/hooks/use-theme';
 import { ensurePushRegistered } from '@/push';
 import { connectRealtime, disconnectRealtime } from '@/realtime';
-import {
-  Avatar,
-  Badge,
-  BottomSheet,
-  Button,
-  EmptyState,
-  IconButton,
-  Input,
-  ListRow,
-  PageHeader,
-  SegmentedControl,
-  Spinner,
-  Text,
-} from '@/ui';
-
-function ConvRow({
-  view,
-  myId,
-  onPress,
-}: {
-  view: ConversationView;
-  myId: string;
-  onPress: () => void;
-}) {
-  const t = useTheme();
-  const isSelf = view.conversation.systemTag === 'avatar_self';
-  const isGroup = view.conversation.type === 'group';
-  const fromMe = view.lastMsgSenderId === myId;
-  const muted = view.myAiMode === 'off';
-  // 群聊预览带发送者（「昵称: 内容」）
-  const prefix =
-    isGroup && !fromMe && view.lastMsgSenderName
-      ? `${view.lastMsgSenderName}：`
-      : fromMe
-        ? '我：'
-        : '';
-
-  return (
-    <ListRow
-      leading={
-        <View style={{ position: 'relative' }}>
-          <Avatar
-            name={view.displayTitle}
-            variant={isSelf ? 'avatar' : isGroup ? 'group' : 'human'}
-            size={44}
-          />
-          {view.unreadCount > 0 ? (
-            <View
-              style={{
-                position: 'absolute',
-                top: -1,
-                right: -1,
-                width: 9,
-                height: 9,
-                borderRadius: 5,
-                backgroundColor: t.danger,
-                borderWidth: 1.5,
-                borderColor: t.card,
-              }}
-            />
-          ) : null}
-        </View>
-      }
-      title={view.displayTitle}
-      titleTrailing={
-        <>
-          {isSelf ? <Badge label="分身" tone="ai" /> : null}
-          {isGroup ? <Badge label="群聊" /> : null}
-          {muted ? <Icon name="notification-off-line" size={12} color={t.textTertiary} /> : null}
-        </>
-      }
-      subtitle={`${prefix}${view.lastMsgPreview ?? '暂无消息'}`}
-      trailing={
-        <View style={{ alignItems: 'flex-end', gap: 4 }}>
-          <Text variant="micro" tone="muted">
-            {formatTime(view.lastMsgAt)}
-          </Text>
-          {view.unreadCount > 0 ? (
-            <View
-              style={{
-                minWidth: 18,
-                height: 18,
-                borderRadius: 9,
-                backgroundColor: t.primary,
-                alignItems: 'center',
-                justifyContent: 'center',
-                paddingHorizontal: 5,
-              }}
-            >
-              <Text variant="micro" tone="onPrimary" style={{ fontWeight: '600' }}>
-                {view.unreadCount > 99 ? '99+' : view.unreadCount}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      }
-      onPress={onPress}
-      accessibilityLabel={`${view.displayTitle}，${view.lastMsgPreview ?? '暂无消息'}`}
-    />
-  );
-}
+import { Avatar, Button, EmptyState, IconButton, PageHeader, SearchField, Text } from '@/ui';
 
 export default function ChatsScreen() {
   const t = useTheme();
@@ -128,15 +22,9 @@ export default function ChatsScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [otherDevice, setOtherDevice] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [newOpen, setNewOpen] = useState(false);
-  const [contacts, setContacts] = useState<ContactView[]>([]);
-  const [contactsLoading, setContactsLoading] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [tab, setTab] = useState<'direct' | 'group'>('direct');
-  const [title, setTitle] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [contactEmail, setContactEmail] = useState('');
-  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -172,105 +60,88 @@ export default function ChatsScreen() {
     }
   }, [loadConversations]);
 
-  const openNew = async () => {
-    setNewOpen(true);
-    setContactEmail('');
-    setSelected([]);
-    setTitle('');
-    setTab('direct');
-    setContactsLoading(true);
-    try {
-      const res = await api.listContacts();
-      setContacts(res.contacts);
-    } catch {
-      setContacts([]);
-    } finally {
-      setContactsLoading(false);
-    }
-  };
-
-  const addContact = async () => {
-    const email = contactEmail.trim();
-    if (!email) return;
-    setAdding(true);
-    try {
-      const res = await api.sendFriendRequest({ email });
-      setContactEmail('');
-      if (res.request.status === 'accepted') {
-        const contactsRes = await api.listContacts();
-        setContacts(contactsRes.contacts);
-        Alert.alert('已互为联系人', res.request.toUser.name);
-      } else {
-        Alert.alert('好友申请已发送', `等待 ${res.request.toUser.name} 确认`);
-      }
-    } catch (e) {
-      Alert.alert('发送失败', e instanceof Error ? e.message : String(e));
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  const create = async () => {
-    if (selected.length === 0) return;
-    setCreating(true);
-    try {
-      const res = await api.createConversation({
-        type: tab,
-        memberUserIds: selected,
-        title: tab === 'group' ? title.trim() || '新群聊' : undefined,
-      });
-      await loadConversations();
-      setNewOpen(false);
-      setSelected([]);
-      setTitle('');
-      router.push(`/chat/${res.view.conversation.id}`);
-    } finally {
-      setCreating(false);
-    }
-  };
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter((c) =>
+      `${c.displayTitle} ${c.lastMsgPreview ?? ''}`.toLowerCase().includes(q),
+    );
+  }, [conversations, query]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.bg }}>
+    <View style={{ flex: 1, backgroundColor: t.card }}>
       <PageHeader
         large
+        avatar={<Avatar name={user?.name ?? '我'} size={44} />}
         title="消息"
-        subtitle={user?.email}
+        subtitle={user?.department || user?.email}
         right={
-          <View style={{ flexDirection: 'row', gap: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
             <IconButton
-              icon="add-line"
+              icon="search-line"
+              label="搜索会话"
+              size={38}
+              tone={searchOpen ? 'primary' : 'default'}
+              onPress={() => {
+                setSearchOpen((v) => !v);
+                if (searchOpen) setQuery('');
+              }}
+            />
+            <IconButton
+              icon="add-circle-line"
               label="新建会话"
-              tone="primary"
-              filled
-              onPress={() => void openNew()}
+              size={38}
+              onPress={() => setNewOpen(true)}
             />
           </View>
         }
       />
 
-      {otherDevice ? (
+      {searchOpen ? (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 10 }}>
+          <SearchField
+            autoFocus
+            value={query}
+            onChangeText={setQuery}
+            placeholder="搜索"
+            onCancel={() => {
+              setSearchOpen(false);
+              setQuery('');
+            }}
+          />
+        </View>
+      ) : null}
+
+      {otherDevice && !searchOpen ? (
         <View
           style={{
             flexDirection: 'row',
             alignItems: 'center',
             gap: 8,
-            paddingHorizontal: 20,
-            paddingBottom: 6,
+            paddingHorizontal: 16,
+            paddingVertical: 9,
+            backgroundColor: t.bg,
           }}
         >
-          <Icon name="computer-line" size={14} color={t.textTertiary} />
-          <Text variant="micro" tone="muted">
+          <Icon name="computer-line" size={16} color={t.textMuted} />
+          <Text variant="caption" tone="muted">
             {otherDevice}已登录
           </Text>
         </View>
       ) : null}
 
       <FlatList
-        data={conversations}
+        data={filtered}
         keyExtractor={(item) => item.conversation.id}
-        contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: insets.bottom + 12 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 12 }}
         ItemSeparatorComponent={() => (
-          <View style={{ height: 1, backgroundColor: t.border, marginLeft: 70 }} />
+          <View
+            style={{
+              height: StyleSheet.hairlineWidth,
+              backgroundColor: t.separator,
+              marginLeft: 76,
+            }}
+          />
         )}
         refreshControl={
           <RefreshControl
@@ -280,126 +151,42 @@ export default function ChatsScreen() {
           />
         }
         renderItem={({ item }) => (
-          <ConvRow
+          <ConversationRow
             view={item}
             myId={user?.id ?? ''}
             onPress={() => router.push(`/chat/${item.conversation.id}`)}
           />
         )}
         ListEmptyComponent={
-          <EmptyState
-            icon="chat-3-line"
-            title="还没有会话"
-            description="点右上角 + 添加联系人并开始聊天"
-            action={
-              <Button label="新建会话" size="sm" fullWidth={false} onPress={() => void openNew()} />
-            }
-          />
+          query.trim() ? (
+            <EmptyState icon="search-line" title="没有匹配的会话" description="换个关键词试试" />
+          ) : (
+            <EmptyState
+              icon="chat-3-line"
+              title="还没有会话"
+              description="点右上角 + 添加联系人并开始聊天"
+              action={
+                <Button
+                  label="新建会话"
+                  size="sm"
+                  fullWidth={false}
+                  onPress={() => setNewOpen(true)}
+                />
+              }
+            />
+          )
         }
       />
 
-      <BottomSheet
+      <NewConversationSheet
         visible={newOpen}
         onClose={() => setNewOpen(false)}
-        title="新建会话"
-        description="选择联系人发起单聊，或创建群聊。对方与双方的分身会一同加入。"
-        maxHeight="82%"
-      >
-        <SegmentedControl
-          options={[
-            { value: 'direct', label: '单聊' },
-            { value: 'group', label: '群聊' },
-          ]}
-          value={tab}
-          onChange={(v) => {
-            setTab(v);
-            setSelected([]);
-          }}
-          style={{ marginBottom: 8 }}
-        />
-        {tab === 'group' ? (
-          <Input
-            value={title}
-            onChangeText={setTitle}
-            placeholder="群聊名称（可选）"
-            style={{ marginBottom: 8 }}
-          />
-        ) : null}
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
-          <Input
-            size="sm"
-            value={contactEmail}
-            onChangeText={setContactEmail}
-            placeholder="输入邮箱发送好友申请（对方需已注册）"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            style={{ flex: 1 }}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            fullWidth={false}
-            label={adding ? '发送中' : '发送申请'}
-            loading={adding}
-            disabled={!contactEmail.trim()}
-            onPress={() => void addContact()}
-          />
-        </View>
-
-        {contactsLoading ? (
-          <Spinner />
-        ) : (
-          <FlatList
-            data={contacts}
-            keyExtractor={(c) => c.user.id}
-            style={{ maxHeight: 280 }}
-            renderItem={({ item }) => {
-              const checked = selected.includes(item.user.id);
-              return (
-                <ListRow
-                  leading={<Avatar name={item.user.name} size={34} />}
-                  title={item.user.name}
-                  subtitle={item.user.email}
-                  selected={checked}
-                  trailing={checked ? <Icon name="check-line" size={18} color={t.primary} /> : null}
-                  onPress={() => {
-                    if (tab === 'direct') setSelected([item.user.id]);
-                    else
-                      setSelected((prev) =>
-                        prev.includes(item.user.id)
-                          ? prev.filter((x) => x !== item.user.id)
-                          : [...prev, item.user.id],
-                      );
-                  }}
-                />
-              );
-            }}
-            ListEmptyComponent={
-              <EmptyState
-                icon="contacts-line"
-                title="还没有联系人"
-                description="用上方邮箱框添加，对方注册后即可发起会话"
-              />
-            }
-          />
-        )}
-
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-          <Button
-            label={tab === 'direct' ? '发起单聊' : `创建群聊（${selected.length}）`}
-            loading={creating}
-            disabled={selected.length === 0}
-            onPress={() => void create()}
-            style={{ flex: 1 }}
-          />
-          <Button
-            label="取消"
-            variant="outline"
-            fullWidth={false}
-            onPress={() => setNewOpen(false)}
-          />
-        </View>
-      </BottomSheet>
+        onCreated={(id) => {
+          void loadConversations();
+          setNewOpen(false);
+          router.push(`/chat/${id}`);
+        }}
+      />
     </View>
   );
 }

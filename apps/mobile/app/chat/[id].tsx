@@ -1,57 +1,26 @@
-import { type Content, contentText } from '@chappie/contract';
 import {
-  adminApi,
   api,
-  dayjs,
-  formatTime,
   type Message,
   type PendingMessage,
-  RECEPTION_LABELS,
   type ReceptionStrategy,
-  STRATEGY_LABELS,
   useAuthStore,
   useChatStore,
 } from '@chappie/shared';
-import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  View,
-} from 'react-native';
-import Icon from 'react-native-remix-icon';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FlatList, KeyboardAvoidingView, Platform, View } from 'react-native';
+import { ChatHeader } from '@/components/chat/chat-header';
+import { ChatComposer, type ReplyTarget } from '@/components/chat/composer';
+import { PendingMessageBubble } from '@/components/chat/pending-message';
+import { ReceptionSheet } from '@/components/chat/reception-sheet';
 import { MemberSheet } from '@/components/member-sheet';
 import { type CardAction, MessageBubble } from '@/components/message';
 import { useTheme } from '@/hooks/use-theme';
 import { realtime } from '@/realtime';
-import { modeLabels } from '@/theme';
-import { Badge, BottomSheet, Button, Chip, IconButton, Input, Text } from '@/ui';
-
-function newClientId(): string {
-  return `cm_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-}
-
-const STRATEGIES: ReceptionStrategy[] = [
-  'summon',
-  'assist',
-  'full',
-  'screen',
-  'decline',
-  'escalate',
-  'silent',
-];
+import { Button, Text } from '@/ui';
 
 export default function ChatScreen() {
   const t = useTheme();
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string }>();
   const convId = typeof params.id === 'string' ? params.id : '';
@@ -65,9 +34,6 @@ export default function ChatScreen() {
   const loadMembers = useChatStore((s) => s.loadMembers);
   const setActiveConv = useChatStore((s) => s.setActiveConv);
   const loadConversations = useChatStore((s) => s.loadConversations);
-  const addPending = useChatStore((s) => s.addPending);
-  const updatePending = useChatStore((s) => s.updatePending);
-  const removePending = useChatStore((s) => s.removePending);
   const myId = useAuthStore((s) => s.user?.id ?? '');
 
   const view = conversations.find((c) => c.conversation.id === convId);
@@ -83,29 +49,12 @@ export default function ChatScreen() {
     ...pending.map((p) => ({ kind: 'pending' as const, pending: p })),
   ];
 
-  const [text, setText] = useState('');
-  const [mentions, setMentions] = useState<string[]>([]);
   const [memberSheetOpen, setMemberSheetOpen] = useState(false);
   const [modeSheetOpen, setModeSheetOpen] = useState(false);
-  const [replyTo, setReplyTo] = useState<{ msgId: string; preview: string } | null>(null);
+  const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [olderExhausted, setOlderExhausted] = useState(false);
   const [showJump, setShowJump] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  /** 同步发送锁：state 更新前拦住连点 */
-  const sendingRef = useRef(false);
-  const lastSentAtRef = useRef(0);
-  const [attachments, setAttachments] = useState<
-    Array<{
-      uri: string;
-      name: string;
-      type: string;
-      isImage: boolean;
-      width?: number;
-      height?: number;
-      size?: number;
-    }>
-  >([]);
   const [, setTypingTick] = useState(0);
   const listRef = useRef<FlatList>(null);
   const atBottomRef = useRef(true);
@@ -172,191 +121,6 @@ export default function ChatScreen() {
     );
   }, [messages.length, pending.length, lastSig]);
 
-  const uploadOne = async (att: {
-    uri: string;
-    name: string;
-    type: string;
-    isImage: boolean;
-    width?: number;
-    height?: number;
-    size?: number;
-  }): Promise<Content> => {
-    const { file: info, url } = await adminApi.uploadFile(
-      { uri: att.uri, name: att.name, type: att.type },
-      att.name,
-    );
-    return info.mime.startsWith('image/')
-      ? {
-          type: 'image',
-          schemaVersion: 1,
-          url,
-          name: info.name,
-          ...(att.width ? { width: att.width } : {}),
-          ...(att.height ? { height: att.height } : {}),
-        }
-      : {
-          type: 'file',
-          schemaVersion: 1,
-          url,
-          name: info.name,
-          ...(info.size ? { size: info.size } : {}),
-        };
-  };
-
-  const send = async () => {
-    // 同步锁 + 短冷却：拦截连点等重复提交
-    if (sendingRef.current || Date.now() - lastSentAtRef.current < 600) return;
-    const value = text.trim();
-    if (!value && attachments.length === 0) return;
-    if (!convId) return;
-    const ws = realtime();
-    if (!ws?.isOpen) {
-      Alert.alert('连接未就绪', '正在重新连接，请稍候再试');
-      return;
-    }
-    sendingRef.current = true;
-    lastSentAtRef.current = Date.now();
-    setUploading(true);
-
-    const batch = [...attachments];
-    const batchIds = batch.map(() => newClientId());
-    const textId = value ? newClientId() : null;
-    const createdAt = dayjs().toISOString();
-    const replyToId = replyTo?.msgId ?? null;
-
-    // 1) 立即上屏：图片用本地预览，文本同时显示
-    batch.forEach((att, i) => {
-      const content: Content = att.isImage
-        ? {
-            type: 'image',
-            schemaVersion: 1,
-            url: att.uri,
-            name: att.name,
-            ...(att.width ? { width: att.width } : {}),
-            ...(att.height ? { height: att.height } : {}),
-          }
-        : {
-            type: 'file',
-            schemaVersion: 1,
-            url: '',
-            name: att.name,
-            ...(att.size ? { size: att.size } : {}),
-          };
-      addPending({
-        clientMsgId: batchIds[i]!,
-        convId,
-        content,
-        mentions: [],
-        replyTo: replyToId,
-        createdAt,
-        status: 'uploading',
-      });
-    });
-    if (value && textId) {
-      addPending({
-        clientMsgId: textId,
-        convId,
-        content: { type: 'text', schemaVersion: 1, text: value },
-        mentions,
-        replyTo: replyToId,
-        createdAt,
-        status: 'sending',
-      });
-    }
-    setText('');
-    setMentions([]);
-    setReplyTo(null);
-    setAttachments([]);
-
-    const uploaded: { clientMsgId: string; content: Content }[] = [];
-    const failed: string[] = [];
-    try {
-      // 2) 异步上传；完成后只更新 pending，不立即发 WS
-      for (let i = 0; i < batch.length; i++) {
-        const att = batch[i]!;
-        const clientMsgId = batchIds[i]!;
-        try {
-          const content = await uploadOne(att);
-          updatePending(convId, clientMsgId, { content, status: 'sending' });
-          uploaded.push({ clientMsgId, content });
-        } catch {
-          removePending(convId, clientMsgId);
-          failed.push(att.name);
-          setAttachments((prev) => [...prev, att]);
-        }
-      }
-
-      // 3) 全部上传完成后快速提交，附件+文本落在同一个 AI 合并窗口内
-      for (const item of uploaded) {
-        ws.sendMessage(convId, item.content, {
-          clientMsgId: item.clientMsgId,
-          mentions: [],
-          replyTo: replyToId,
-        });
-      }
-      if (value && textId) {
-        ws.sendMessage(
-          convId,
-          { type: 'text', schemaVersion: 1, text: value },
-          { clientMsgId: textId, mentions, replyTo: replyToId },
-        );
-      }
-      if (failed.length > 0) {
-        Alert.alert('部分附件上传失败', failed.join('、'));
-      }
-    } catch (e) {
-      Alert.alert('发送失败', e instanceof Error ? e.message : String(e));
-    } finally {
-      sendingRef.current = false;
-      setUploading(false);
-    }
-  };
-
-  const pickImage = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('需要相册权限', '请在系统设置中允许访问照片');
-      return;
-    }
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.85,
-      allowsMultipleSelection: true,
-    });
-    if (res.canceled) return;
-    setAttachments((prev) => [
-      ...prev,
-      ...res.assets.map((asset) => ({
-        uri: asset.uri,
-        name: asset.fileName ?? `image-${Date.now()}.jpg`,
-        type: asset.mimeType ?? 'image/jpeg',
-        isImage: true,
-        width: asset.width,
-        height: asset.height,
-        size: asset.fileSize,
-      })),
-    ]);
-  };
-
-  const pickFile = async () => {
-    const res = await DocumentPicker.getDocumentAsync({
-      type: ['application/pdf', 'text/*', 'application/json', 'application/zip'],
-      multiple: true,
-      copyToCacheDirectory: true,
-    });
-    if (res.canceled) return;
-    setAttachments((prev) => [
-      ...prev,
-      ...res.assets.map((asset) => ({
-        uri: asset.uri,
-        name: asset.name,
-        type: asset.mimeType ?? 'application/octet-stream',
-        isImage: (asset.mimeType ?? '').startsWith('image/'),
-        size: asset.size,
-      })),
-    ]);
-  };
-
   const onCardAction = (msgId: string, action: CardAction, editedText?: string) => {
     void api.cardAction(msgId, { action, editedText }).catch(() => undefined);
   };
@@ -409,7 +173,9 @@ export default function ChatScreen() {
       .catch(() => undefined);
   };
 
-  const mentionCandidates = members.filter((m) => m.principalId !== myId);
+  const isGroupChat = Boolean(
+    view && view.conversation.type === 'group' && view.conversation.systemTag === null,
+  );
   const now = Date.now();
   const activeTypers = Object.entries(typingByConv[convId] ?? {}).filter(
     ([pid, until]) => pid !== myId && until > now,
@@ -427,70 +193,13 @@ export default function ChatScreen() {
       style={{ flex: 1, backgroundColor: t.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {/* 头部 */}
-      <View
-        style={{
-          paddingTop: insets.top + 6,
-          paddingBottom: 8,
-          paddingHorizontal: 8,
-          backgroundColor: t.card,
-          borderBottomWidth: 1,
-          borderBottomColor: t.border,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 6,
-        }}
-      >
-        <IconButton
-          icon="arrow-left-s-line"
-          label="返回"
-          tone="primary"
-          onPress={() => router.back()}
-        />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Text variant="subtitle" numberOfLines={1} style={{ flexShrink: 1 }}>
-              {view?.displayTitle ?? '会话'}
-            </Text>
-            {view?.conversation.systemTag === 'avatar_self' ? (
-              <Badge label="分身" tone="ai" />
-            ) : null}
-          </View>
-          <Text variant="micro" tone="muted" numberOfLines={1}>
-            {view?.conversation.systemTag === 'avatar_self'
-              ? '与分身直接对话，无需切换接待身份'
-              : view?.conversation.type === 'group'
-                ? `${members.filter((m) => m.principalType === 'human').length} 位成员 · ${
-                    members.filter((m) => m.principalType === 'avatar').length
-                  } 个分身`
-                : view?.peerReception?.state === 'avatar'
-                  ? '对方由 AI 分身接待'
-                  : '对方当前为真人接待'}
-          </Text>
-        </View>
-        {view?.conversation.systemTag === 'avatar_self' ? (
-          <Badge label="控制通道" tone="ai" />
-        ) : (
-          <Button
-            size="sm"
-            variant="secondary"
-            fullWidth={false}
-            label={`${
-              view?.myReception
-                ? RECEPTION_LABELS[view.myReception.state]
-                : modeLabels[view?.myAiMode ?? 'manual']
-            }${
-              view?.myReception?.state === 'avatar'
-                ? ` · ${STRATEGY_LABELS[view.myReception.strategy] ?? ''}`
-                : ''
-            }${view?.myReception?.until ? ' · 临时' : ''}`}
-            onPress={() => setModeSheetOpen(true)}
-          />
-        )}
-        {view && view.conversation.type === 'group' && view.conversation.systemTag === null ? (
-          <IconButton icon="team-line" label="成员管理" onPress={() => setMemberSheetOpen(true)} />
-        ) : null}
-      </View>
+      <ChatHeader
+        view={view}
+        members={members}
+        onBack={() => router.back()}
+        onModePress={() => setModeSheetOpen(true)}
+        onMembersPress={() => setMemberSheetOpen(true)}
+      />
 
       <FlatList
         ref={listRef}
@@ -500,124 +209,7 @@ export default function ChatScreen() {
         }
         renderItem={({ item }) => {
           if (item.kind === 'pending') {
-            const pc = item.pending.content;
-            const uploading = item.pending.status === 'uploading';
-            return (
-              <View
-                style={{
-                  alignItems: 'flex-end',
-                  paddingHorizontal: 14,
-                  paddingVertical: 5,
-                }}
-              >
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 4,
-                    marginBottom: 3,
-                  }}
-                >
-                  <Text variant="micro" tone="muted">
-                    我 · {formatTime(item.pending.createdAt)} · {uploading ? '上传中' : '发送中'}
-                  </Text>
-                  <ActivityIndicator size="small" color={t.textMuted} />
-                </View>
-                {pc.type === 'image' ? (
-                  <View
-                    style={{
-                      position: 'relative',
-                      borderRadius: 16,
-                      overflow: 'hidden',
-                      backgroundColor: t.surfaceRaised,
-                    }}
-                  >
-                    {pc.url ? (
-                      <Image
-                        source={{ uri: pc.url }}
-                        style={{
-                          width: 220,
-                          height:
-                            pc.width && pc.height
-                              ? Math.min(280, Math.round((220 * pc.height) / pc.width))
-                              : 160,
-                          opacity: uploading ? 0.7 : 1,
-                        }}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View
-                        style={{
-                          width: 220,
-                          height: 160,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <ActivityIndicator color={t.primary} />
-                      </View>
-                    )}
-                    {uploading ? (
-                      <View
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          backgroundColor: 'rgba(0,0,0,0.25)',
-                        }}
-                      >
-                        <ActivityIndicator color="#fff" />
-                      </View>
-                    ) : null}
-                  </View>
-                ) : pc.type === 'file' ? (
-                  <View
-                    style={{
-                      width: 260,
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 8,
-                      borderRadius: 12,
-                      backgroundColor: t.primary,
-                      padding: 10,
-                    }}
-                  >
-                    <Icon name="file-text-line" size={20} color={t.primaryFg} />
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text
-                        variant="caption"
-                        numberOfLines={1}
-                        style={{ color: t.primaryFg, fontWeight: '600' }}
-                      >
-                        {pc.name ?? '文件'}
-                      </Text>
-                      {typeof pc.size === 'number' ? (
-                        <Text variant="micro" style={{ color: t.primaryFg, opacity: 0.8 }}>
-                          {formatBytes(pc.size)}
-                        </Text>
-                      ) : null}
-                    </View>
-                    {uploading ? <ActivityIndicator color={t.primaryFg} /> : null}
-                  </View>
-                ) : (
-                  <View
-                    style={{
-                      backgroundColor: t.primary,
-                      borderRadius: 16,
-                      paddingHorizontal: 13,
-                      paddingVertical: 9,
-                      maxWidth: '82%',
-                    }}
-                  >
-                    <Text style={{ fontSize: 15, color: t.primaryFg }}>{contentText(pc)}</Text>
-                  </View>
-                )}
-              </View>
-            );
+            return <PendingMessageBubble pending={item.pending} />;
           }
           return (
             <MessageBubble
@@ -661,31 +253,6 @@ export default function ChatScreen() {
         }
       />
 
-      {/* 提及候选 */}
-      {mentionCandidates.length > 0 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ maxHeight: 42, borderTopWidth: 1, borderTopColor: t.border }}
-          contentContainerStyle={{ paddingHorizontal: 10, paddingVertical: 6, gap: 6 }}
-        >
-          {mentionCandidates.map((m) => (
-            <Chip
-              key={m.principalId}
-              label={`@${m.name}${m.principalType === 'avatar' ? ' ✨' : ''}`}
-              active={mentions.includes(m.principalId)}
-              onPress={() =>
-                setMentions((prev) =>
-                  prev.includes(m.principalId)
-                    ? prev.filter((x) => x !== m.principalId)
-                    : [...prev, m.principalId],
-                )
-              }
-            />
-          ))}
-        </ScrollView>
-      ) : null}
-
       {showJump ? (
         <View style={{ alignItems: 'center', paddingVertical: 4 }}>
           <Button
@@ -703,160 +270,32 @@ export default function ChatScreen() {
         </View>
       ) : null}
 
-      {/* 正在输入 / 分身处理中：固定高度占位，消失时高度不变 */}
-      <View
-        style={{
-          height: 24,
-          paddingHorizontal: 16,
-          justifyContent: 'center',
-          opacity: typingNames.length > 0 ? 1 : 0,
-        }}
-        pointerEvents={typingNames.length > 0 ? 'auto' : 'none'}
-      >
-        <Text variant="micro" tone="muted" numberOfLines={1}>
-          {typingNames.length > 0
-            ? avatarTyping
-              ? '分身正在处理…'
-              : `${typingNames.join('、')} 正在输入…`
-            : ' '}
-        </Text>
-      </View>
-
-      {/* 输入栏 */}
-      <View
-        style={{
-          borderTopWidth: 1,
-          borderTopColor: t.border,
-          backgroundColor: t.card,
-          paddingBottom: Math.max(insets.bottom, 10),
-        }}
-      >
-        {replyTo ? (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              marginHorizontal: 12,
-              marginTop: 8,
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 8,
-              backgroundColor: t.bg,
-              borderLeftWidth: 2,
-              borderLeftColor: t.primary,
-            }}
-          >
-            <Text variant="caption" tone="muted" numberOfLines={1} style={{ flex: 1 }}>
-              回复:{replyTo.preview}
-            </Text>
-            <IconButton
-              icon="close-line"
-              label="取消回复"
-              size={28}
-              tone="muted"
-              onPress={() => setReplyTo(null)}
-            />
-          </View>
-        ) : null}
-        {attachments.length > 0 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingTop: 8 }}
-          >
-            {attachments.map((att, index) => (
-              <View
-                key={`${att.uri}-${att.name}`}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  backgroundColor: t.surfaceRaised,
-                  borderRadius: 10,
-                  padding: 4,
-                }}
-              >
-                {att.isImage ? (
-                  <Image
-                    source={{ uri: att.uri }}
-                    style={{ width: 34, height: 34, borderRadius: 6 }}
-                  />
-                ) : (
-                  <Icon name="file-text-line" size={16} color={t.textMuted} />
-                )}
-                <Text variant="micro" tone="muted" numberOfLines={1} style={{ maxWidth: 110 }}>
-                  {att.name}
-                </Text>
-                <IconButton
-                  icon="close-line"
-                  label="移除附件"
-                  size={24}
-                  tone="muted"
-                  onPress={() => setAttachments((prev) => prev.filter((_, i) => i !== index))}
-                />
-              </View>
-            ))}
-          </ScrollView>
-        ) : null}
+      {/* 正在输入 / 分身处理中：仅在实际发生时占位，空闲时不留下灰色空条 */}
+      {typingNames.length > 0 ? (
         <View
           style={{
-            flexDirection: 'row',
-            alignItems: 'flex-end',
-            gap: 8,
-            paddingHorizontal: 12,
-            paddingTop: 8,
+            height: 24,
+            paddingHorizontal: 16,
+            justifyContent: 'center',
+            backgroundColor: t.card,
           }}
         >
-          <IconButton
-            icon="image-line"
-            label="发送图片"
-            size={36}
-            tone="muted"
-            disabled={uploading}
-            onPress={() => void pickImage()}
-          />
-          <IconButton
-            icon="attachment-2"
-            label="发送文件"
-            size={36}
-            tone="muted"
-            disabled={uploading}
-            onPress={() => void pickFile()}
-          />
-          {uploading ? <ActivityIndicator size="small" color={t.primary} /> : null}
-          <Input
-            value={text}
-            onChangeText={(v) => {
-              setText(v);
-              realtime()?.typing(convId);
-            }}
-            placeholder="输入消息…"
-            multiline
-            style={{ flex: 1, maxHeight: 110, borderRadius: 22, paddingVertical: 9 }}
-          />
-          {avatarTyping ? (
-            <IconButton
-              icon="stop-circle-line"
-              label="停止分身并接管"
-              size={44}
-              tone="danger"
-              filled
-              onPress={takeover}
-            />
-          ) : (
-            <IconButton
-              icon="send-plane-fill"
-              label="发送"
-              size={44}
-              tone="primary"
-              filled
-              disabled={(!text.trim() && attachments.length === 0) || uploading}
-              onPress={() => void send()}
-            />
-          )}
+          <Text variant="micro" tone="muted" numberOfLines={1}>
+            {avatarTyping ? '分身正在处理…' : `${typingNames.join('、')} 正在输入…`}
+          </Text>
         </View>
-      </View>
+      ) : null}
+
+      <ChatComposer
+        convId={convId}
+        members={members}
+        myId={myId}
+        isGroup={isGroupChat}
+        avatarTyping={avatarTyping}
+        replyTo={replyTo}
+        onClearReply={() => setReplyTo(null)}
+        onTakeover={takeover}
+      />
 
       {view ? (
         <MemberSheet
@@ -869,70 +308,14 @@ export default function ChatScreen() {
         />
       ) : null}
 
-      {/* 接待权选择（真人/分身 + 策略 + 临时托管） */}
-      <BottomSheet
+      <ReceptionSheet
         visible={modeSheetOpen}
         onClose={() => setModeSheetOpen(false)}
-        title="接待方式"
-        description="真人接待时分身只在你召唤或确认草稿时协助；临时托管到期自动回落。"
-      >
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-          <Button
-            size="sm"
-            variant={view?.myReception?.state !== 'avatar' ? 'primary' : 'outline'}
-            label="真人接待"
-            onPress={() => changeReception('human', view?.myReception?.strategy ?? 'assist')}
-            style={{ flex: 1 }}
-          />
-          <Button
-            size="sm"
-            variant={view?.myReception?.state === 'avatar' ? 'primary' : 'outline'}
-            label="分身接待"
-            onPress={() => release()}
-            style={{ flex: 1 }}
-          />
-        </View>
-        <Text variant="micro" tone="muted" style={{ marginTop: 14 }}>
-          分身策略
-        </Text>
-        {STRATEGIES.map((s) => {
-          const active = view?.myReception?.strategy === s;
-          return (
-            <View
-              key={s}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}
-            >
-              <Button
-                size="sm"
-                variant={active ? 'primary' : 'outline'}
-                label={`${STRATEGY_LABELS[s] ?? s}${active ? '（当前）' : ''}`}
-                onPress={() => changeReception('avatar', s)}
-                style={{ flex: 1 }}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                fullWidth={false}
-                label="临时 2h"
-                onPress={() => changeReception('avatar', s, 2)}
-              />
-            </View>
-          );
-        })}
-        <Button
-          variant="outline"
-          tone="warning"
-          label="接管对话（暂停分身并冷却 15 分钟）"
-          onPress={takeover}
-          style={{ marginTop: 14 }}
-        />
-      </BottomSheet>
+        view={view}
+        onChangeReception={changeReception}
+        onTakeover={takeover}
+        onRelease={release}
+      />
     </KeyboardAvoidingView>
   );
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }

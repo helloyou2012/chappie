@@ -37,6 +37,9 @@ export function MessageBubble({
   const t = useTheme();
   const mine = message.senderId === myId;
   const isAvatar = message.senderType === 'avatar';
+  // 分身代表我发言时也归到「我」这一侧，避免自己的分身消息混在对方消息里
+  const onBehalfOfMe = isAvatar && message.onBehalfOf === myId;
+  const selfSide = mine || onBehalfOfMe;
   const sender = members.find((m) => m.principalId === message.senderId);
   const [showExplain, setShowExplain] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -50,7 +53,7 @@ export function MessageBubble({
         style={{
           paddingHorizontal: 14,
           paddingVertical: 5,
-          alignItems: mine ? 'flex-end' : 'flex-start',
+          alignItems: selfSide ? 'flex-end' : 'flex-start',
         }}
       >
         <CardView card={message.content.card} msgId={message.msgId} onAction={onCardAction} />
@@ -84,19 +87,30 @@ export function MessageBubble({
 
   return (
     <>
-      <MessageRow mine={mine} wide={isAvatar}>
+      <MessageRow
+        selfSide={selfSide}
+        avatar={
+          selfSide ? null : (
+            <Avatar
+              name={sender?.name ?? '成员'}
+              variant={isAvatar ? 'avatar' : 'human'}
+              size={30}
+            />
+          )
+        }
+      >
         <MessageIdentity
-          mine={mine}
+          selfSide={selfSide}
           senderName={sender?.name}
           senderType={isAvatar ? 'avatar' : 'human'}
-          senderAvatarName={sender?.name}
-          onBehalfOfMe={isAvatar && message.onBehalfOf === myId}
+          onBehalfOfMe={onBehalfOfMe}
           createdAt={message.createdAt}
         />
         <AgentActivityPanel
           thinking={message.recalled ? '' : (message.aiMeta?.thinking ?? '')}
           activity={message.aiMeta?.activity ?? []}
           streaming={Boolean(message.aiMeta?.streaming) && !message.recalled}
+          align={selfSide ? 'right' : 'left'}
         />
         {media ? (
           media.type === 'image' ? (
@@ -120,7 +134,7 @@ export function MessageBubble({
                 alignItems: 'center',
                 gap: 8,
                 borderRadius: 12,
-                backgroundColor: mine ? t.bubbleUser : isAvatar ? t.surfaceRaised : t.bubble,
+                backgroundColor: mine ? t.bubbleUser : isAvatar ? t.aiBubble : t.bubble,
                 padding: 10,
               }}
             >
@@ -144,7 +158,7 @@ export function MessageBubble({
           )
         ) : text ? (
           <MessageSurface
-            mine={mine}
+            selfSide={selfSide}
             isAvatar={isAvatar}
             recalled={message.recalled}
             text={text}
@@ -153,7 +167,9 @@ export function MessageBubble({
               isAvatar && message.aiMeta?.explanation ? () => setShowExplain((v) => !v) : undefined
             }
             onLongPress={message.recalled ? undefined : () => setSheetOpen(true)}
-            accessibilityLabel={`${mine ? '我' : (sender?.name ?? '成员')}：${text}`}
+            accessibilityLabel={`${
+              onBehalfOfMe ? '我的分身' : mine ? '我' : (sender?.name ?? '成员')
+            }：${text}`}
           />
         ) : null}
         {notice ? (
@@ -293,59 +309,89 @@ export function MessageBubble({
 // ---------------------------------------------------------------------------
 
 function MessageRow({
-  mine,
-  wide,
+  selfSide,
+  avatar,
   children,
 }: {
-  mine: boolean;
-  wide?: boolean;
+  selfSide: boolean;
+  avatar: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <View
       style={{
-        paddingHorizontal: 14,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: selfSide ? 'flex-end' : 'flex-start',
+        gap: 8,
+        paddingHorizontal: 12,
         paddingVertical: 5,
-        alignItems: mine ? 'flex-end' : 'flex-start',
       }}
     >
-      <View style={wide ? { width: '100%' } : { maxWidth: '82%' }}>{children}</View>
+      {avatar}
+      <View
+        style={{
+          maxWidth: '82%',
+          flexShrink: 1,
+          alignItems: selfSide ? 'flex-end' : 'flex-start',
+        }}
+      >
+        {children}
+      </View>
     </View>
   );
 }
 
 function MessageIdentity({
-  mine,
+  selfSide,
   senderName,
   senderType,
-  senderAvatarName,
   onBehalfOfMe,
   createdAt,
 }: {
-  mine: boolean;
+  selfSide: boolean;
   senderName?: string;
   senderType: 'human' | 'avatar';
-  senderAvatarName?: string;
   onBehalfOfMe: boolean;
   createdAt: string;
 }) {
   const isAvatar = senderType === 'avatar';
+  // 「我的分身」或「bob 的分身」；真人显示名字
+  const name = onBehalfOfMe
+    ? '我的分身'
+    : isAvatar
+      ? `${senderName ?? '成员'} 的分身`
+      : selfSide
+        ? '我'
+        : (senderName ?? '成员');
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 }}>
-      {!mine && senderAvatarName ? (
-        <Avatar name={senderAvatarName} variant={isAvatar ? 'avatar' : 'human'} size={16} />
-      ) : null}
-      <Text variant="micro" tone="muted" mono>
-        {mine ? '我' : (senderName ?? '成员')}
-        {isAvatar ? ' · AI 代发' : ''}
-        {onBehalfOfMe ? ' · 代表你' : ''} · {formatTime(createdAt)}
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        marginBottom: 4,
+        maxWidth: '100%',
+      }}
+    >
+      <Text
+        variant="caption"
+        tone="muted"
+        numberOfLines={1}
+        style={{ fontWeight: '500', flexShrink: 1 }}
+      >
+        {name}
+      </Text>
+      {isAvatar ? <Badge label="AI" tone="ai" /> : null}
+      <Text variant="micro" tone="tertiary" mono>
+        {formatTime(createdAt)}
       </Text>
     </View>
   );
 }
 
 function MessageSurface({
-  mine,
+  selfSide,
   isAvatar,
   recalled,
   text,
@@ -354,7 +400,7 @@ function MessageSurface({
   onLongPress,
   accessibilityLabel,
 }: {
-  mine: boolean;
+  selfSide: boolean;
   isAvatar: boolean;
   recalled: boolean;
   text: string;
@@ -364,6 +410,14 @@ function MessageSurface({
   accessibilityLabel: string;
 }) {
   const t = useTheme();
+  const background = recalled
+    ? 'transparent'
+    : isAvatar
+      ? t.aiBubble
+      : selfSide
+        ? t.bubbleUser
+        : t.bubble;
+  const color = recalled ? t.textMuted : isAvatar ? t.text : selfSide ? t.bubbleUserText : t.text;
   return (
     <Pressable
       onPress={onPress}
@@ -374,28 +428,16 @@ function MessageSurface({
     >
       <View
         style={{
-          borderRadius: isAvatar ? 0 : 16,
-          paddingHorizontal: isAvatar ? 0 : 13,
-          paddingVertical: isAvatar ? 0 : 9,
-          backgroundColor: isAvatar
-            ? 'transparent'
-            : recalled
-              ? 'transparent'
-              : mine
-                ? t.bubbleUser
-                : t.bubble,
-          borderWidth: recalled && !isAvatar ? 1 : 0,
+          borderRadius: 16,
+          paddingHorizontal: 12,
+          paddingVertical: 9,
+          backgroundColor: background,
+          borderWidth: recalled ? 1 : 0,
           borderColor: t.border,
           borderStyle: recalled ? 'dashed' : 'solid',
         }}
       >
-        <Text
-          style={{
-            fontSize: 15,
-            lineHeight: isAvatar ? 24 : 21,
-            color: recalled ? t.textMuted : mine ? t.bubbleUserText : t.text,
-          }}
-        >
+        <Text style={{ fontSize: 15, lineHeight: 22, color }}>
           {text}
           {streaming ? <BlinkingCursor color={t.primary} /> : null}
         </Text>

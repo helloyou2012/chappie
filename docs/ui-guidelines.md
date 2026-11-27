@@ -236,34 +236,83 @@
 移动端与 Web 共用同一套视觉令牌（`apps/mobile/src/theme.ts` 与本文 1.x 同源），
 但交互形态按触屏重排：悬浮操作 → 长按菜单，常驻侧栏 → 底部抽屉，快捷键提示 → 触控按钮。
 
+导航与列表形态参考飞书 / 微信：**顶层 Tab 用大标题 + 账户头像，二级页用居中导航栏；
+列表页白底通栏、行间发丝线；设置与通讯录用灰色分组间隔 + 彩色图标。**
+
 **硬性约定**
 
 1. 页面与业务组件**只从 `@/ui` 取组件**，不直接 `import { Text, TextInput, ActivityIndicator, Switch, Modal } from 'react-native'`。
-2. 文本一律用 `<Text variant tone>`：`variant` ∈ `h1 h2 title subtitle body bodySm caption micro`；
+2. 文本一律用 `<Text variant tone>`：`variant` ∈ `h1 h2 nav title subtitle row body bodySm caption micro`；
    `tone` ∈ `default muted tertiary primary onPrimary danger success warning ai agent`。
    页面文本优先用 `Text variant tone`；仅登录页大标题等一次性样式可直接写 `fontSize`，并尽量避免硬编码颜色。
-3. 表面用 `<Card>` / `<Divider>` / `<PageHeader>` / `<Screen>`；不手写 `backgroundColor + borderRadius + borderWidth` 组合。
+3. 表面用 `<Card>` / `<Group>` / `<Divider>` / `<Screen>`；不手写 `backgroundColor + borderRadius + borderWidth` 组合。
 4. 操作用 `<Button variant size tone loading>` / `<IconButton icon label>`；`label` 必填（无障碍）。
-5. 表单用 `<Field label hint>` + `<Input multiline>`；选择用 `<SegmentedControl>` / `<ChipRow>` / `<Toggle>`。
+5. 表单用 `<Field label hint>` + `<Input multiline>`；搜索用 `<SearchField>`；选择用 `<SegmentedControl>` / `<ChipRow>` / `<Toggle>`。
 6. 浮层用 `<BottomSheet>`（侧重操作/表单）与 `<Dialog>`（确认/纠错）；菜单行用 `<MenuRow>`。
-7. 列表行用 `<ListRow leading title subtitle trailing onPress>`；空态用 `<EmptyState>`；加载用 `<Spinner>`；
+7. 列表行用 `<GroupRow leading title subtitle value trailing onPress>`（设置/通讯录）或
+   `<ListRow>`（抽屉内紧凑选择）；空态用 `<EmptyState>`；加载用 `<Spinner>`；
    头像用 `<Avatar name variant>`（统一单色底与 Web 共用 `avatarColor`；AI 变体共用底色，通过角标区分）。
 8. `View` 仅用于布局（flex 容器、间距、进度条等非组件化结构）；新增可复用的视觉形态必须先沉淀到 `ui/`。
+9. **导航分层**：顶层 Tab 页用 `<PageHeader large avatar>`；二级页（通讯录、日报、会话）用 `<NavBar onBack>`，
+   标题居中。不要给二级页套大标题。右侧操作超过一个图标按钮的宽度时，用 `rightInset` 按实际宽度预留，
+   让长标题提前省略而不是被遮挡。会话头部的「接待方式」用短标签胶囊（真人 / 分身 / 暂停，临时托管带时钟），
+   完整策略在抽屉里展示。
+10. **列表页底色**：消息 / 通讯录 / 我的 / 日程使用白底（`card`）；分组之间用 8px 灰色画布（`bg`）间隔，
+    分组内部只用 `separator` 发丝线，不给列表行加圆角卡片或阴影。
+11. **彩色图标**：通讯录入口与设置行使用 `<TileIcon>`（实色底白字形）或语义色线性图标（`TILE_COLORS`），
+    颜色只从 `tile.tsx` 的调色板取；主操作使用 `<Fab>` 圆形悬浮按钮。
+12. **消息行**：对方消息头像 30px 在左；身份行只保留「名字 + AI 标记 + 时间」，自己的分身代表你发言时
+    归到右侧并显示「我的分身」。所有文本消息统一用气泡（分身用 `aiBubble`），不再有裸文本形态。
+    工具活动收成一行摘要（如「2 次工具调用 · 查看待办」），流式处理时自动展开、结束后自动收起。
+13. **输入区**：单行时是一行圆角胶囊（`bg` 底，40px「+」/ 无边框输入 / 40px 实心发送钮）；
+    出现换行或内容撑高后切换为上下两段卡片：上方文本顶对齐，下方左侧「+」、右侧发送钮。
+    发送钮用 `IconButton solid`，禁用时回落中性灰；输入框自身不画 outline / 边框，
+    附件与回复预览放在卡片上方，不再在输入框两侧摆放独立图标。
+14. **@ 提及**：只在输入框里键入 `@` 时弹出候选面板（贴输入卡上方，含群聊「所有人」广播），
+    不单独放「@」按钮。选中后插入 `@名字 ` 并记录 principal ID；删掉这段文字时自动移除对应 ID。
+    群聊广播使用 `ALL_MENTION_ID`（`__all__`）；候选面板需要 `keyboardShouldPersistTaps="handled"`，
+    避免点选时键盘先收起。
 
-**组件清单**：`Text` `Screen` `PageHeader` `Card` `Divider` `Button` `IconButton` `Field` `Input`
-`Badge` `SegmentedControl` `Chip` `ChipRow` `Toggle` `BottomSheet` `Dialog` `MenuRow` `ListRow`
-`EmptyState` `Avatar` `Spinner` `space`（间距刻度）。
+**组件清单**：`Text` `Screen` `PageHeader` `NavBar` `Card` `Group` `GroupRow` `SectionHeader` `Divider`
+`Button` `IconButton` `Fab` `Field` `Input` `SearchField` `Badge` `SegmentedControl` `Chip` `ChipRow`
+`Toggle` `BottomSheet` `Dialog` `MenuRow` `ListRow` `TileIcon` `EmptyState` `Avatar` `Spinner` `space`。
+
+**业务组件层（`apps/mobile/src/components`）**
+
+页面只保留数据获取、状态编排与路由；可复用的行、抽屉、输入区按业务域沉淀：
+
+- `chat/`：`ChatComposer`（文本 / 附件 / @ 提及 / 回复 / 多行 / 发送状态）、`ChatHeader`、
+  `ReceptionSheet`、`PendingMessageBubble`
+- `conversations/`：`ConversationRow`、`NewConversationSheet`
+- `contacts/`：`ContactRow`、`ContactsQuickEntries`、`ContactDetailSheet`、
+  `FriendRequestsSheet`、`GroupsSheet`，共享逻辑放 `utils.ts`
+- `schedule/`：`CalendarGrid`、`CalendarRow`、`TodoRow`、`CreateSheet`、`EventSheet`，
+  常量与状态映射放 `meta.ts`
+- `avatar/`：`PersonaSection`、`PolicySection`、`CapabilitiesSection`、`MemorySection`、`UsageSection`
+- `profile/`：`ProfileHeader`、`ProfileEditSheet`、`AppearanceSheet`、`PushSheet`、`ServerSheet`
+- `approvals/ApprovalRow`；通用业务组件 `message`、`agent-activity`、`member-sheet`
+
+约定：业务组件通过 Props / store 取数据，不直接操作路由；表单与视图状态由组件自己持有，
+异步动作由页面回传（如保存/删除）；共享类型、常量放同级 `utils.ts` / `meta.ts`。
+页面不再内联可复用的列表行、抽屉或输入区。
 
 **移动端尺寸差异**
 
-| 元素   | 移动端规格                                                                 |
-| ------ | -------------------------------------------------------------------------- |
-| Button | 高 44（md）/ 34（sm），圆角 11 / 9；图标按钮 34–44（`IconButton size`）    |
-| Input  | 高 44（md）/ 34（sm），多行默认 minHeight 44；**同行必须与 Button 同档位** |
-| Card   | 圆角 16，1px 边框，默认内边距 14；`tone` 支持 warning / danger 强调        |
-| 浮层   | `BottomSheet` 顶部圆角 22，含底部安全区；`Dialog` 圆角 16，居中            |
-| 页面   | `PageHeader` 自带状态栏安全区；二级页传 `onBack` 显示返回按钮              |
-| 列表行 | `ListRow` 高约 48（py 8），选中/按下分别用 `surface-raised` / `hover`      |
+| 元素     | 移动端规格                                                                 |
+| -------- | -------------------------------------------------------------------------- |
+| Button   | 高 44（md）/ 34（sm），圆角 11 / 9；图标按钮 34–44（`IconButton size`）    |
+| Input    | 高 44（md）/ 34（sm），多行默认 minHeight 44；**同行必须与 Button 同档位** |
+| Card     | 圆角 16，1px 边框，默认内边距 14；`tone` 支持 warning / danger 强调        |
+| 浮层     | `BottomSheet` 顶部圆角 22，含底部安全区；`Dialog` 圆角 16，居中            |
+| 页面     | `PageHeader` 自带状态栏安全区；`NavBar` 高 44；二级页标题居中              |
+| 分组行   | `GroupRow` 高 54 / 62（带副标题），左右内边距 16，行间 `separator` 发丝线  |
+| Tab 栏   | 高 56 + 底部安全区（显式 height），图标 24，标签 10/12 行高；选中品牌色    |
+| 悬浮按钮 | `Fab` 直径 56，右下角，品牌色实心 +                                        |
+| 开关     | `Toggle` 自绘 38×22 轨道 + 18 白色圆钮，微阴影；减少动效时直接切换         |
+| 列表行   | `ListRow` 高约 48（py 8），选中/按下分别用 `surface-raised` / `hover`      |
+
+**移动端专用 token**：`separator`（浅色 `rgba(10,10,10,.07)` / 深色 `rgba(255,255,255,.08)`），
+用于同组行之间的发丝线，比 `border` 更轻；`TILE_COLORS` 为彩色图标块调色板。
 
 **主题**
 

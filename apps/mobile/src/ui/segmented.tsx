@@ -1,7 +1,8 @@
 /**
  * 选择控件：SegmentedControl（互斥分页/视图切换）与 Chip（表单选项、筛选）。
  */
-import { Pressable, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useTheme } from '@/hooks/use-theme';
 import { Text } from './text';
 
@@ -16,6 +17,8 @@ export function SegmentedControl<T extends string>({
   onChange,
   style,
   variant = 'pill',
+  trailing,
+  divider = true,
 }: {
   options: readonly Option<T>[];
   value: T;
@@ -23,41 +26,67 @@ export function SegmentedControl<T extends string>({
   style?: object;
   /** pill：选项选择（表单/设置）；underline：内容视图切换 */
   variant?: 'pill' | 'underline';
+  /** underline 变体右侧的附加操作（筛选 / 日历图标） */
+  trailing?: ReactNode;
+  /** underline 变体是否显示底部分隔线 */
+  divider?: boolean;
 }) {
   const t = useTheme();
   if (variant === 'underline') {
     return (
       <View
         accessibilityRole="tablist"
-        style={[{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: t.border }, style]}
+        style={[
+          {
+            flexDirection: 'row',
+            alignItems: 'stretch',
+            borderBottomWidth: divider ? StyleSheet.hairlineWidth : 0,
+            borderBottomColor: t.separator,
+          },
+          style,
+        ]}
       >
-        {options.map((o) => {
-          const active = o.value === value;
-          return (
-            <Pressable
-              key={o.value}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
-              onPress={() => onChange(o.value)}
-              style={{
-                flex: 1,
-                paddingVertical: 10,
-                alignItems: 'center',
-                borderBottomWidth: 2,
-                marginBottom: -1,
-                borderBottomColor: active ? t.primary : 'transparent',
-              }}
-            >
-              <Text
-                variant="bodySm"
-                style={{ fontWeight: '600', color: active ? t.text : t.textMuted }}
-                numberOfLines={1}
+        <View style={{ flex: 1, flexDirection: 'row', paddingLeft: 6 }}>
+          {options.map((o) => {
+            const active = o.value === value;
+            return (
+              <Pressable
+                key={o.value}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                onPress={() => onChange(o.value)}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingTop: 10,
+                  alignItems: 'center',
+                }}
               >
-                {o.label}
-              </Text>
-            </Pressable>
-          );
-        })}
+                <Text
+                  style={{
+                    fontSize: 15,
+                    fontWeight: active ? '600' : '400',
+                    color: active ? t.text : t.textMuted,
+                  }}
+                  numberOfLines={1}
+                >
+                  {o.label}
+                </Text>
+                <View
+                  style={{
+                    height: 3,
+                    width: active ? 18 : 0,
+                    borderRadius: 2,
+                    backgroundColor: t.primary,
+                    marginTop: 7,
+                  }}
+                />
+              </Pressable>
+            );
+          })}
+        </View>
+        {trailing ? (
+          <View style={{ paddingRight: 12, justifyContent: 'center' }}>{trailing}</View>
+        ) : null}
       </View>
     );
   }

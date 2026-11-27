@@ -9,6 +9,8 @@ export const colors = {
   textMuted: 'rgba(10,10,10,0.56)',
   textTertiary: 'rgba(10,10,10,0.38)',
   border: 'rgba(10,10,10,0.1)',
+  /** 列表发丝线：比卡片边框更轻，用于同组行之间 */
+  separator: 'rgba(10,10,10,0.07)',
   primary: '#0285f7',
   primaryFg: '#ffffff',
   surfaceRaised: 'rgba(10,10,10,0.05)',
@@ -31,6 +33,7 @@ export const darkColors: typeof colors = {
   textMuted: 'rgba(255,255,255,0.58)',
   textTertiary: 'rgba(255,255,255,0.38)',
   border: 'rgba(255,255,255,0.12)',
+  separator: 'rgba(255,255,255,0.08)',
   primary: '#4da3f8',
   primaryFg: '#141414',
   surfaceRaised: 'rgba(255,255,255,0.03)',

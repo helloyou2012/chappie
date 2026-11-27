@@ -23,6 +23,8 @@ interface AgentActivityProps {
   thinking: string;
   activity: AgentActivityItem[];
   streaming: boolean;
+  /** 摘要行对齐：自己的消息靠右 */
+  align?: 'left' | 'right';
 }
 
 function toolIcon(toolId?: string): IconName {
@@ -36,238 +38,126 @@ function toolIcon(toolId?: string): IconName {
   return 'tools-line';
 }
 
-function firstLine(text: string, max = 42): string {
-  const line = text.split('\n').find((l) => l.trim()) ?? '';
-  const trimmed = line.trim();
-  return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
-}
-
-/** Agent 活动时间线：思考 + 工具调用（仅在主人视角可见） */
-export function AgentActivityPanel({ thinking, activity, streaming }: AgentActivityProps) {
+/**
+ * Agent 活动时间线：思考 + 工具调用（仅在主人视角可见）。
+ *
+ * 默认只显示一行摘要，避免每条 AI 消息上方堆一大块工具细节；
+ * 流式处理期间自动展开，结束后自动收起。
+ */
+export function AgentActivityPanel({
+  thinking,
+  activity,
+  streaming,
+  align = 'left',
+}: AgentActivityProps) {
   const t = useTheme();
-  const [groupOpen, setGroupOpen] = useState(true);
-  const [openRows, setOpenRows] = useState<Record<string, boolean>>({});
-  const toolCount = activity.filter((a) => a.kind === 'tool').length;
+  const [open, setOpen] = useState(streaming);
+
+  useEffect(() => {
+    setOpen(streaming);
+  }, [streaming]);
 
   if (!thinking && activity.length === 0) return null;
 
-  const animate = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-  const rowOpen = (key: string, fallback = false) => openRows[key] ?? fallback;
-  const toggleRow = (key: string, fallback = false) => {
-    animate();
-    setOpenRows((prev) => ({ ...prev, [key]: !(prev[key] ?? fallback) }));
-  };
-
-  const rows = [
-    ...(thinking
-      ? [
-          {
-            key: 'thinking',
-            title: '思考',
-            detail: firstLine(thinking),
-            content: thinking,
-            status: streaming ? 'running' : 'done',
-            icon: 'sparkling-line',
-            mono: false,
-            fallbackOpen: streaming,
-          },
-        ]
-      : []),
-    ...activity.map((item, index) => ({
-      key: `tool-${index}`,
-      title: item.title,
-      detail: item.detail,
-      content: item.content,
-      status: item.status,
-      icon: toolIcon(item.toolId),
-      mono: true,
-      fallbackOpen: false,
-    })),
-  ];
-
-  // 只有一个条目：不做二级分组，但这一行本身可以收起（默认展开）
-  if (rows.length === 1) {
-    const row = rows[0]!;
-    // thinking: 流式时展开，完成后自动收起；tool call: 默认收起
-    const open = rowOpen(row.key, row.fallbackOpen);
-    return (
-      <View style={{ width: '100%', marginBottom: 4 }}>
-        <Pressable
-          onPress={() => toggleRow(row.key, row.fallbackOpen)}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 2 }}
-        >
-          <Icon
-            name={open ? 'arrow-down-s-line' : 'arrow-right-s-line'}
-            size={12}
-            color={t.textMuted}
-          />
-          <Icon
-            name={row.icon as IconName}
-            size={13}
-            color={row.icon === 'sparkling-line' ? t.primary : t.textMuted}
-          />
-          <Text variant="caption" style={{ fontWeight: '600' }} numberOfLines={1}>
-            {row.title}
-          </Text>
-          {row.detail ? (
-            <View
-              style={{
-                maxWidth: '52%',
-                borderRadius: 6,
-                backgroundColor: t.surfaceHover,
-                paddingHorizontal: 6,
-                paddingVertical: 1,
-              }}
-            >
-              <Text variant="micro" tone="muted" numberOfLines={1}>
-                {row.detail}
-              </Text>
-            </View>
-          ) : null}
-          {row.status === 'running' ? (
-            <View style={{ marginLeft: 'auto' }}>
-              <Icon name="loader-4-line" size={12} color={t.primary} />
-            </View>
-          ) : row.status === 'failed' ? (
-            <View style={{ marginLeft: 'auto' }}>
-              <Icon name="error-warning-line" size={12} color={t.danger} />
-            </View>
-          ) : null}
-        </Pressable>
-        {open ? (
-          <View
-            style={{
-              marginLeft: 6,
-              borderLeftWidth: 1,
-              borderLeftColor: t.border,
-              paddingLeft: 8,
-              paddingVertical: 2,
-            }}
-          >
-            <ScrollView style={{ maxHeight: 200 }}>
-              <Text
-                variant="caption"
-                tone="muted"
-                style={{
-                  lineHeight: 17,
-                  fontFamily: row.mono
-                    ? Platform.select({ ios: 'Menlo', android: 'monospace' })
-                    : undefined,
-                }}
-              >
-                {row.content}
-                {row.status === 'running' ? <BlinkingCursor color={t.primary} /> : null}
-              </Text>
-            </ScrollView>
-          </View>
-        ) : null}
-      </View>
-    );
-  }
+  const tools = activity.filter((a) => a.kind === 'tool');
+  const toolTitles = tools
+    .map((a) => a.title)
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('、');
+  const summary =
+    tools.length > 0
+      ? `${tools.length} 次工具调用${toolTitles ? ` · ${toolTitles}` : ''}`
+      : '思考过程';
 
   return (
-    <View style={{ width: '100%', marginBottom: 4 }}>
+    <View style={{ marginBottom: 6, alignSelf: 'stretch' }}>
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${summary}，${open ? '收起' : '展开'}`}
         onPress={() => {
-          animate();
-          setGroupOpen((v) => !v);
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          setOpen((v) => !v);
         }}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 2 }}
+        style={({ pressed }) => ({
+          alignSelf: align === 'right' ? 'flex-end' : 'flex-start',
+          maxWidth: '100%',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 5,
+          paddingHorizontal: 8,
+          paddingVertical: 4,
+          borderRadius: 8,
+          backgroundColor: pressed ? t.surfaceHover : t.surfaceRaised,
+        })}
       >
         <Icon
-          name={groupOpen ? 'arrow-down-s-line' : 'arrow-right-s-line'}
-          size={14}
-          color={t.textMuted}
+          name={streaming ? 'loader-4-line' : 'sparkling-line'}
+          size={13}
+          color={streaming ? t.primary : t.textMuted}
         />
-        <Text variant="caption" tone="muted">
-          {toolCount > 0 ? `${toolCount} 次工具调用` : '思考过程'}
-          {toolCount > 0 && thinking ? ' · 思考' : ''}
+        <Text variant="micro" tone="muted" numberOfLines={1} style={{ flexShrink: 1 }}>
+          {summary}
         </Text>
-        {streaming ? (
-          <Text variant="micro" tone="muted">
-            进行中…
-          </Text>
-        ) : null}
+        <Icon
+          name={open ? 'arrow-up-s-line' : 'arrow-down-s-line'}
+          size={12}
+          color={t.textTertiary}
+        />
       </Pressable>
 
-      {groupOpen
-        ? rows.map((row) => {
-            const open = rowOpen(row.key, row.fallbackOpen);
+      {open ? (
+        <View style={{ marginTop: 6, gap: 6 }}>
+          {thinking ? (
+            <View
+              style={{
+                backgroundColor: t.surfaceRaised,
+                borderRadius: 8,
+                paddingHorizontal: 9,
+                paddingVertical: 7,
+              }}
+            >
+              <ScrollView style={{ maxHeight: 150 }} nestedScrollEnabled>
+                <Text variant="micro" tone="muted" style={{ lineHeight: 17 }}>
+                  {thinking}
+                  {streaming ? <BlinkingCursor color={t.primary} /> : null}
+                </Text>
+              </ScrollView>
+            </View>
+          ) : null}
+
+          {activity.map((item, index) => {
+            // 工具活动可能同名，标题 + 索引是唯一稳定标识
+            const key = `${item.title}-${index}`;
             return (
-              <View key={row.key} style={{ marginTop: 2 }}>
-                <Pressable
-                  onPress={() => toggleRow(row.key, row.fallbackOpen)}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 2 }}
-                >
-                  <Icon
-                    name={open ? 'arrow-down-s-line' : 'arrow-right-s-line'}
-                    size={12}
-                    color={t.textMuted}
-                  />
-                  <Icon
-                    name={row.icon as IconName}
-                    size={13}
-                    color={row.icon === 'sparkling-line' ? t.primary : t.textMuted}
-                  />
-                  <Text variant="caption" style={{ fontWeight: '600' }} numberOfLines={1}>
-                    {row.title}
+              <View key={key} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                <Icon
+                  name={toolIcon(item.toolId)}
+                  size={13}
+                  color={item.status === 'failed' ? t.danger : t.textMuted}
+                />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text variant="micro" style={{ fontWeight: '600' }} numberOfLines={1}>
+                    {item.title}
                   </Text>
-                  {row.detail ? (
-                    <View
-                      style={{
-                        maxWidth: '52%',
-                        borderRadius: 6,
-                        backgroundColor: t.surfaceHover,
-                        paddingHorizontal: 6,
-                        paddingVertical: 1,
-                      }}
-                    >
-                      <Text variant="micro" tone="muted" numberOfLines={1}>
-                        {row.detail}
-                      </Text>
-                    </View>
+                  {item.detail ? (
+                    <Text variant="micro" tone="muted" numberOfLines={2} style={{ marginTop: 1 }}>
+                      {item.detail}
+                    </Text>
                   ) : null}
-                  {row.status === 'running' ? (
-                    <View style={{ marginLeft: 'auto' }}>
-                      <Icon name="loader-4-line" size={12} color={t.primary} />
-                    </View>
-                  ) : row.status === 'failed' ? (
-                    <View style={{ marginLeft: 'auto' }}>
-                      <Icon name="error-warning-line" size={12} color={t.danger} />
-                    </View>
-                  ) : null}
-                </Pressable>
-                {open ? (
-                  <View
-                    style={{
-                      marginLeft: 6,
-                      borderLeftWidth: 1,
-                      borderLeftColor: t.border,
-                      paddingLeft: 8,
-                      paddingVertical: 2,
-                    }}
-                  >
-                    <ScrollView style={{ maxHeight: 200 }}>
-                      <Text
-                        variant="caption"
-                        tone="muted"
-                        style={{
-                          lineHeight: 17,
-                          fontFamily: row.mono
-                            ? Platform.select({ ios: 'Menlo', android: 'monospace' })
-                            : undefined,
-                        }}
-                      >
-                        {row.content}
-                        {row.status === 'running' ? <BlinkingCursor color={t.primary} /> : null}
-                      </Text>
-                    </ScrollView>
-                  </View>
+                </View>
+                {item.status === 'running' ? (
+                  <Icon name="loader-4-line" size={12} color={t.primary} />
+                ) : item.status === 'failed' ? (
+                  <Icon name="error-warning-line" size={12} color={t.danger} />
+                ) : item.status === 'done' ? (
+                  <Icon name="check-line" size={12} color={t.success} />
                 ) : null}
               </View>
             );
-          })
-        : null}
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
